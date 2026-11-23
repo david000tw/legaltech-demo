@@ -41,9 +41,10 @@
     const { useState, useMemo } = React;
 
     const CASE_INFO = {
-      caseNo: "115年度訴字第 482 號",
-      court: "臺灣桃園地方法院 民事庭",
-      division: "民事第三股",
+      // 車禍涉訟不問金額一律適用簡易程序（民事訴訟法第427條第2項第11款）；被告住平鎮區 → 中壢簡易庭
+      caseNo: "115年度壢簡字第 482 號",
+      court: "臺灣桃園地方法院 中壢簡易庭",
+      division: "簡易庭（股別依分案）",
       title: "林大明 請求損害賠償等事件",
       plaintiff: "林大明（原告）",
       defendant: "陳志豪（被告）",
@@ -59,7 +60,7 @@
         page: "第 1 頁",
         category: "警方卷證",
         summaryNote: "系統說明：警方研判被告駕駛自小客車於路口未依規定讓車且未注意車前狀況，為本件肇事主因；原告無違規紀錄。可直接作為被告過失之核心證據。",
-        quote: "二、研判結果：陳志豪駕駛自小客車行經無號誌路口，未讓幹道車先行且未減速注意車前狀況，涉嫌違反道路交通安全規則第45條第1項第9款；林大明尚無發現肇事因素。"
+        quote: "二、研判結果：陳志豪駕駛自小客車行經無號誌路口，未讓幹道車先行且未減速注意車前狀況，涉嫌違反道路交通安全規則第102條第1項第2款；林大明尚無發現肇事因素。"
       },
       {
         id: "原證2",
@@ -136,13 +137,14 @@
 
     const INITIAL_JUDGMENTS = [
       {
+        // 出處：https://judgment.judicial.gov.tw/FILES/TCEV/113,中簡,3946,20250217,1.pdf（excerpt 為原文逐字節錄，「……」為省略）
         id: "j1",
-        citation: "最高法院 112 年度台上字第 1842 號判決",
-        shortTag: "最高法院112台上1842",
-        stance: "有利我方",
+        citation: "臺灣臺中地方法院 113 年度中簡字第 3946 號民事判決（路權與過失部分）",
+        shortTag: "臺中地院113中簡3946",
+        stance: "有利我方（但須防禦與有過失）",
         pinned: true,
-        summary: "汽車行駛至無號誌交岔路口，支線道車應暫停讓幹線道車先行；違反保護他人之法律致生損害於他人者，推定其有過失。",
-        excerpt: "按汽車行駛至無號誌之交岔路口，支線道車應暫停讓幹線道車先行，道路交通安全規則第45條第1項第9款定有明文。上開規定係為保護他人生命、身體或財產安全而設之法律，違反該規定致生損害者，依民法第184條第2項規定，推定其有過失。"
+        summary: "支線道車行經無號誌路口未暫停讓幹線道車先行，認定有過失，依民法第184條第2項前段、第191條之2前段負賠償責任。惟幹線道車未減速慢行，仍被認定與有過失，過失比例原告30％、被告70％。",
+        excerpt: "被告駕駛肇事車輛上路，本應遵守上開交通規則，然被告行至無號誌交岔路口，未在適當位置暫停禮讓幹線道之系爭車輛，而依當時情狀並無不能注意之情形，二車因而碰撞，並致原告駕駛之系爭車輛撞擊路旁住家，顯見被告就本件事故之發生確有過失……違反保護他人之法律，致生損害於他人者，負賠償責任；汽車、機車或其他非依軌道行駛之動力車輛，在使用中加損害於他人者，駕駛人應賠償因此所生之損害，民法第184條第2項前段、第191條之2前段分別定有明文。……又上開交通規則均旨在保障公眾行車之安全，屬保護他人之法律"
       },
       {
         id: "j2",
@@ -150,17 +152,18 @@
         shortTag: "最高法院77年第9次民庭決議",
         stance: "有利我方（折舊計算基準）",
         pinned: true,
-        summary: "損害賠償請求權人請求修理費時，更新零件部分應扣除折舊，但工資費用因非屬零件汰換，不生折舊問題。",
-        excerpt: "損害賠償之目的在於填補所受之損害，非使被害人因而獲得額外利益。物被毀損時，被害人請求賠償物被毀損所減少之價額，固得以修復費用為估定之標準，但以必要者為限，如係以新品代替舊品，應予扣除折舊；惟其中屬於『工資』部分，因不涉及零件新舊替換，自無折舊可言。"
+        summary: "依民法第196條請求物被毀損所減少之價額，得以必要之修復費用估定；修理材料以新品換舊品者，應予折舊。（「工資不予折舊」為實務通常見解，非本決議原文）",
+        excerpt: "物被毀損時，被害人除得依民法第196條請求賠償外，並不排除民法第213條至第215條之適用。依民法第196條請求賠償物被毀損所減少之價額，得以修復費用為估定之標準，但以必要者為限（例如：修理材料以新品換舊品，應予折舊）。"
       },
       {
+        // 出處同 j1，慰撫金段落逐字節錄
         id: "j3",
-        citation: "臺灣高等法院 113 年度上易字第 619 號判決",
-        shortTag: "高院113上易619",
+        citation: "臺灣臺中地方法院 113 年度中簡字第 3946 號民事判決（慰撫金部分）",
+        shortTag: "臺中地院113中簡3946-慰撫金",
         stance: "需留意防禦（慰撫金酌定）",
         pinned: false,
-        summary: "精神慰撫金之核定，應斟酌兩造身分、資力、加害程度、被害人痛苦程度及家庭經濟狀況，非謂請求金額愈高即當然准許。",
-        excerpt: "慰撫金之多寡，應斟酌雙方之身分、地位、資力與加害之程度及其他各種情形核定之，其數額是否相當，自應依實際加害情形與被害人所受痛苦之程度，並斟酌雙方之身份、地位及經濟狀況定之。"
+        summary: "慰撫金依雙方身分、資力與加害程度等情形核定。本件原告請求 150,000 元，法院認為過高，核定為 50,000 元。",
+        excerpt: "按慰撫金之賠償須以人格權遭遇侵害，使精神上受有痛苦為必要，其核給之標準固與財產上損害之計算不同，然非不可斟酌雙方身份資力與加害程度，及其他各種情形核定相當之數額（最高法院51年度台上字第223號民事判決意旨參照）。……認原告請求精神慰撫金150,000元實屬過高，應以50,000元為適當。"
       }
     ];
 
@@ -280,34 +283,52 @@
       }
     ];
 
+    // 第一審財產權訴訟裁判費：民事訴訟法第77條之13，並依第77條之27提高徵收（114/1/1 生效，司法院公告）
+    // https://www.judicial.gov.tw/tw/cp-1654-2592-cc5cf-1.html
+    // 100萬 → 13,200；1,000萬 → 118,500；1億 → 910,500；10億 → 7,840,500
     function calcCivilFee(amount) {
       const val = Math.max(0, Number(amount) || 0);
       if (val === 0) return 0;
-      let fee = 0;
+      const units = Math.ceil(val / 10000); // 畸零之數不滿萬元者，以萬元計算
+      if (units <= 10) return 1500; // 10萬元以下
       const brackets = [
-        [100000, 1000],
-        [1000000, 1000],
-        [10000000, 900],
-        [100000000, 800],
-        [1000000000, 700],
-        [Infinity, 600]
+        // [級距上限（萬元）, 每萬元費額]
+        [100, 130],
+        [1000, 117],
+        [10000, 88],
+        [100000, 77],
+        [Infinity, 66]
       ];
-      let prevCap = 0;
+      let fee = 1500;
+      let prevCap = 10;
       for (const [cap, per10k] of brackets) {
-        if (val <= prevCap) break;
-        const span = Math.min(val, cap) - prevCap;
-        const units = Math.ceil(span / 10000);
-        fee += units * per10k;
+        if (units <= prevCap) break;
+        fee += (Math.min(units, cap) - prevCap) * per10k;
         prevCap = cap;
       }
       return fee;
     }
 
+    // 以 UTC 計算日期，避免在台灣時區（UTC+8）用 toISOString 時少算一天
+    function parseYmd(dateStr) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr || "");
+      return m ? [Number(m[1]), Number(m[2]) - 1, Number(m[3])] : null;
+    }
+
     function addDays(dateStr, days) {
-      const d = new Date(dateStr + "T00:00:00");
-      if (isNaN(d.getTime())) return "請輸入正確日期";
-      d.setDate(d.getDate() + days);
-      return d.toISOString().slice(0, 10);
+      const p = parseYmd(dateStr);
+      if (!p) return "請輸入正確日期";
+      return new Date(Date.UTC(p[0], p[1], p[2] + days)).toISOString().slice(0, 10);
+    }
+
+    // 只提示、不自動順延：補行上班日的週六不適用民法第122條順延，國定假日也需另查
+    function weekendNote(dateStr) {
+      const p = parseYmd(dateStr);
+      if (!p) return "";
+      const wd = new Date(Date.UTC(p[0], p[1], p[2])).getUTCDay();
+      return wd === 0 || wd === 6
+        ? "末日為週末：依民法第122條原則上順延至次一上班日，但補行上班日不適用，請核對當年行事曆。"
+        : "";
     }
 
     function App() {
@@ -931,8 +952,7 @@
                     </div>
 
                     <div className="space-y-1 mb-5 text-[16px]">
-                      <div>案號：{CASE_INFO.caseNo}（依本案卷證與爭點擬定）</div>
-                      <div>股別：{CASE_INFO.division}</div>
+                      <div>案號：（起訴時尚未分案，由法院收狀後編定）</div>
                       <div>原告：林大明　住桃園市中壢區某路100號</div>
                       <div>被告：陳志豪　住桃園市平鎮區某街55號</div>
                     </div>
@@ -990,12 +1010,12 @@
                           ? "被告既違反道路交通安全規則且已自承未注意車況，過失事證明確，竟遲未履行賠償義務，顯已侵害原告權益。"
                           : tone === "平和穩健"
                           ? "被告就本件事故具有過失，爰依侵權行為法律關係請求填補原告因此所受之損害。"
-                          : "本件被告違反保護他人之法律致生損害，依法推定有過失，且有最高法院實務見解可資參照"}
+                          : "本件被告違反保護他人之法律致生損害，依法推定有過失，且有實務見解可資參照"}
                         <button
                           onClick={() => handleCitationClick("j1")}
                           className="mx-1 px-1.5 py-0.5 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-sans font-semibold align-baseline cursor-pointer"
                         >
-                          [最高法院112台上1842]
+                          [臺中地院113中簡3946]
                         </button>
                         {(insertedCitations.p2 || []).map((c) => (
                           <button
@@ -1774,6 +1794,14 @@
                       • 若為判決送達，上訴 20 日期間屆滿日參考：
                       <strong className="text-slate-900">{addDays(serviceDate, 20)}</strong>
                       （實際須依假日順延及在途期間調整）
+                      {weekendNote(addDays(serviceDate, 20)) && (
+                        <div className="mt-1 text-rose-700 font-semibold">
+                          ⚠ {weekendNote(addDays(serviceDate, 20))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      費率依司法院公告（114/1/1 起依民事訴訟法第77條之27提高徵收）；刑事附帶民事訴訟經裁定移送民事庭者免納裁判費。
                     </div>
                     <div>
                       • 紙本遞狀建議準備：法院正本 1 份 ＋ 對造繕本 {copyCount} 份 ＋ 卷宗留存 1 份
@@ -1827,7 +1855,7 @@
                     <div className="font-bold text-slate-900">
                       Word 匯出預設格式（可依事務所範本調整）：
                     </div>
-                    <div>• 檔案名稱：115年度訴字第482號_民事起訴狀_林大明.docx</div>
+                    <div>• 檔案名稱：民事起訴狀_林大明_v1.docx（分案後改以案號命名）</div>
                     <div>• 字體與級數：標楷體 14 級字（標題 18 級字粗體）</div>
                     <div>• 行距與邊界：固定行高 24pt，上下左右邊界各 2.5cm</div>
                     <div>• 附帶內容：文末自動附帶證物清單（原證 1 ～ 原證 {evidences.length}）</div>
