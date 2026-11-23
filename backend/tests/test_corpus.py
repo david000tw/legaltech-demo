@@ -1,5 +1,7 @@
 import json
 import re
+
+import pytest
 from datetime import date
 from pathlib import Path
 
@@ -12,7 +14,7 @@ from app.corpus.splitter import split_judgment
 from app.corpus.statute_source import parse_law_single
 from app.db import admin_session, app_session, tenant_session
 from app.ingest.service import ingest_document
-from app.models import Case, Judgment, JudgmentPassage, StatuteArticle
+from app.models import Case, Judgment, JudgmentPassage, Page, PageText, StatuteArticle
 from app.text_norm import normalize_text
 from tests.helpers import create_firm
 
@@ -136,17 +138,23 @@ def test_search_articles_finds_191_2(db):
 
 
 def test_search_pages_skips_scanned_and_other_cases(db):
+    from tests.test_ingest import blank_pdf
     firm = create_firm("甲事務所")
     with tenant_session(firm) as s:
         c1 = Case(firm_id=firm, title="甲案", our_side="plaintiff")
         c2 = Case(firm_id=firm, title="乙案", our_side="plaintiff")
         s.add_all([c1, c2])
         s.flush()
-        ingest_document(s, firm, c1.id, "evidence", "診斷.txt", "診斷證明書：右腕骨折，宜休養六週。".encode())
+        d = ingest_document(s, firm, c1.id, "evidence", "診斷.txt", "診斷證明書：右腕骨折，宜休養六週。".encode())
+        ingest_document(s, firm, c1.id, "evidence", "掃描.pdf", blank_pdf())
         ingest_document(s, firm, c2.id, "evidence", "他案.txt", "診斷證明書：右腕骨折，宜休養六週。".encode())
         ingest_document(s, firm, c1.id, "opponent_brief", "答辯.txt", "右腕骨折休養六週過長".encode())
+        page = s.scalars(select(Page).where(Page.document_id == d.id)).one()
+        s.add(PageText(firm_id=firm, page_id=page.id, version=2, source="manual",
+                       text="診斷證明書（校正版）：右腕骨折，宜休養六週。"))
+        s.flush()
         hits = search_pages(s, c1.id, "右腕 骨折 休養", k=5)
-        assert len(hits) == 1 and "診斷證明書" in hits[0].text
+        assert len(hits) == 1 and hits[0].version == 2 and "校正版" in hits[0].text
 
 
 def test_page_footers_removed_in_all_seed_judgments():
@@ -160,3 +168,59 @@ def test_page_footers_removed_in_all_seed_judgments():
 def test_procedural_tail_is_other():
     kinds = {k for k, t in passages_3946() if "職權宣告假執行" in normalize_text(t)}
     assert kinds == {"other"}
+
+
+def _all_passages():
+    for f in sorted((SEED / "judgments").glob("*.json")):
+        data = json.loads(f.read_text(encoding="utf-8"))
+        yield f.stem, split_judgment(data["full_text"])
+
+
+def test_sentences_not_split_mid_line():
+    """換行後剛好以「數字、」開頭的行，不能被當成新段落（竹院簡上17）。"""
+    for needle in ("就本件車禍應各負百分之70、百分之30之過失責任", "被上訴人依民法第184條第1項前段、第191條之2、第193條第1項"):
+        n = normalize_text(needle)
+        holders = [(stem, k) for stem, ps in _all_passages() for k, t in ps if n in normalize_text(t)]
+        assert holders == [("SCDV_114_jianshang_17", "court_reasoning")], (needle, holders)
+
+
+@pytest.mark.parametrize("stem,needle,kind", [
+    ("tcev_113_3946", "得心證之理由", "court_reasoning"),
+    ("tcev_113_3946", "一、原告主張", "party_claim"),
+    ("TPEV_114_beijian_610", "得心證之理由", "court_reasoning"),
+    ("TPEV_114_beijian_610", "原告起訴主張略以", "party_claim"),
+    ("TPEV_114_beijian_610", "被告則以", "party_claim"),
+    ("SDEV_114_shajian_456", "原告起訴主張", "party_claim"),
+    ("SDEV_114_shajian_456", "二、被告抗辯", "party_claim"),
+    ("SDEV_114_shajian_456", "尚無依強制汽車責任保險法第32條扣除之問題", "court_reasoning"),
+    ("TCDV_113_jianshang_211", "法院之判斷", "court_reasoning"),
+    ("TCDV_113_jianshang_211", "兩造不爭執事項", "other"),
+    ("SCDV_114_jianshang_17", "被上訴人起訴主張", "party_claim"),
+    ("SCDV_114_jianshang_17", "上訴人則以", "party_claim"),
+    ("SCDV_114_jianshang_17", "本院之判斷", "court_reasoning"),
+])
+def test_splitter_classifies_headings_in_all_seed_judgments(stem, needle, kind):
+    passages = dict(_all_passages())[stem]
+    kinds = {k for k, t in passages if normalize_text(needle) in normalize_text(t)}
+    assert kinds == {kind}, (stem, needle, kinds)
+
+
+def test_seed_metadata_matches_pdf_text():
+    for f in sorted((SEED / "judgments").glob("*.json")):
+        d = json.loads(f.read_text(encoding="utf-8"))
+        head = normalize_text(d["full_text"][:300])
+        number = re.search(r"\d+年度.+?字第\d+號", d["citation"]).group(0)
+        assert number in head, f.name
+        dates = re.findall(r"中華民國(\d+)年(\d+)月(\d+)日", normalize_text(d["full_text"]))
+        y, m, dd = (int(x) for x in dates[-1])
+        assert date(y + 1911, m, dd).isoformat() == d["decided_on"], f.name
+
+
+def test_load_seed_resplit_restores_passages(db):
+    with admin_session() as s:
+        load_seed(s, SEED)
+        p = s.scalars(select(JudgmentPassage)).first()
+        p.text = "被竄改"
+    with admin_session() as s:
+        load_seed(s, SEED, resplit=True)
+        assert s.scalars(select(JudgmentPassage).where(JudgmentPassage.text == "被竄改")).all() == []

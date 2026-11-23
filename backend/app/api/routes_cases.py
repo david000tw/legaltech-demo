@@ -7,11 +7,12 @@ from sqlalchemy import func, select
 
 from app.auth import CurrentMember, current_member
 from app.db import tenant_session
-from app.ingest.extract import UnsupportedFile
+from app.ingest.extract import UnreadableFile, UnsupportedFile
 from app.ingest.service import current_page_text, ingest_document
 from app.models import Case, Document, Exhibit, Page, Round
 
 router = APIRouter(prefix="/api")
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
 class CaseBody(BaseModel):
@@ -76,7 +77,8 @@ def get_case(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
 @router.post("/cases/{case_id}/rounds")
 def create_round(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
-        _case_or_404(s, case_id)
+        if s.get(Case, case_id, with_for_update=True) is None:  # 鎖住案件列，避免同時建輪次撞號
+            raise HTTPException(404, "找不到案件")
         seq = (s.scalar(select(func.max(Round.seq)).where(Round.case_id == case_id)) or 0) + 1
         r = Round(firm_id=m.firm_id, case_id=case_id, seq=seq, status="created")
         s.add(r)
@@ -85,11 +87,14 @@ def create_round(case_id: UUID, m: CurrentMember = Depends(current_member)) -> d
 
 
 @router.post("/cases/{case_id}/documents")
-async def upload_document(case_id: UUID, file: UploadFile,
+def upload_document(case_id: UUID, file: UploadFile,
                           kind: Literal["evidence", "opponent_brief"] = Form(...),
                           round_id: UUID | None = Form(None),
                           m: CurrentMember = Depends(current_member)) -> dict:
-    data = await file.read()
+    # 一般 def：FastAPI 會放到執行緒池，抽字時不會卡住其他請求。
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"檔案超過 {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
     with tenant_session(m.firm_id) as s:
         _case_or_404(s, case_id)
         if round_id is not None:
@@ -100,6 +105,8 @@ async def upload_document(case_id: UUID, file: UploadFile,
             doc = ingest_document(s, m.firm_id, case_id, kind, file.filename or "未命名", data, round_id)
         except UnsupportedFile as e:
             raise HTTPException(415, str(e))
+        except UnreadableFile as e:
+            raise HTTPException(422, str(e))
         return {"id": str(doc.id), "page_count": doc.page_count}
 
 

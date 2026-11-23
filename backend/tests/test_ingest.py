@@ -122,3 +122,99 @@ def test_unsupported_extension_415(lawyer_client):
     client, _, _ = lawyer_client
     case_id = new_case(client)
     assert upload(client, case_id, "照片.jpg", b"\xff\xd8\xff").status_code == 415
+
+
+def encrypted_pdf() -> bytes:
+    w = PdfWriter()
+    w.add_blank_page(width=595, height=842)
+    w.encrypt("secret")
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("name,data", [
+    ("壞掉.pdf", b"%PDF-1.4\nthis is not really a pdf"),
+    ("空檔.pdf", b""),
+    ("加密.pdf", None),
+    ("壞掉.docx", b"PK\x03\x04 not a zip at all"),
+    ("亂碼.txt", b"\x80\x80\x80\x80"),
+])
+def test_unreadable_upload_422(lawyer_client, name, data):
+    client, _, _ = lawyer_client
+    case_id = new_case(client)
+    r = upload(client, case_id, name, encrypted_pdf() if data is None else data)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]
+
+
+def test_utf16_and_nul_in_txt():
+    assert extract_pages("中文內容測試".encode("utf-16"), "a.txt")[0].text == "中文內容測試"
+    assert extract_pages("中\x00文".encode("utf-8"), "a.txt")[0].text == "中文"
+
+
+def test_pdf_page_extract_failure_marks_needs_ocr(monkeypatch):
+    from pypdf import PageObject
+
+    def boom(self, *a, **k):
+        raise ValueError("broken content stream")
+    monkeypatch.setattr(PageObject, "extract_text", boom)
+    pages = extract_pages((FIXTURES / "tcev_113_3946.pdf").read_bytes(), "判決.pdf")
+    assert len(pages) == 7 and all(p.text is None for p in pages)
+
+
+def test_docx_tables_are_extracted_in_order():
+    d = docx.Document()
+    d.add_paragraph("醫療費用明細如下：")
+    t = d.add_table(rows=2, cols=2)
+    t.cell(0, 0).text, t.cell(0, 1).text = "項目", "金額"
+    t.cell(1, 0).text, t.cell(1, 1).text = "醫療費用", "新臺幣45,000元"
+    d.add_paragraph("以上屬實。")
+    buf = io.BytesIO()
+    d.save(buf)
+    (page,) = extract_pages(buf.getvalue(), "收據.docx")
+    assert page.text == "醫療費用明細如下：\n項目\t金額\n醫療費用\t新臺幣45,000元\n以上屬實。"
+
+
+def test_upload_too_large_413(lawyer_client, monkeypatch):
+    from app.api import routes_cases
+    monkeypatch.setattr(routes_cases, "MAX_UPLOAD_BYTES", 10)
+    client, _, _ = lawyer_client
+    case_id = new_case(client)
+    assert upload(client, case_id, "大檔.txt", "超過十個位元組的內容".encode()).status_code == 413
+
+
+def _capture_sql(fn):
+    from sqlalchemy import event
+
+    from app import db as dbmod
+    eng = dbmod.engine_for(dbmod.settings().database_url)
+    seen = []
+
+    def listener(conn, cur, stmt, params, ctx, many):
+        seen.append(stmt)
+    event.listen(eng, "before_cursor_execute", listener)
+    try:
+        fn()
+    finally:
+        event.remove(eng, "before_cursor_execute", listener)
+    return seen
+
+
+def test_exhibit_numbering_locks_case_row(lawyer_client):
+    client, firm_id, _ = lawyer_client
+    case_id = new_case(client)
+    from app.ingest.service import ingest_document
+
+    def go():
+        with tenant_session(firm_id) as s:
+            ingest_document(s, firm_id, case_id, "evidence", "01_a.txt", "內容一".encode())
+    stmts = _capture_sql(go)
+    assert any("FROM cases" in st and "FOR UPDATE" in st for st in stmts)
+
+
+def test_create_round_locks_case_row(lawyer_client):
+    client, _, _ = lawyer_client
+    case_id = new_case(client)
+    stmts = _capture_sql(lambda: client.post(f"/api/cases/{case_id}/rounds"))
+    assert any("FROM cases" in st and "FOR UPDATE" in st for st in stmts)

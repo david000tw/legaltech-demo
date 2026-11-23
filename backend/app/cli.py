@@ -4,6 +4,7 @@ python -m app.cli create-firm --name NAME [--internal]
 python -m app.cli create-member --firm NAME --email E --password P --role lawyer|assistant
                                 [--bar-number N --bar-verified]
 python -m app.cli import-testcase <dir> --firm NAME
+python -m app.cli load-seed [--resplit]
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.auth import hash_password
+from app.corpus.seed_loader import load_seed
 from app.db import admin_session
 from app.ingest.service import ingest_document
 from app.models import Case, Firm, Member, Round
@@ -72,6 +74,15 @@ def cmd_import_testcase(a) -> None:
     print(f"round_id={round_id}")
 
 
+SEED_DIR = Path(__file__).resolve().parent.parent / "seed"
+
+
+def cmd_load_seed(a) -> None:
+    with admin_session() as s:
+        j, art = load_seed(s, SEED_DIR, resplit=a.resplit)
+    print(f"judgments_added={j} articles_added={art}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -95,6 +106,10 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("dir")
     t.add_argument("--firm", required=True)
     t.set_defaults(func=cmd_import_testcase)
+
+    ls = sub.add_parser("load-seed")
+    ls.add_argument("--resplit", action="store_true")
+    ls.set_defaults(func=cmd_load_seed)
     return p
 
 

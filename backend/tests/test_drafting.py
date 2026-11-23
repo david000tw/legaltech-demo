@@ -137,7 +137,11 @@ def test_stale_running_can_restart(db):
 def test_scanned_opponent_brief_fails_no_text(db):
     from tests.helpers import create_firm
     firm = create_firm("甲事務所")
-    _, round_id = make_round(firm, opponent_pages=("",), evidence={"01_研判表.txt": EVIDENCE_TEXT})
+    case_id, round_id = make_round(firm, opponent_pages=(), evidence={"01_研判表.txt": EVIDENCE_TEXT})
+    from app.ingest.service import ingest_document
+    from tests.test_ingest import blank_pdf
+    with tenant_session(firm) as s:
+        ingest_document(s, firm, case_id, "opponent_brief", "掃描答辯狀.pdf", blank_pdf(), round_id)
     fake = fake_all()
     with tenant_session(firm) as s:
         start_round(s, round_id)

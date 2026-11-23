@@ -32,6 +32,10 @@ _UNBOUND_PATTERNS = [
     re.compile(rf"第\s*{NUM}\s*頁"),
     re.compile(rf"第\s*{NUM}\s*條(?:\s*之\s*{NUM})?"),
 ]
+_CASE_NUMBER_PATTERNS = _UNBOUND_PATTERNS[:3]  # 判決字號、釋字、決議
+# 法院判斷段裡轉述的當事人主張：從「原告雖主張」之類開始，到「等語／云云／等情／置辯」或句號為止。
+_PARTY_START = re.compile(r"(?:原告|被告|上訴人|被上訴人)(?:雖|固|另|復)?(?:主張|辯稱|抗辯|辯以|陳稱|則以)")
+_PARTY_END = re.compile(r"等語|云云|等情|置辯|。")
 _QUOTED = re.compile(r"「([^「」]*)」|『([^『』]*)』|“([^“”]*)”|\"([^\"]*)\"")
 MIN_QUOTE = 15
 KIND_BY_PREFIX = {"E": "evidence", "J": "judgment", "S": "statute"}
@@ -92,6 +96,24 @@ def attach_citations(s: Session, p: Paragraph, items: list[tuple[str, str]]) -> 
     return out
 
 
+def _in_party_claim(passage_text: str, quote: str) -> bool:
+    norm, q = normalize_text(passage_text), normalize_text(quote)
+    pos = norm.find(q)
+    if not q or pos < 0:
+        return False
+    for m in _PARTY_START.finditer(norm):
+        end_m = _PARTY_END.search(norm, m.end())
+        end = end_m.end() if end_m else len(norm)
+        if m.start() < pos + len(q) and pos < end:
+            return True
+    return False
+
+
+def _contains_case_number(quote: str) -> bool:
+    t = unicodedata.normalize("NFKC", quote)
+    return any(p.search(t) for p in _CASE_NUMBER_PATTERNS)
+
+
 def _quote_reasons(source: str, quote: str) -> list[str]:
     reasons = []
     if find_quote(source, quote) is None:
@@ -112,6 +134,8 @@ def verify_citation(s: Session, c: Citation) -> list[str]:
         reasons = ["unknown_code"]
     elif c.kind == "evidence":
         reasons = _quote_reasons(s.get(PageText, c.page_text_id).text, c.quote)
+        if _contains_case_number(c.quote):  # 卷證裡埋的字號逐字引用後，展開的書狀仍會出現字號
+            reasons.append("quote_contains_case_number")
     elif c.kind == "judgment":
         passage = s.get(JudgmentPassage, c.judgment_passage_id)
         judgment = s.get(Judgment, passage.judgment_id)
@@ -121,6 +145,8 @@ def verify_citation(s: Session, c: Citation) -> list[str]:
         if passage.passage_type != "court_reasoning":
             reasons.append("not_court_reasoning")
         reasons += _quote_reasons(passage.text, c.quote)
+        if passage.passage_type == "court_reasoning" and _in_party_claim(passage.text, c.quote):
+            reasons.append("possible_party_claim")
     else:
         article = s.get(StatuteArticle, c.statute_article_id)
         if article is None:

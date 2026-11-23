@@ -2,34 +2,54 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.corpus.splitter import split_judgment
-from app.models import Judgment, JudgmentPassage, Statute, StatuteArticle
+from app.models import Candidate, Citation, Judgment, JudgmentPassage, Statute, StatuteArticle
+
+log = logging.getLogger(__name__)
 
 
 def _opt_date(v: str | None) -> date | None:
     return date.fromisoformat(v) if v else None
 
 
-def load_seed(admin_s: Session, seed_dir: Path) -> tuple[int, int]:
-    """回傳本次新增的（判決數, 條文數）。"""
+def _referenced(admin_s: Session, judgment_id) -> bool:
+    ids = select(JudgmentPassage.id).where(JudgmentPassage.judgment_id == judgment_id)
+    return bool(admin_s.scalar(select(Candidate.id).where(Candidate.judgment_passage_id.in_(ids)).limit(1))
+                or admin_s.scalar(select(Citation.id).where(Citation.judgment_passage_id.in_(ids)).limit(1)))
+
+
+def _insert_passages(admin_s: Session, j: Judgment) -> None:
+    for seq, (kind, text) in enumerate(split_judgment(j.full_text), start=1):
+        admin_s.add(JudgmentPassage(judgment_id=j.id, seq=seq, passage_type=kind, text=text, status="active"))
+
+
+def load_seed(admin_s: Session, seed_dir: Path, resplit: bool = False) -> tuple[int, int]:
+    """回傳本次新增的（判決數, 條文數）。resplit=True 時，已匯入且尚未被引用的判決依目前切段器重切。"""
     new_j = new_a = 0
     for f in sorted((Path(seed_dir) / "judgments").glob("*.json")):
         d = json.loads(f.read_text(encoding="utf-8"))
-        if admin_s.scalar(select(Judgment.id).where(Judgment.citation == d["citation"])):
+        existing = admin_s.scalars(select(Judgment).where(Judgment.citation == d["citation"])).one_or_none()
+        if existing is not None:
+            if resplit:
+                if _referenced(admin_s, existing.id):
+                    log.warning("判決 %s 已被引用，不重切", existing.citation)
+                else:
+                    admin_s.execute(delete(JudgmentPassage).where(JudgmentPassage.judgment_id == existing.id))
+                    _insert_passages(admin_s, existing)
             continue
         j = Judgment(citation=d["citation"], court=d["court"], court_level=d["court_level"],
                      decided_on=date.fromisoformat(d["decided_on"]), source_url=d["source_url"],
                      full_text=d["full_text"], status="active", curated=bool(d.get("curated")))
         admin_s.add(j)
         admin_s.flush()
-        for seq, (kind, text) in enumerate(split_judgment(d["full_text"]), start=1):
-            admin_s.add(JudgmentPassage(judgment_id=j.id, seq=seq, passage_type=kind, text=text, status="active"))
+        _insert_passages(admin_s, j)
         new_j += 1
     for f in sorted((Path(seed_dir) / "statutes").glob("*.json")):
         d = json.loads(f.read_text(encoding="utf-8"))
