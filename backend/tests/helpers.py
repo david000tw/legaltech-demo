@@ -21,7 +21,7 @@ def create_firm(name: str, internal: bool = True) -> UUID:
 def create_member(firm_id: UUID, email: str, role: str = "lawyer", *, bar_verified: bool = True,
                   bar_number: str | None = "(110)北律字第0001號") -> UUID:
     with admin_session() as s:
-        m = Member(firm_id=firm_id, email=email, password_hash=hash_password(PASSWORD),
+        m = Member(firm_id=firm_id, email=email.strip().lower(), password_hash=hash_password(PASSWORD),
                    display_name=email.split("@")[0], role=role,
                    bar_number=bar_number if role == "lawyer" else None,
                    bar_verified=bar_verified if role == "lawyer" else False)

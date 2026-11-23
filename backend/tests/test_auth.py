@@ -1,3 +1,6 @@
+import base64
+import json
+import uuid
 from pathlib import Path
 
 import pytest
@@ -5,7 +8,9 @@ from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app import auth as auth_mod
 from app import cli
+from app.api import routes_auth
 from app.auth import CurrentMember, require_lawyer
 from app.db import admin_session
 from app.main import create_app
@@ -69,13 +74,38 @@ def test_verified_lawyer_passes_require_lawyer(client):
 
 
 def test_tampered_cookie_401(client):
+    """把 cookie 內的事務所換掉但不重新簽章，必須被拒絕。"""
     f = create_firm("甲事務所")
-    create_member(f, "lawyer@example.test")
+    mid = create_member(f, "lawyer@example.test")
     login(client, "lawyer@example.test")
-    client.cookies.set("session", client.cookies["session"][:-2] + "xx")
+    token = client.cookies["session"]
+    payload, ts, sig = token.rsplit(".", 2)
+    forged = base64.urlsafe_b64encode(
+        json.dumps({"m": str(mid), "f": str(uuid.uuid4())}, separators=(",", ":")).encode()
+    ).rstrip(b"=").decode()
+    client.cookies.set("session", ".".join([forged, ts, sig]))
+    assert client.get("/api/me").status_code == 401
+    client.cookies.set("session", "not-a-token")
     assert client.get("/api/me").status_code == 401
     client.cookies.clear()
     assert client.get("/api/me").status_code == 401
+
+
+def test_expired_cookie_401(client, monkeypatch):
+    f = create_firm("甲事務所")
+    create_member(f, "lawyer@example.test")
+    login(client, "lawyer@example.test")
+    monkeypatch.setattr(auth_mod, "SESSION_MAX_AGE", -1)
+    assert client.get("/api/me").status_code == 401
+
+
+def test_login_unknown_email_still_runs_password_check(client, monkeypatch):
+    """查無帳號時也要跑一次 argon2，避免用回應時間猜出哪些帳號存在。"""
+    calls = []
+    real = routes_auth.verify_password
+    monkeypatch.setattr(routes_auth, "verify_password", lambda p, h: calls.append(h) or real(p, h))
+    assert login(client, "nobody@example.test").status_code == 401
+    assert len(calls) == 1
 
 
 def test_logout_clears_session(client):

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
 from app import db
@@ -8,6 +9,8 @@ from app.config import Settings
 
 # "testclient" 是 Starlette TestClient 的預設來源；真實連線的來源一定是 IP。
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "testclient"}
+# Host 標頭白名單（擋 DNS rebinding）；"testserver" 是 TestClient 的預設 Host。
+ALLOWED_HOST_HEADERS = ["127.0.0.1", "localhost", "[::1]", "testserver"]
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -25,6 +28,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if host not in LOOPBACK_HOSTS:
             return JSONResponse({"detail": "只允許本機存取"}, status_code=403)
         return await call_next(request)
+
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOST_HEADERS)
 
     @app.get("/api/health")
     def health() -> dict:

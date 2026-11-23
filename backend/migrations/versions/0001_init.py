@@ -6,7 +6,7 @@ Create Date: 2026-11-23
 """
 from alembic import op
 
-from app.models import PUBLIC_TABLES, Base, business_tables
+from app.models import PUBLIC_TABLES, READ_ONLY_FOR_APP, Base, business_tables
 
 revision = "0001"
 down_revision = None
@@ -30,7 +30,8 @@ def upgrade() -> None:
             f"CREATE POLICY tenant_isolation ON {t} "
             f"USING ({col} = {FIRM_EXPR}) WITH CHECK ({col} = {FIRM_EXPR})"
         )
-        op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {t} TO app_user")
+        privileges = "SELECT" if t in READ_ONLY_FOR_APP else "SELECT, INSERT, UPDATE, DELETE"
+        op.execute(f"GRANT {privileges} ON {t} TO app_user")
     for t in PUBLIC_TABLES:
         op.execute(f"GRANT SELECT ON {t} TO app_user")
 
@@ -38,9 +39,9 @@ def upgrade() -> None:
         """
         CREATE FUNCTION auth_lookup(p_email text)
         RETURNS TABLE(member_id uuid, firm_id uuid, password_hash text)
-        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+        LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
             SELECT m.id, m.firm_id, m.password_hash
-            FROM members m WHERE lower(m.email) = lower(p_email)
+            FROM public.members m WHERE lower(m.email) = lower(p_email)
         $$
         """
     )

@@ -29,3 +29,22 @@ def test_quote_length_ignores_spaces():
 
 def test_normalize_removes_nbsp_and_ideographic_space():
     assert normalize_text("原\xa0 \xa0 告　楊家豪") == "原告楊家豪"
+
+
+def test_zero_width_and_soft_hyphen_ignored():
+    hay = "被告未注意​車前狀況且未­減速"
+    span = find_quote(hay, "被告未注意車前狀況且未減速")
+    assert span == (0, len(hay))
+
+
+def test_partial_expanded_char_not_matched():
+    # ㈠ 經 NFKC 會展開成 (一)；引文只對到展開後的一部分時不算逐字。
+    assert find_quote("㈠原告主張", "一)原告主張") is None
+    assert find_quote("㈠原告主張", "原告主張") == (1, 5)
+    assert find_quote("㈠原告主張", "(一)原告主張") == (0, 5)
+
+
+def test_span_excludes_leading_and_trailing_whitespace():
+    hay = "原告\n  主張：被告未減速。  \n下一段"
+    s, e = find_quote(hay, "主張：被告未減速。")
+    assert hay[s:e] == "主張：被告未減速。"

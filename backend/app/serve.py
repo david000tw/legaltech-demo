@@ -7,7 +7,8 @@ from app.main import create_app
 
 def main() -> None:
     settings = Settings()
-    uvicorn.run(create_app(settings), host=settings.bind_host, port=settings.port)
+    uvicorn.run(create_app(settings), host=settings.bind_host, port=settings.port,
+                proxy_headers=False)  # 不信任 X-Forwarded-For，避免外部請求偽裝成本機
 
 
 if __name__ == "__main__":

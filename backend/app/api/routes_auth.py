@@ -3,12 +3,15 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from app.auth import (
-    COOKIE_NAME, SESSION_MAX_AGE, CurrentMember, current_member, sign_session, verify_password,
+    COOKIE_NAME, SESSION_MAX_AGE, CurrentMember, current_member, hash_password, sign_session,
+    verify_password,
 )
 from app.db import app_session, tenant_session
 from app.models import Member
 
 router = APIRouter(prefix="/api")
+# 查無帳號時也跑一次 argon2，讓回應時間不透露帳號是否存在。
+_DUMMY_HASH = hash_password("dummy-password-for-timing")
 
 
 class LoginBody(BaseModel):
@@ -19,8 +22,10 @@ class LoginBody(BaseModel):
 @router.post("/auth/login")
 def login(body: LoginBody, request: Request, response: Response) -> dict:
     with app_session() as s:
-        row = s.execute(text("select * from auth_lookup(:e)"), {"e": body.email.strip()}).first()
-    if row is None or not verify_password(body.password, row.password_hash):
+        rows = s.execute(text("select * from auth_lookup(:e)"), {"e": body.email.strip()}).all()
+    row = rows[0] if len(rows) == 1 else None
+    ok = verify_password(body.password, row.password_hash if row else _DUMMY_HASH)
+    if row is None or not ok:
         raise HTTPException(401, "帳號或密碼錯誤")
     response.set_cookie(COOKIE_NAME, sign_session(request, row.member_id, row.firm_id),
                         max_age=SESSION_MAX_AGE, httponly=True, samesite="lax")
