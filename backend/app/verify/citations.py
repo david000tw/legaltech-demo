@@ -197,17 +197,24 @@ class Blocker:
     reason: str
 
 
+def paragraph_blockers(s: Session, p: Paragraph) -> list[str]:
+    """重新驗證並回傳該段所有阻擋原因（含 unreviewed）。"""
+    out: list[str] = []
+    reasons = verify_paragraph(s, p)
+    if p.status != "reviewed":
+        out.append("unreviewed")
+    out.extend(reasons)
+    for c in paragraph_citations(s, p.id):
+        if c.verify_status != "ok":
+            out.append(f"citation_failed:{c.code}")
+        elif c.kind == "judgment" and not c.lawyer_confirmed:
+            out.append(f"judgment_unconfirmed:{c.code}")
+    return out
+
+
 def export_blockers(s: Session, draft_id: UUID) -> list[Blocker]:
     """匯出前一律重新驗證，不信任先前存的結果。"""
     out: list[Blocker] = []
     for p in s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id).order_by(Paragraph.seq)):
-        reasons = verify_paragraph(s, p)
-        if p.status != "reviewed":
-            out.append(Blocker(p.seq, "unreviewed"))
-        out.extend(Blocker(p.seq, r) for r in reasons)
-        for c in paragraph_citations(s, p.id):
-            if c.verify_status != "ok":
-                out.append(Blocker(p.seq, f"citation_failed:{c.code}"))
-            elif c.kind == "judgment" and not c.lawyer_confirmed:
-                out.append(Blocker(p.seq, f"judgment_unconfirmed:{c.code}"))
+        out.extend(Blocker(p.seq, r) for r in paragraph_blockers(s, p))
     return out
