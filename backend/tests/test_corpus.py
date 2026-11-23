@@ -16,6 +16,7 @@ from app.db import admin_session, app_session, tenant_session
 from app.ingest.service import ingest_document
 from app.models import Case, Judgment, JudgmentPassage, Page, PageText, StatuteArticle
 from app.text_norm import normalize_text
+from scripts.build_seed_statutes import api_articles
 from tests.helpers import create_firm
 
 BACKEND = Path(__file__).resolve().parent.parent
@@ -33,25 +34,29 @@ def passages_3946():
 
 def test_seed_statutes_match_raw_snapshot():
     files = sorted((SEED / "statutes").glob("*.json"))
-    assert len(files) == 3
+    assert len(files) == 6  # spike：加民事訴訟法、家事事件法、保險法
     total = 0
     for f in files:
         data = json.loads(f.read_text(encoding="utf-8"))
         for art in data["articles"]:
             raw = SEED / "raw" / "statutes" / f"{data['pcode']}_{art['article_no']}.html"
+            if not raw.exists():  # spike：新條文的原始快照是開放資料 API（seed/raw/statutes/moj_api）
+                assert api_articles(data["pcode"])[art["article_no"]] == art["text"]
+                total += 1
+                continue
             parsed = parse_law_single(raw.read_text(encoding="utf-8"))
             assert parsed == {"name": data["name"], "article_no": art["article_no"], "text": art["text"]}
             total += 1
-    assert total == 12
+    assert total == 42  # spike：12 + 30
 
 
 def test_seed_judgments_match_raw_pdf():
     files = sorted((SEED / "judgments").glob("*.json"))
-    assert len(files) == 5
+    assert len(files) == 15  # spike：加外遇、分割遺產、借名登記各 3～4 件
     for f in files:
         data = json.loads(f.read_text(encoding="utf-8"))
         assert data["full_text"] == pdf_text(SEED / "raw" / data["raw_file"])
-        assert data["curated"] is True
+        assert isinstance(data["curated"], bool)  # spike：每類只精選 1～2 件
         assert data["court_level"] in {"summary", "district", "high", "supreme"}
 
 
@@ -101,9 +106,9 @@ def test_load_seed_idempotent(db):
         first = load_seed(s, SEED)
     with admin_session() as s:
         second = load_seed(s, SEED)
-        assert s.scalar(select(func.count()).select_from(Judgment)) == 5
-        assert s.scalar(select(func.count()).select_from(StatuteArticle)) == 12
-    assert first == (5, 12)
+        assert s.scalar(select(func.count()).select_from(Judgment)) == 15  # spike：5 → 15
+        assert s.scalar(select(func.count()).select_from(StatuteArticle)) == 42  # spike：12 → 42
+    assert first == (15, 42)
     assert second == (0, 0)
 
 

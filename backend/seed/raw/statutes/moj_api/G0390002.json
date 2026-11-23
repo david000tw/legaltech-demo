@@ -1,0 +1,15 @@
+{
+ "LawName": "保險法",
+ "LawURL": "https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=G0390002",
+ "LawModifiedDate": "20250618",
+ "LawEffectiveDate": "",
+ "source": "https://law.moj.gov.tw/api/Ch/Law/JSON",
+ "UpdateDate": "2026/11/13 上午 12:00:00",
+ "LawArticles": [
+  {
+   "ArticleType": "A",
+   "ArticleNo": "第 112 條",
+   "ArticleContent": "保險金額約定於被保險人死亡時給付於其所指定之受益人者，其金額不得作為被保險人之遺產。"
+  }
+ ]
+}

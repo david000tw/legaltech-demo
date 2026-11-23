@@ -1,0 +1,15 @@
+{
+ "LawName": "民事訴訟法",
+ "LawURL": "https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=B0010001",
+ "LawModifiedDate": "20231129",
+ "LawEffectiveDate": "",
+ "source": "https://law.moj.gov.tw/api/Ch/Law/JSON",
+ "UpdateDate": "2026/11/13 上午 12:00:00",
+ "LawArticles": [
+  {
+   "ArticleType": "A",
+   "ArticleNo": "第 277 條",
+   "ArticleContent": "當事人主張有利於己之事實者，就其事實有舉證之責任。但法律別有規定，或依其情形顯失公平者，不在此限。"
+  }
+ ]
+}

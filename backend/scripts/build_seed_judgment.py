@@ -26,12 +26,14 @@ def main() -> None:
     ap.add_argument("--court-level", required=True, choices=["summary", "district", "high", "supreme"])
     ap.add_argument("--decided-on", required=True)
     ap.add_argument("--url", required=True)
+    # 未精選的判決不加權（搜尋時 curated 有 1.5 倍加權）；預設維持精選，與既有種子相同
+    ap.add_argument("--no-curated", dest="curated", action="store_false")
     a = ap.parse_args()
     pdf = a.pdf.resolve()
     if pdf.parent != (SEED / "raw").resolve():
         raise SystemExit("原始 PDF 必須放在 seed/raw/")
     data = {"citation": a.citation, "court": a.court, "court_level": a.court_level,
-            "decided_on": a.decided_on, "source_url": a.url, "curated": True,
+            "decided_on": a.decided_on, "source_url": a.url, "curated": a.curated,
             "raw_file": pdf.name, "full_text": pdf_full_text(pdf)}
     out = SEED / "judgments" / f"{pdf.stem}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
