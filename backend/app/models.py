@@ -16,6 +16,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from app.case_types import CASE_TYPES
+
 
 class Base(DeclarativeBase):
     pass
@@ -49,6 +51,11 @@ def _tenant_key(table: str) -> UniqueConstraint:
 
 def _created() -> Mapped[datetime]:
     return mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+def _tags() -> Mapped[list]:
+    """案型標籤（JSONB 字串陣列，可多個；沒有標籤＝空陣列）。"""
+    return mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
 
 
 def _enum(col: str, values: tuple[str, ...], name: str) -> CheckConstraint:
@@ -86,6 +93,7 @@ class Case(Base):
     __tablename__ = "cases"
     __table_args__ = (
         _enum("our_side", ("plaintiff", "defendant"), "ck_case_side"),
+        _enum("case_type", tuple(CASE_TYPES), "ck_case_type"),
         _tenant_key("cases"),
         _tfk("created_by", "members"),
     )
@@ -216,6 +224,8 @@ class Judgment(Base):
     full_text: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="active")
     curated: Mapped[bool] = mapped_column(Boolean, default=False)
+    case_types: Mapped[list] = _tags()  # 案型標籤，可多個
+    annotation: Mapped[str | None] = mapped_column(Text)  # 例如「少數見解：否定配偶權」，給 AI 與律師看
 
 
 class JudgmentPassage(Base):
@@ -249,6 +259,7 @@ class StatuteArticle(Base):
     text: Mapped[str] = mapped_column(Text)
     effective_from: Mapped[date | None] = mapped_column(Date)
     amended_on: Mapped[date | None] = mapped_column(Date)
+    case_types: Mapped[list] = _tags()
     statute: Mapped[Statute] = relationship()
 
 

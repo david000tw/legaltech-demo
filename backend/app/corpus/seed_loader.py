@@ -37,6 +37,8 @@ def load_seed(admin_s: Session, seed_dir: Path, resplit: bool = False) -> tuple[
         d = json.loads(f.read_text(encoding="utf-8"))
         existing = admin_s.scalars(select(Judgment).where(Judgment.citation == d["citation"])).one_or_none()
         if existing is not None:
+            existing.case_types = list(d.get("case_types", []))  # 標籤與註記可隨種子更新；全文不動
+            existing.annotation = d.get("annotation")
             if resplit:
                 if _referenced(admin_s, existing.id):
                     log.warning("判決 %s 已被引用，不重切", existing.citation)
@@ -46,7 +48,8 @@ def load_seed(admin_s: Session, seed_dir: Path, resplit: bool = False) -> tuple[
             continue
         j = Judgment(citation=d["citation"], court=d["court"], court_level=d["court_level"],
                      decided_on=date.fromisoformat(d["decided_on"]), source_url=d["source_url"],
-                     full_text=d["full_text"], status="active", curated=bool(d.get("curated")))
+                     full_text=d["full_text"], status="active", curated=bool(d.get("curated")),
+                     case_types=list(d.get("case_types", [])), annotation=d.get("annotation"))
         admin_s.add(j)
         admin_s.flush()
         _insert_passages(admin_s, j)
@@ -59,13 +62,15 @@ def load_seed(admin_s: Session, seed_dir: Path, resplit: bool = False) -> tuple[
             admin_s.add(st)
             admin_s.flush()
         for a in d["articles"]:
-            exists = admin_s.scalar(select(StatuteArticle.id).where(
-                StatuteArticle.statute_id == st.id, StatuteArticle.article_no == a["article_no"]))
-            if exists:
+            exists = admin_s.scalars(select(StatuteArticle).where(
+                StatuteArticle.statute_id == st.id, StatuteArticle.article_no == a["article_no"])).one_or_none()
+            if exists is not None:
+                exists.case_types = list(a.get("case_types", []))
                 continue
             admin_s.add(StatuteArticle(statute_id=st.id, article_no=a["article_no"], text=a["text"],
                                        effective_from=_opt_date(a.get("effective_from")),
-                                       amended_on=_opt_date(a.get("amended_on"))))
+                                       amended_on=_opt_date(a.get("amended_on")),
+                                       case_types=list(a.get("case_types", []))))
             new_a += 1
     admin_s.flush()
     return new_j, new_a

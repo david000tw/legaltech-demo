@@ -13,6 +13,9 @@ export default function SourcePane({ source, citation, canReview = false, onConf
   return (
     <div data-testid="source-pane" className="space-y-2 p-4">
       <h3 className="font-semibold text-slate-800">{source.title}</h3>
+      {source.annotation && (
+        <p className="rounded border border-purple-300 bg-purple-50 p-2 text-xs text-purple-900">{source.annotation}</p>
+      )}
       {!source.span && <p className="text-xs text-red-700">引文在原文中找不到。</p>}
       {citation?.verify_status === 'warn' && !citation.court_confirmed && (
         <div className="space-y-1 rounded border border-orange-300 bg-yellow-50 p-2 text-xs text-orange-900">

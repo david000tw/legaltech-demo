@@ -73,3 +73,18 @@ describe('SourcePane', () => {
     expect(screen.getByText(/點選引用/)).toBeInTheDocument()
   })
 })
+
+describe('minority opinion', () => {
+  it('marks a minority-opinion judgment', () => {
+    render(<CitationTag citation={cite({ annotation: '少數見解：否定配偶權' })} onClick={vi.fn()} />)
+    expect(screen.getByText('少數見解')).toBeInTheDocument()
+    render(<SourcePane source={{ kind: 'judgment', title: '某判決（法院判斷段）', text: '原文', span: null,
+      annotation: '少數見解：否定配偶權' }} />)
+    expect(screen.getByText('少數見解：否定配偶權')).toBeInTheDocument()
+  })
+
+  it('shows no mark for an ordinary judgment', () => {
+    render(<CitationTag citation={cite({ annotation: null })} onClick={vi.fn()} />)
+    expect(screen.queryByText('少數見解')).not.toBeInTheDocument()
+  })
+})

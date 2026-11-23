@@ -15,7 +15,8 @@ from app.models import Case, Claim, Document, Page, PageText, Round
 from app.text_norm import find_quote, quote_length
 
 MIN_QUOTE = 15
-SIDE_LABEL = {"plaintiff": "原告", "defendant": "被告"}
+from app.case_types import SIDE_LABEL  # noqa: E402,F401  沿用舊的匯入位置
+from app.pipeline.case_context import case_context  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,8 @@ def extract_claims(s: Session, round_id: UUID, provider: AIProvider, member_id: 
     rnd = s.get(Round, round_id)
     case = s.get(Case, rnd.case_id)
     pages = [op for op in opponent_pages(s, round_id) if op.text is not None]
-    user = (f"我方立場：{SIDE_LABEL[case.our_side]}。以下是對造書狀全文，請拆成主張清單。\n\n"
+    user = (case_context(s, case) + "\n\n"
+            f"我方立場：{SIDE_LABEL[case.our_side]}。以下是對造書狀全文，請拆成主張清單。\n\n"
             + format_pages([(op.page_no, op.text.text) for op in pages]))
     result = provider.run(step="claims", system=load_prompt("claims"), user=user, schema=CLAIMS_SCHEMA,
                           effort="medium")

@@ -35,8 +35,15 @@ def _get_or_404(s, model, obj_id, what: str):
     return obj
 
 
+def _annotation(s, c: Citation) -> str | None:
+    if c.kind != "judgment" or not c.judgment_passage_id:
+        return None
+    return s.get(Judgment, s.get(JudgmentPassage, c.judgment_passage_id).judgment_id).annotation
+
+
 def citation_json(s, c: Citation) -> dict:
     return {"id": str(c.id), "code": c.code, "kind": c.kind, "quote": c.quote, "label": citation_label(s, c),
+            "annotation": _annotation(s, c),
             "verify_status": c.verify_status, "verify_reasons": c.verify_reasons,
             "lawyer_confirmed": c.lawyer_confirmed, "court_confirmed": c.court_confirmed}
 
@@ -93,7 +100,8 @@ def citation_source(citation_id: UUID, m: CurrentMember = Depends(current_member
         else:
             return {"kind": c.kind, "title": f"找不到 {c.code} 的來源（不在候選清單）", "text": "", "span": None}
         span = find_quote(text, c.quote) if c.quote.strip() else None
-        return {"kind": c.kind, "title": title, "text": text, "span": list(span) if span else None}
+        return {"kind": c.kind, "title": title, "text": text, "span": list(span) if span else None,
+                "annotation": _annotation(s, c)}
 
 
 class CitationBody(BaseModel):

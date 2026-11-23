@@ -37,7 +37,7 @@ export type RoundDetail = { id: string; seq: number; status: RoundStatus; error:
   draft_id: string | null; claims: ClaimView[] }
 export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgment' | 'statute'; quote: string;
   label: string | null; verify_status: 'ok' | 'warn' | 'failed'; verify_reasons: string[]; lawyer_confirmed: boolean
-  court_confirmed: boolean }
+  court_confirmed: boolean; annotation?: string | null }  // annotation：判決的註記，例如「少數見解：否定配偶權」
 // display_heading＝系統編號＋標題（顯示與匯出一致）；heading_text＝去掉編號的標題（修改表單用）
 export type ParagraphView = { id: string; seq: number; heading: string; display_heading: string; heading_text: string;
   text: string; rendered_text: string;
@@ -45,7 +45,8 @@ export type ParagraphView = { id: string; seq: number; heading: string; display_
   reviewed_at: string | null; citations: CitationView[] }
 export type DraftView = { id: string; round_id: string; case_id: string; can_review: boolean;
   paragraphs: ParagraphView[]; blockers: Blocker[] }
-export type CitationSource = { kind: string; title: string; text: string; span: [number, number] | null }
+export type CitationSource = { kind: string; title: string; text: string; span: [number, number] | null
+  annotation?: string | null }
 export type CitationInput = { code: string; quote: string }
 
 async function detail(r: Response): Promise<string> {

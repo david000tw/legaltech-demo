@@ -2,10 +2,11 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import func, select
 
 from app.auth import CurrentMember, current_member
+from app.case_types import CASE_TYPES, DEFAULT_CASE_TYPE
 from app.db import tenant_session
 from app.ingest.extract import UnreadableFile, UnsupportedFile
 from app.ingest.service import current_page_text, ingest_document
@@ -18,6 +19,14 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 class CaseBody(BaseModel):
     title: str
     our_side: Literal["plaintiff", "defendant"]
+    case_type: str = DEFAULT_CASE_TYPE
+
+    @field_validator("case_type")
+    @classmethod
+    def _known_type(cls, v: str) -> str:
+        if v not in CASE_TYPES:
+            raise ValueError(f"不支援的案型：{v}")
+        return v
 
 
 def _case_or_404(s, case_id: UUID) -> Case:
@@ -34,7 +43,8 @@ def _case_summary(c: Case) -> dict:
 @router.post("/cases")
 def create_case(body: CaseBody, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
-        c = Case(firm_id=m.firm_id, title=body.title, our_side=body.our_side, created_by=m.id)
+        c = Case(firm_id=m.firm_id, title=body.title, our_side=body.our_side, case_type=body.case_type,
+                 created_by=m.id)
         s.add(c)
         s.flush()
         return _case_summary(c)

@@ -22,6 +22,7 @@ from app.models import (
     Candidate, Case, Claim, Document, Exhibit, Judgment, JudgmentPassage, Page, PageText, Round,
     StatuteArticle,
 )
+from app.pipeline.case_context import case_context
 from app.pipeline.claims import SIDE_LABEL
 from app.text_norm import find_quote, normalize_text, quote_length
 
@@ -69,8 +70,9 @@ def build_candidates(s: Session, round_id: UUID) -> list[Candidate]:
     else:
         hit_ids = {pt.id for q in queries for pt in search_pages(s, rnd.case_id, q, PAGES_PER_CLAIM)}
         evidence = [pt for pt in all_pages if pt.id in hit_ids]
-    passages = _unique([p for q in queries for p in search_passages(s, q, PASSAGES_PER_CLAIM)])
-    articles = _unique([a for q in queries for a in search_articles(s, q, ARTICLES_PER_CLAIM)])
+    case_type = s.get(Case, rnd.case_id).case_type  # 同類型加權、不排除（設計 5.3）
+    passages = _unique([p for q in queries for p in search_passages(s, q, PASSAGES_PER_CLAIM, case_type=case_type)])
+    articles = _unique([a for q in queries for a in search_articles(s, q, ARTICLES_PER_CLAIM, case_type=case_type)])
 
     out: list[Candidate] = []
     for i, pt in enumerate(evidence, start=1):
@@ -102,7 +104,8 @@ def candidate_source(s: Session, c: Candidate) -> tuple[str, str]:
     if c.kind == "judgment":
         p = s.get(JudgmentPassage, c.judgment_passage_id)
         j = s.get(Judgment, p.judgment_id)
-        return f"{j.citation}（法院判斷段）", p.text
+        note = f"【註記：{j.annotation}】" if j.annotation else ""  # 少數見解等，AI 與律師都要看到
+        return f"{j.citation}（法院判斷段）{note}", p.text
     a = s.get(StatuteArticle, c.statute_article_id)
     return article_display(a.statute.name, a.article_no), a.text
 
@@ -177,7 +180,8 @@ def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_i
     case = s.get(Case, rnd.case_id)
     claims = _claims(s, round_id)
     cands = round_candidates(s, round_id)
-    user = (f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張】\n{format_claims(claims)}\n\n"
+    user = (case_context(s, case) + "\n\n"
+            f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張】\n{format_claims(claims)}\n\n"
             f"【候選資料】\n{format_candidates(s, list(cands.values()))}")
     if estimate_tokens(user) > SELECT_TOKEN_LIMIT:
         raise AIError("other", f"對應步驟的輸入過長（約 {estimate_tokens(user):,} token），請減少卷證或拆成多輪")

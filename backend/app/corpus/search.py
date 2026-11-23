@@ -14,6 +14,11 @@ from app.text_norm import normalize_text
 
 _KEEP = re.compile(r"[㐀-䶿一-鿿豈-﫿0-9]")
 CURATED_BOOST = 1.5
+TYPE_BOOST = 2.0  # 與案件同類型的判決、條文加權（設計 5.3）：只加權、不排除；沒有標籤的維持原分數
+
+
+def _type_boost(case_type: str | None, tags: list | None) -> float:
+    return TYPE_BOOST if case_type and case_type in (tags or []) else 1.0
 
 
 def bigrams(s: str) -> set[str]:
@@ -33,22 +38,23 @@ def _top(scored: list[tuple[float, object]], k: int) -> list:
     return [obj for _, obj in scored[:k]]
 
 
-def search_passages(s: Session, query: str, k: int,
-                    passage_types: tuple[str, ...] = ("court_reasoning",)) -> list[JudgmentPassage]:
+def search_passages(s: Session, query: str, k: int, passage_types: tuple[str, ...] = ("court_reasoning",),
+                    case_type: str | None = None) -> list[JudgmentPassage]:
     q = bigrams(query)
     rows = s.execute(
-        select(JudgmentPassage, Judgment.curated)
+        select(JudgmentPassage, Judgment.curated, Judgment.case_types)
         .join(Judgment, Judgment.id == JudgmentPassage.judgment_id)
         .where(Judgment.status == "active", JudgmentPassage.status == "active",
                JudgmentPassage.passage_type.in_(passage_types))
     ).all()
-    return _top([(score(q, p.text) * (CURATED_BOOST if curated else 1.0), p) for p, curated in rows], k)
+    return _top([(score(q, p.text) * (CURATED_BOOST if curated else 1.0) * _type_boost(case_type, tags), p)
+                 for p, curated, tags in rows], k)
 
 
-def search_articles(s: Session, query: str, k: int) -> list[StatuteArticle]:
+def search_articles(s: Session, query: str, k: int, case_type: str | None = None) -> list[StatuteArticle]:
     q = bigrams(query)
     arts = s.scalars(select(StatuteArticle).options(joinedload(StatuteArticle.statute))).all()
-    return _top([(score(q, a.text), a) for a in arts], k)
+    return _top([(score(q, a.text) * _type_boost(case_type, a.case_types), a) for a in arts], k)
 
 
 def search_pages(s: Session, case_id: UUID, query: str, k: int) -> list[PageText]:

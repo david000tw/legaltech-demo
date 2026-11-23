@@ -12,6 +12,7 @@ from app.ai.schemas import DRAFT_SCHEMA, REWRITE_SCHEMA
 from app.models import Case, Citation, Claim, Draft, Paragraph, ReviewEvent, Round
 from app.numbering import strip_heading_number
 from app.pipeline.candidates import format_candidates, round_candidates
+from app.pipeline.case_context import case_context
 from app.pipeline.claims import SIDE_LABEL
 from app.verify.citations import MARKER_RE, attach_citations, verify_paragraph
 
@@ -45,7 +46,8 @@ def draft_context(s: Session, round_id: UUID, extra_codes: list[str] | None = No
     cands = round_candidates(s, round_id)
     codes = [c for c in _selected_codes(claims) + (extra_codes or []) if c in cands]
     codes = list(dict.fromkeys(codes))
-    return (f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張與對應結果】\n{_claim_lines(claims) or '（無）'}\n\n"
+    return (case_context(s, case) + "\n\n"
+            f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張與對應結果】\n{_claim_lines(claims) or '（無）'}\n\n"
             f"【可引用的資料原文】\n{format_candidates(s, [cands[c] for c in codes]) or '（無）'}")
 
 
