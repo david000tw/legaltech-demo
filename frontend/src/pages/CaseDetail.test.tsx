@@ -1,0 +1,62 @@
+import { render, screen } from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import * as api from '../api'
+import CaseDetail from './CaseDetail'
+
+vi.mock('../api', async (orig) => {
+  const real = await orig<typeof import('../api')>()
+  return { ...real, getCase: vi.fn(), getRound: vi.fn(), createRound: vi.fn(), runRound: vi.fn(), uploadDocument: vi.fn() }
+})
+
+const baseCase: api.CaseDetail = {
+  id: 'c1', title: '林大明車禍案', our_side: 'plaintiff', case_type: 'traffic_tort',
+  documents: [
+    { id: 'd1', kind: 'evidence', filename: '01_研判表.txt', round_id: null, page_count: 1,
+      pages: [{ id: 'p1', page_no: 1, needs_ocr: false }] },
+    { id: 'd2', kind: 'evidence', filename: '02_掃描收據.pdf', round_id: null, page_count: 1,
+      pages: [{ id: 'p2', page_no: 1, needs_ocr: true }] },
+  ],
+  exhibits: [
+    { id: 'e1', label: '原證1', prefix: '原證', number: 1, document_id: 'd1', filename: '01_研判表.txt' },
+    { id: 'e2', label: '原證2', prefix: '原證', number: 2, document_id: 'd2', filename: '02_掃描收據.pdf' },
+  ],
+  rounds: [{ id: 'r1', seq: 1, status: 'failed', error: "usage_limit: You've hit your session limit" }],
+}
+
+function renderAt() {
+  return render(
+    <MemoryRouter initialEntries={['/cases/c1']}>
+      <Routes><Route path="/cases/:caseId" element={<CaseDetail />} /></Routes>
+    </MemoryRouter>,
+  )
+}
+
+describe('CaseDetail', () => {
+  beforeEach(() => vi.resetAllMocks())
+
+  it('lists exhibits with numbers and marks scanned pages as 待辨識', async () => {
+    vi.mocked(api.getCase).mockResolvedValue(baseCase)
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'failed', stale: false, draft_id: null,
+      error: "usage_limit: You've hit your session limit", claims: [] })
+    renderAt()
+    expect(await screen.findByText('原證1')).toBeInTheDocument()
+    expect(screen.getByText('原證2')).toBeInTheDocument()
+    expect(screen.getByText('待辨識')).toBeInTheDocument()
+  })
+
+  it('shows the error of a failed round', async () => {
+    vi.mocked(api.getCase).mockResolvedValue(baseCase)
+    renderAt()
+    expect(await screen.findByText(/usage_limit: You've hit your session limit/)).toBeInTheDocument()
+  })
+
+  it('links to the draft once the round is drafted', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'drafted', error: null }] })
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', stale: false, draft_id: 'dr1',
+      error: null, claims: [] })
+    renderAt()
+    const link = await screen.findByRole('link', { name: '開啟草稿' })
+    expect(link).toHaveAttribute('href', '/drafts/dr1')
+  })
+})
