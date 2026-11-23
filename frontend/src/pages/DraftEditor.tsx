@@ -1,0 +1,151 @@
+import { useCallback, useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import * as api from '../api'
+import CitationTag from '../components/CitationTag'
+import ExportButton, { reasonLabel } from '../components/ExportButton'
+import SourcePane from '../components/SourcePane'
+
+function ParagraphCard({ p, onShowSource, onChanged, onError }: {
+  p: api.ParagraphView
+  onShowSource: (c: api.CitationView) => void
+  onChanged: () => Promise<void>
+  onError: (m: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(p.text)
+  const [instruction, setInstruction] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function act(f: () => Promise<unknown>) {
+    setBusy(true)
+    try {
+      await f()
+      await onChanged()
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const save = () => act(async () => {
+    await api.patchParagraph(p.id, text, p.citations.map((c) => ({ code: c.code, quote: c.quote })))
+    setEditing(false)
+  })
+
+  return (
+    <article className="space-y-2 rounded-lg border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-slate-900">{p.heading}</h3>
+        <span className={`text-xs ${p.status === 'reviewed' ? 'text-emerald-700' : 'text-slate-500'}`}>
+          {p.status === 'reviewed' ? `已審（${p.reviewed_bar_number ?? ''}）` : '未審'}
+        </span>
+      </div>
+      {editing ? (
+        <div className="space-y-2">
+          <label className="block text-xs text-slate-600">
+            段落內文
+            <textarea aria-label="段落內文" value={text} onChange={(e) => setText(e.target.value)} rows={6}
+              className="mt-1 w-full rounded border border-slate-300 p-2 font-mono text-sm" />
+          </label>
+          <p className="text-xs text-slate-500">引用請保留 {'{{cite:代碼}}'}／{'{{quote:代碼}}'} 標記，不要直接寫字號、條號或原證號。</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={save} disabled={busy} className="rounded bg-indigo-600 px-3 py-1 text-sm text-white">儲存</button>
+            <button type="button" onClick={() => { setEditing(false); setText(p.text) }} className="rounded border px-3 py-1 text-sm">取消</button>
+          </div>
+        </div>
+      ) : (
+        <p className="whitespace-pre-wrap leading-7 text-slate-800">{p.rendered_text}</p>
+      )}
+      {p.verify_reasons.length > 0 && (
+        <ul className="text-sm text-red-700">{p.verify_reasons.map((r) => <li key={r}>{reasonLabel(r)}</li>)}</ul>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {p.citations.map((c) => (
+          <span key={c.id} className="inline-flex items-center gap-1">
+            <CitationTag citation={c} onClick={() => onShowSource(c)} />
+            {c.kind === 'judgment' && c.verify_status === 'ok' && !c.lawyer_confirmed && (
+              <button type="button" disabled={busy} onClick={() => act(() => api.confirmCitation(c.id))}
+                className="rounded border border-amber-400 px-2 py-0.5 text-xs text-amber-800">已讀原文，確認</button>
+            )}
+          </span>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
+        <button type="button" onClick={() => setEditing(true)} className="rounded border px-3 py-1 text-sm">修改</button>
+        <input value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="重寫指示，例如：語氣更精簡"
+          aria-label="重寫指示" className="min-w-48 flex-1 rounded border border-slate-300 px-2 py-1 text-sm" />
+        <button type="button" disabled={busy || !instruction.trim()}
+          onClick={() => act(async () => { await api.rewriteParagraph(p.id, instruction); setInstruction('') })}
+          className="rounded border px-3 py-1 text-sm disabled:opacity-50">要求重寫</button>
+        <button type="button" disabled={busy} onClick={() => act(() => api.reviewParagraph(p.id))}
+          className="rounded bg-emerald-600 px-3 py-1 text-sm text-white disabled:opacity-50">標記已審</button>
+      </div>
+    </article>
+  )
+}
+
+export default function DraftEditor() {
+  const { draftId = '' } = useParams()
+  const [draft, setDraft] = useState<api.DraftView | null>(null)
+  const [source, setSource] = useState<api.CitationSource | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      setDraft(await api.getDraft(draftId))
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }, [draftId])
+
+  useEffect(() => { void load() }, [load])
+
+  async function showSource(c: api.CitationView) {
+    try {
+      setSource(await api.getCitationSource(c.id))
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  async function doExport() {
+    try {
+      const blob = await api.exportDraft(draftId)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = '民事準備書狀.docx'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError((e as Error).message)
+      await load()
+    }
+  }
+
+  if (!draft) return <p className="p-6 text-slate-600">{error ?? '載入中…'}</p>
+  return (
+    <div className="mx-auto max-w-7xl space-y-4 p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Link to={`/cases/${draft.case_id}`} className="text-sm text-indigo-700 underline">← 回到案件</Link>
+          <h1 className="mt-1 text-2xl font-bold text-slate-900">民事準備書狀（草稿）</h1>
+          <p className="text-xs text-amber-700">AI 產出的初稿，須由律師逐段審核；判決引用須逐筆讀原文確認。</p>
+        </div>
+        <ExportButton blockers={draft.blockers} onExport={doExport} />
+      </div>
+      {error && <p className="text-sm text-red-700">{error}</p>}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <aside className="rounded-lg border border-slate-200 bg-white lg:sticky lg:top-4 lg:max-h-[85vh] lg:overflow-auto">
+          <SourcePane source={source} />
+        </aside>
+        <div className="space-y-4">
+          {draft.paragraphs.map((p) => (
+            <ParagraphCard key={`${p.id}-${p.text}`} p={p} onShowSource={showSource} onChanged={load} onError={setError} />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}

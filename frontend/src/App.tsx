@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import * as api from './api'
 import CaseDetail from './pages/CaseDetail'
 import Cases from './pages/Cases'
+import DraftEditor from './pages/DraftEditor'
 import Login from './pages/Login'
 
 function RequireLogin({ children }: { children: ReactNode }) {
@@ -20,6 +21,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/cases" element={<RequireLogin><Cases /></RequireLogin>} />
       <Route path="/cases/:caseId" element={<RequireLogin><CaseDetail /></RequireLogin>} />
+      <Route path="/drafts/:draftId" element={<RequireLogin><DraftEditor /></RequireLogin>} />
       <Route path="*" element={<Navigate to="/cases" replace />} />
     </Routes>
   )
