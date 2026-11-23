@@ -14,7 +14,7 @@ from sqlalchemy import (
     Text, UniqueConstraint, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -230,6 +230,7 @@ class JudgmentPassage(Base):
     passage_type: Mapped[str] = mapped_column(String(20))
     text: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="active")
+    judgment: Mapped[Judgment] = relationship()
 
 
 class Statute(Base):
@@ -248,6 +249,7 @@ class StatuteArticle(Base):
     text: Mapped[str] = mapped_column(Text)
     effective_from: Mapped[date | None] = mapped_column(Date)
     amended_on: Mapped[date | None] = mapped_column(Date)
+    statute: Mapped[Statute] = relationship()
 
 
 class Candidate(Base):
