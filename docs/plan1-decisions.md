@@ -1,0 +1,148 @@
+# 計畫 1 開發決策紀錄
+
+執行計畫 1 期間，遇到計畫沒寫清楚或與實際狀況衝突時，由實作者（AI）自行做的決定，以及審查後決定延後的次要問題。原文保留英文執行紀錄，依發生順序排列；「cost」是「這個決定如果錯了，代價是什麼」。
+
+- 計畫：`docs/superpowers/plans/2026-11-23-legaltech-plan1-core-flow.md`（上層資料夾）
+- 驗收報告：[acceptance-plan1.md](acceptance-plan1.md)
+
+## 決策（Rulings）
+
+- Pre-flight: Ruling: FakeProvider(responses: dict[str, dict | Exception]) raises Exception values and records `calls: list[str]` — Task 12 tests need to raise AIError at a given step and assert no call — cost if wrong: test helper change only.
+- Task 1: Ruling: frontend template ships React 19 (plan says 18) — kept 19; spec does not pin React version and Testing Library supports 19 — cost if wrong: downgrade deps.
+- Task 1: Ruling: vite.config server.host 127.0.0.1/strictPort/proxy set now (plan Task 15) — Global Constraint applies to every task — cost: none.
+- Task 1: Ruling: added .gitattributes (eol=lf, pdf/docx binary) — core.autocrlf would rewrite fixtures/testdata — cost: none.
+- Task 1: Ruling: removed uv-generated authors (user's personal email), build-system, src/ — privacy; app is not a package — cost: none.
+- Task 1: Ruling: httpx2 install was blocked by permission classifier (unverifiable package); kept httpx and filtered the Starlette deprecation warning in pytest config — cost: warning returns if filter regex breaks.
+- Task 2: Ruling: table names are plural (firms, members, cases...) — "case" is an SQL reserved word — cost: none.
+- Task 2: Ruling: 0001_init uses Base.metadata.create_all + explicit RLS/grant SQL — no deployment exists during plan 1; later schema changes must be explicit migrations — cost if wrong: dev DB rebuild.
+- Task 2: Ruling: Case.created_by nullable — CLI import-testcase creates cases without a member — cost: none.
+- Task 2: Ruling: tenant_session/app_session/admin_session auto-commit on clean exit, rollback on exception — callers may still commit mid-way — cost: none.
+- Task 2: Ruling: alembic.ini kept ASCII-only — alembic read it as cp950 even with PYTHONUTF8=1 — cost: none.
+- Task 3: Ruling: added test_verified_lawyer_passes_require_lawyer, test_logout_clears_session, test_cli_create_firm_and_member beyond the brief — TDD requires a test per new function — cost: none.
+- Task 4: Ruling: NFKC applied per code point (not whole string) so normalized offsets map back to the original — differs only for combining marks, absent in Chinese legal text — cost: a quote with combining marks might not match.
+- Task 5: Ruling: ingest_document takes keyword-only storage (defaults to LocalStorage(settings.storage_dir)) — plan signature had no way to reach the storage root — cost: none.
+- Task 5: Ruling: the 20-char "no text layer" threshold applies to PDF only; .txt/.docx pages always keep their text — a short typed page is not a scan — cost: none.
+- Task 5: Ruling: .txt decodes utf-8-sig, falls back to cp950 (Big5) — common for Taiwanese plain-text files — cost: mis-decoding a non-Big5 legacy file.
+- Task 5: Ruling: GET /api/cases/{id} also returns pages per document and rounds — Task 15 CaseDetail needs them — cost: none.
+- Task 6: Ruling: added tests test_build_args_matches_contract, test_missing_structured_output_is_invalid_output, test_missing_executable_is_other, test_estimate_tokens beyond the brief — each new branch needs a failing-first test — cost: none.
+- Task 6: Ruling: get_provider imports ClaudeCodeLocalProvider lazily — avoids provider<->claude_code import cycle — cost: none.
+- Phase1: Ruling: firms/members are SELECT-only for app_user (plan said full CRUD on all business tables) — is_internal_test/bar_verified/role gate compliance and must not be self-editable — cost if wrong: later features needing app-side member edits must add column-level grants. test_firms_and_members_not_writable_by_app_user RED→GREEN.
+- Phase1: Ruling: normalization also drops Unicode Cf (zero-width space, soft hyphen) — PDF extraction inserts them; extends the spec's "NFKC + delete whitespace" — cost: a quote relying on a format char would still match (harmless). test_zero_width_and_soft_hyphen_ignored RED→GREEN.
+- Phase1: Ruling: logout only clears the cookie; a copied token stays valid ≤12h — single-user local dev; server-side session revocation belongs to plan 4 (multi-firm hardening) — cost: a leaked cookie works until expiry.
+- Phase1: Ruling: auth_lookup relies on its owner bypassing FORCE RLS (superuser locally); on AWS RDS the master user is not a true superuser — plan 5 must re-verify (e.g. owner role with BYPASSRLS) — cost: login finds nobody on RDS until fixed.
+- Phase1: Ruling: spec 5.10 isolates by firm AND case membership; plan 1 implements firm only — case membership is plan 4 scope per plan roadmap — cost: within one firm every member sees every case (single-user dev).
+- Task 7: Ruling: judgment.judicial.gov.tw rejects curl (bot defense); the 4 new PDFs were saved by WebFetch as raw server bytes and copied (sha256 matched by the fetching subagent; spoofing a browser UA was denied by the permission classifier and not retried) — still original bytes, no transcription — cost: re-download needs a browser or WebFetch.
+- Task 7: Ruling: seed = 3946 + 北簡610 + 沙簡456 (summary) + 中院簡上211 + 竹院簡上17 (district); no High Court case — plan allowed 簡上 or 高院 — cost: no high-court passage in the corpus.
+- Task 7: Ruling: splitter counts "綜上所述" headings as court_reasoning; 不爭執/爭執事項 and 原審判決經過 as other — conclusion paragraphs are the court's own reasoning; agreed-facts lists are not — cost: a citation to agreed facts gets not_court_reasoning.
+- Task 7: Ruling: seed JSON stores raw_file and is regenerated only by scripts; tests re-derive statutes from raw HTML and judgments from raw PDF — guards against hand edits — cost: none.
+- Task 7: Ruling: added Judgment/Statute relationships on passages/articles, plus tests test_seed_judgments_match_raw_pdf, test_bigrams_keep_cjk_and_digits_only, test_parse_law_single_html (caught a last-line-dropped bug), test_search_articles_finds_191_2, test_search_pages_skips_scanned_and_other_cases, test_split_3946_main_text_and_reasoning_count.
+- Task 7: Ruling: backend/seed/raw/** marked binary in .gitattributes — eol=lf normalization was rewriting the server's CRLF bytes in raw HTML snapshots — cost: none.
+- Task 8: Ruling: (found while reading 3946 party claims) splitter now drops standalone Chinese-numeral page footers (第一頁…) that pypdf emits mid-sentence, and treats 勝訴部分/簡易程序 headings as other — test_page_footers_removed_in_all_seed_judgments, test_procedural_tail_is_other RED→GREEN.
+- Task 8: Ruling: demo-lin gold lists the 5 defenses actually written into the synthetic 答辯狀 (plan named 2) — the brief needed realistic breadth; recall check covers all — cost: none.
+- Task 8: Ruling: tc-3946 is defendant-side (被證), opponent = 起訴狀 rewritten from the judgment's 原告主張 with fictional names/place/plate; gold = 7 claims (fault + 6 damage items) — cost: none.
+- Task 8: Ruling: import_testcase runs via admin_session (dev CLI) — same as other CLI commands — cost: none.
+- Task 9: Ruling: claim quote_verified also requires ≥15 normalized chars (prompt rule) — a 3-char quote would verify trivially — cost: some genuine short quotes show unverified.
+- Task 9: Ruling: page_no numbers all opponent briefs of the round consecutively (opponent_pages helper, reused later) and skips pages without text — multiple briefs per round otherwise collide — cost: none.
+- Task 9: Ruling: FakeProvider accepts dict | Exception | callable and records calls (pre-flight ruling) — cost: none.
+- Task 10: Ruling: unverified evidence quotes are removed from selection.evidence and kept only in selection.unverified_quotes — drafting must not be fed a quote that is not verbatim — cost: a claim may lose evidence the AI paraphrased.
+- Task 10: Ruling: evidence candidates ordered by exhibit number then page; judgments/statutes by first search hit; added app/exhibit_labels.py (evidence_label computes 原證N第M頁 live), candidate_source/format_candidates reused by drafting — cost: none.
+- Task 10: Ruling: added tests test_select_unverified_evidence_quote, test_select_prompt_has_required_rules — cost: none.
+- Task 10: Ruling: conftest honors LEGALTECH_TEST_DB (auto-created) — a reviewer running pytest concurrently on legaltech_test dropped my schema mid-run; implementer runs now use LEGALTECH_TEST_DB=legaltech_test_impl — cost: none.
+- Task 11: Ruling: attach_citations(s, paragraph, [(code, quote)]) lives in app/verify/citations.py and is the single way drafting/rewrite/edit bind citations to candidates; duplicate codes in one paragraph keep the first — cost: a paragraph cannot cite two different quotes from the same candidate.
+- Task 11: Ruling: unknown_code also fires when the citation's stored target differs from the round's candidate (guards tampered ids) — cost: none.
+- Task 11: Ruling: quote_not_found and quote_too_short are reported together when both apply; statute quotes have no length floor — cost: none.
+- Task 11: Ruling: added tests test_fullwidth_digits_flagged, test_valid_paragraph_has_no_reasons, test_fabricated_quote_rejected, test_unknown_code_rejected, test_inline_quote_unverified_in_paragraph — cost: none.
+- Task 12: Ruling: app.state.provider_factory (default get_provider) and run_round(provider_factory=...) — background tasks and rewrite must be injectable so tests never invoke the real claude CLI — cost: none.
+- Task 12: Ruling: run_round also marks failed on ProviderNotAllowed/NotEnabled ("provider: …") and on any unexpected exception ("other: …", logged) — a round must never stay stuck in running — cost: none.
+- Task 12: Ruling: rewrite sends the same draft context plus the codes already cited in the paragraph; AIError from rewrite → HTTP 503 with "<kind>: <message>" — cost: none.
+- Task 12: Ruling: replace_paragraph() (delete citations, reset review fields, re-attach, re-verify) is shared by rewrite and the Task 13 edit path — cost: none.
+- Phase2: Ruling: "事證已臻明確" paragraphs are court_reasoning (court's own words; 沙簡456's only 強制險§32 holding lived there) — cost: boilerplate "其餘攻擊防禦方法不另論述" becomes citable (harmless).
+- Phase2: Ruling: possible_party_claim is a hard failure (blocks export) and may over-flag a holding written in the same sentence as the restated claim — spec 2 anti-goal (citing a party's argument as the court's) outweighs convenience; plan 2's support check can relax it — cost: lawyer must pick a different quote in those rare sentences.
+- Task 13: Ruling: confirm/review routes check existence (404) before role (403) so another firm's ids never reveal anything — cost: none.
+- Task 13: Ruling: confirm_citation re-verifies before confirming; renumber to a taken number → 409; renumber records a revert event on every paragraph citing that exhibit's pages (reviewed or not) — cost: none.
+- Task 13: Ruling: GET /api/drafts/{id} re-verifies (export_blockers) on every read and returns blockers; added paragraph_blockers() shared by review and export — cost: a read writes verify_reasons.
+- Task 13: Ruling: added tests test_get_draft_returns_rendered_text_and_blockers, test_only_ok_judgment_citations_can_be_confirmed, test_renumber_to_taken_number_409; cross-firm test also covers confirm/review/patch — cost: none.
+- Task 14: Ruling: margin test allows <0.01 cm — Word stores margins in twips (2.5 cm = 1417 twip = 899795 EMU) — cost: none.
+- Task 14: Ruling: red-team set has 8 cases (plan listed 6): added marker_without_citation and injected_instruction_quoted (evidence quote carrying the injected case number); plus control test test_force_reviewed_valid_draft_exports proving the 409s are caused by verification, not by force_reviewed — cost: none.
+- Task 14: Ruling: export filename via RFC 5987 filename* (民事準備書狀.docx) with ASCII fallback — cost: none.
+- Phase3: Ruling: evidence quotes are blocked only for case-number-type references (判決字號/簡寫字號/釋字/決議), not statute or exhibit numbers — police reports legitimately quote "違反道路交通安全規則第102條"; a quoted, attributed statute number is not a fabricated authority — cost: an injected "民法第999條" inside evidence could appear inside a 「」 quote attributed to that exhibit.
+- Task 15: Ruling: added react-router-dom for page routing and a RequireLogin guard (GET /api/me) — plan lists pages but no router — cost: none.
+- Task 15: Ruling: added LoginCases.test.tsx (login success/failure, case list + create) and a drafted-round link test beyond the brief — cost: none.
+- Task 15: Ruling: template assets/App.css removed; index.html lang zh-Hant-TW and title set — cost: none.
+- Task 16: Ruling: citations shown as a tag row under each rendered paragraph (not inline) — rendered_text is plain text from the backend; inline positions would need a structured render API — cost: lawyer maps tags to text by code/label.
+- Task 16: Ruling: edit keeps the paragraph's existing citations (code+quote) and only changes the text — plan 1 has no UI for editing quotes; a removed marker shows citation_without_marker — cost: changing a quote requires AI rewrite.
+- Task 16: Ruling: source span offsets are Python code points, JS slices UTF-16 — identical for BMP CJK; non-BMP characters (CJK Ext-B) would shift the highlight — cost: highlight off by one per astral char; fix in plan 2 if seen.
+- Task 16: Ruling: REASON_LABELS also covers phase-review codes (malformed_marker, possible_party_claim, quote_contains_case_number) plus a fallback label — cost: none.
+- Task 17: Ruling: added an exhibit renumber control (改號) on the case page — Step 3 requires renumbering in the browser but no task built UI for PATCH /exhibits — test 'renumbers an exhibit and reloads the case' RED→GREEN — cost: none.
+- Task 17: Ruling: gold recall table uses the bigram score to pick each gold claim's best match; tc-3946 「精神慰撫金」 mis-paired to claim 6 though claim 13 covers it — recall judged by hand in acceptance-plan1.md, not by the table — cost: table alone may understate recall.
+- Phase4: Ruling: edit_paragraph and renumber_exhibit take no explicit row lock — their UPDATEs already wait on review/export locks and the version check rejects stale reviews; edit-vs-edit stays last-writer-wins — cost: two people editing one paragraph at once silently lose one edit (PATCH version check deferred to plan 2).
+- Phase4: Ruling: ocr_unchecked deferred to plan 2 — plan 1 never creates ai_ocr page texts, so no citation can point at unchecked OCR — cost: none until OCR lands; plan 2 must add it with OCR.
+- Phase4: Ruling: a withdrawn judgment keeps the paragraph labelled 已審 next to the red reason (export still blocked by re-verification); auto-revert on withdraw belongs with the admin withdraw operation (later plan) — cost: lawyer sees 已審 plus a red reason until then.
+- Phase4: Ruling: requests without an Origin header are allowed (TestClient, curl, server-side tools; browsers always send Origin on cross-site POST) — cost: a non-browser attacker on this machine already has the cookie problem solved and is out of scope.
+- Phase5: Ruling: no separate phase-5 critic for Task 17 (tests + docs + one UI control) — the fresh whole-branch final review covers it — cost: one fewer independent read of Task 17 alone.
+- Final: Ruling: {{cite:S1}}第N項 stays allowed — a 項 inside a verified article is lawyer-checkable, not a different authority — cost: a wrong 項 number can reach the brief.
+- Final: Ruling: Important 5 (0001_init uses create_all on live models) deferred — any plan-2 migration that adds a column/table fails loudly on the fresh test DB (migrated_db drops schema and upgrades head every run), so drift cannot ship silently; freezing 0001 as explicit DDL is plan 2's first step — cost: plan 2 must do it before its first model change.
+- Final: Ruling: plan exempts statute quotes from the 15-char minimum (reviewer: spec 5.5 states it generally) — statute quotes are matched inside one specific verified article, so short quotes cannot be ambiguous across sources — cost: a short statute quote could be cherry-picked within an article.
+- Final: Ruling: declined-to-judge items stay with their owning plans — layer-4 support check (plan 2), statute validity by accident date and judgment withdraw/sync (plan 3), case-membership isolation / session revocation / audit logs / usage alerts (plan 4), Bedrock + session-secret policy + auth_lookup on RDS (plan 5), OCR + ocr_unchecked (plan 2), bigram recall (plan 3 OpenSearch) — cost: each gap remains until its plan.
+- Final: Ruling: judgment quotes containing other courts' case numbers verbatim, and paraphrases split into sub-15-char quotes >3 chars apart, are accepted per spec thresholds (layer-4 territory) — cost: a lawyer must catch these by reading.
+- Final: Ruling: per-firm file encryption/presigned URLs, upload spooling before the 50 MB check, and no login rate limit are accepted for single-user loopback dev — cost: must be revisited before pilot (plan 5).
+
+## 延後處理的次要問題（Deferred minors）
+
+- Final: minor (deferred): 8 duplicate citation code silently keeps the first quote (should flag differing quotes).
+- Final: minor (deferred): 9 classify_failure checks login keywords before the structured 429 signal.
+- Final: minor (deferred): 10 STALE_AFTER 45 min < worst-case run 60 min (3 steps × 2 attempts × 600 s); a restarted live run keeps spending quota.
+- Final: minor (deferred): 11 usage from retried/failed/superseded AI attempts is not recorded (G9 accuracy).
+- Final: minor (deferred): 12 log.exception / FastAPI default handler may log psycopg DETAIL rows containing case text (spec 5.10).
+- Final: minor (deferred): 13 image-only .docx/.txt pages become empty PageText without needs_ocr / 待辨識.
+- Final: minor (deferred): 14 case page omits claim quote/page; opponent briefs not listed; opponent_brief without round_id accepted.
+- Final: minor (deferred): 15 export button not disabled while exporting; concurrent exports could deadlock on verify writes (500).
+- Final: minor (deferred): 16 start_round relies on GC for a fresh status; add populate_existing.
+- Final: minor (deferred): 17 default session_secret not rejected outside dev; "testserver" in allowed hosts; e2e red-team check exact-string only; AI calls hold an idle-in-transaction connection.
+
+## 審查與修正紀錄
+
+- Phase1: fixed cross-firm FK (FK checks bypass RLS) — composite (firm_id, id) FKs on every business→business ref — test_cross_firm_foreign_key_rejected RED→GREEN.
+- Phase1: fixed case-variant duplicate emails — unique index on lower(email), login requires exactly one row, helpers lowercase — test_email_unique_case_insensitive RED→GREEN.
+- Phase1: fixed RLS test that could pass with RLS disabled — now catalog-driven (relrowsecurity+relforcerowsecurity+policy) + public tables read-only test; mutation check (cases without ENABLE) made it fail, restored.
+- Phase1: fixed find_quote partial match inside NFKC-expanded chars (㈠→(一)) — match must start/end on original char boundaries — test_partial_expanded_char_not_matched RED→GREEN; added test_span_excludes_leading_and_trailing_whitespace.
+- Phase1: fixed login timing oracle (dummy argon2 verify) — test_login_unknown_email_still_runs_password_check RED→GREEN; tamper test now forges payload without re-signing; added test_expired_cookie_401.
+- Phase1: fixed host-header/proxy bypass — TrustedHostMiddleware (127.0.0.1/localhost/[::1]) + uvicorn proxy_headers=False — test_untrusted_host_header_rejected RED→GREEN.
+- Phase1: fixed auth_lookup search_path → pg_catalog, public, pg_temp and schema-qualified public.members.
+- Phase2: fixed corrupt/encrypted/empty/undecodable uploads → UnreadableFile → 422; per-page extract failure → needs_ocr; NUL stripped; UTF-16 BOM decoded — test_unreadable_upload_422[5 cases], test_utf16_and_nul_in_txt, test_pdf_page_extract_failure_marks_needs_ocr RED→GREEN.
+- Phase2: fixed docx tables dropped — body walked in order, cells joined by \t, rows by \n — test_docx_tables_are_extracted_in_order RED→GREEN.
+- Phase2: fixed splitter cutting mid-sentence — headings count only after a line ending in 。：:；;」）) or a short heading line — test_sentences_not_split_mid_line RED→GREEN; added heading-classification table over all 5 seed judgments.
+- Phase2: fixed party claims restated inside court reasoning — citation reason possible_party_claim when the quote overlaps "(原告|被告|上訴人|被上訴人)(雖|固|另|復)?(主張|辯稱|抗辯|辯以|陳稱|則以)…(等語|云云|等情|置辯|。)" — test_party_claim_restated_inside_reasoning_flagged RED→GREEN.
+- Phase2: fixed red-team gap: evidence quotes containing a judgment/釋字/決議 number get quote_contains_case_number — test_evidence_quote_containing_case_number_flagged RED→GREEN. Carry to Task 17: must_not_cite is checked on rendered/exported text, not raw markers.
+- Phase2: fixed exhibit/round numbering race — case row locked FOR UPDATE in ingest_document and create_round — test_exhibit_numbering_locks_case_row, test_create_round_locks_case_row RED→GREEN.
+- Phase2: fixed upload blocking + no size cap — sync def (threadpool), MAX_UPLOAD_BYTES 50 MB → 413 — test_upload_too_large_413 RED→GREEN.
+- Phase2: fixed weak tests — search_pages now covers scanned page + PageText v2; seed metadata cross-checked against PDF text (case number in first 300 chars, last 中華民國 date == decided_on).
+- Phase2: fixed seed re-split — load_seed(resplit=True) re-splits unreferenced judgments; CLI `load-seed [--resplit]` — test_load_seed_resplit_restores_passages RED→GREEN.
+- Phase3: fixed malformed-marker bypass ({{cite:民法第184條}}, full-width braces) — scans strip only valid MARKER_RE, any leftover brace → malformed_marker; scan text is NFKC + Cf-stripped — test_malformed_marker_flagged, test_fullwidth_marker_flagged RED→GREEN.
+- Phase3: fixed heading not scanned for self-quoted text — test_heading_inline_quote_flagged RED→GREEN.
+- Phase3: fixed reference-pattern gaps (110台上1234, 釋字748號, 民法184條, §184, 上證/甲證/原證物, zero-width inside numbers) — test_more_unbound_forms_flagged[9] RED→GREEN.
+- Phase3: fixed failed citations rendered like verified ones — render_text re-verifies and shows 【未驗證：代碼】 for failed citations — test_failed_citation_not_rendered_as_verified RED→GREEN.
+- Phase3: fixed concurrent/superseded runs — start_round locks the round row; STALE_AFTER 45 min; run_round carries started_at as a token, checks it (FOR UPDATE) before every commit and before writing failed — test_superseded_run_does_not_overwrite RED→GREEN; test_concurrent_start_round_one_busy added (passed before the fix by timing; kept as regression guard).
+- Phase3: fixed party-claim detection gaps (則主張, 雖以…云云置辯, cross-sentence …等語) — terminator preferred within 400 chars unless a court turn (然查/惟查/經查/次查/又查/本院/按) intervenes, else first 。 — test_party_claim_variants RED→GREEN.
+- Phase3: fixed inline-quote gaps (〝〞﹁﹂＂‘’, mixed quote pairs, two adjacent <15-char quotes) — test_more_quote_forms_flagged[5] RED→GREEN.
+- Phase3: fixed select-step size risk — SELECT_TOKEN_LIMIT 180k estimated tokens → AIError("other", 輸入過長…) before calling the model — test_select_input_too_long_fails_clearly RED→GREEN.
+- Phase3: fixed injection rule scope — all four prompts name 對造書狀 as untrusted — test_prompts_treat_opponent_brief_as_untrusted RED→GREEN.
+- Phase3: added missing tests: assistant can run a round, cross-firm 404 for /run, GET /rounds, /rewrite; rewrite AIError → 503; ProviderNotAllowed and unexpected exceptions mark the round failed (behavior already correct).
+- Phase4: fixed heading markers bypassing layer 1 — any MARKER_RE match in heading → marker_in_heading — redteam quote_marker_in_heading / cite_marker_in_heading RED→GREEN.
+- Phase4: fixed review not bound to what the lawyer saw — GET draft returns per-paragraph version = sha256(heading, rendered_text)[:32]; POST /review requires {"version"} (422 after 404/403), mismatch → 409; mark_reviewed and confirm_citation lock the paragraph row FOR UPDATE with populate_existing; review event stores the rendered text — test_review_with_stale_version_conflicts, test_review_after_renumber_with_stale_version_conflicts, test_review_waits_for_concurrent_edit_and_conflicts, test_confirm_waits_for_concurrent_edit_and_conflicts (was StaleDataError 500), test_review_event_records_reviewed_text RED→GREEN.
+- Phase4: fixed export race — export takes FOR SHARE on the draft's paragraphs (ordered by id) before checking blockers — test_export_keeps_paragraphs_locked_until_done RED→GREEN.
+- Phase4: fixed AI rewrite overwriting a concurrent edit — after the AI returns, re-read FOR UPDATE and compare text → ParagraphChanged → 409; caught inside the transaction so the usage record still commits — test_rewrite_conflicts_with_edit_made_while_ai_was_working RED→GREEN.
+- Phase4: fixed part of spec 5.6 — evidence citation whose page_text is no longer the page's latest version → source_superseded — test_superseded_page_text_fails_citation RED→GREEN.
+- Phase4: fixed docx paragraph spacing — Normal space_before/after = 0 — test_export_docx_format RED→GREEN.
+- Phase4: fixed empty draft exportable — export_blockers → [Blocker(0, "empty_draft")] — test_empty_draft_cannot_be_exported RED→GREEN.
+- Phase4: fixed control characters → 500 — control_char reason (heading/text/quotes) and filenames stripped in 證物清單 — test_control_chars_block_export_instead_of_500, test_control_chars_in_filename_are_dropped_on_export, redteam control_char_in_text RED→GREEN.
+- Phase4: fixed CSRF — non-GET with an Origin outside settings.allowed_origins → 403; export is POST — test_cross_site_write_rejected, test_export_is_post_only RED→GREEN.
+- Phase4: added missing tests — cross-firm 404 for PATCH /paragraphs, PATCH /exhibits, POST /export; frontend api.test.ts (export POST + 409 → ExportBlockedError, 403 message, review sends version), DraftEditor 409 conflict + 503 rewrite error display.
+- Phase4: fixed UI details — error cleared when the next action starts and draft reloaded after a failed action; confirm/review buttons hidden unless can_review; revokeObjectURL deferred 60 s — DraftEditor tests RED→GREEN.
+- Phase4: verified in real browser after restart — reviewed ¶5-8 with version, POST export downloaded (原證6, spacing 0), GET export 405.
+- Final: fixed Critical 1 (review racing an edit/renumber left unseen content reviewed + exportable; reverses Phase4 lock ruling) — edit_paragraph uses lock_paragraph, renumber_exhibit locks exhibit + citing paragraphs (by id, populate_existing) — test_edit_arriving_during_review_still_reverts, test_renumber_arriving_during_review_still_reverts RED→GREEN, suite 269/269.
+- Final: fixed Important 2 (nested 「『』」 and unclosed quotes slipped past inline_quote_unverified) — depth-tracking outermost-quote scanner, unclosed runs to sentence end, verbatim check tries raw and inner-quote-stripped — test_nested_or_unclosed_quotes_flagged[3] RED→GREEN, test_verbatim_quote_with_inner_quotes_passes[2] guard, suite 269/269.
+- Final: fixed Important 3 (case/article number forms missed) — 字/第 optional, 99年台上1號, 第N、N條, 第N-N條, 大法官/解釋 forms, formal numerals (case/article patterns only) — test_more_reference_forms_flagged[9] RED→GREEN, test_ordinary_text_not_flagged[7] guard, suite 269/269.
+- Final: fixed Minor 7 re-graded Important ({{cite:S1}}之1 renders an unverified article) — _STATUTE_SUFFIX → unbound_reference:S1之1 — in test_more_reference_forms_flagged RED→GREEN.
+- Final: fixed Important 4 (non-JSON CLI failure lost stderr, retried, misclassified) — non-zero exit without JSON → classify_failure(None, stderr), no retry — test_cli_error_keeps_stderr_and_does_not_retry RED→GREEN, suite 269/269.
+- Final: fixed Important 6 (no manual repair; reverses Task 16 citation ruling) — PATCH takes optional heading; UI edits heading, sends only citations whose markers remain, 刪除本段 (two-step) clears heading+text; cleared paragraphs are hidden, unreviewed-exempt and not exported, empty_draft if none left; edit event keeps the old text — test_patch_can_change_heading, test_cleared_paragraph_is_removed_from_draft_and_export, test_draft_with_only_cleared_paragraphs_is_empty, FE 'edits the heading and drops citations…', 'removes a paragraph only after a second confirmation', api 'sends the heading…' RED→GREEN (FE RED verified by stashing the implementation), suites 269/269 + 29/29.
