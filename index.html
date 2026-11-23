@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>台灣 AI 訴訟輔助與書狀生成系統 — 律師實務互動 Demo</title>
+  <title>台灣 AI 訴訟輔助與書狀生成系統 — 實務互動 Demo 與需求確認</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -202,6 +202,81 @@
       }
     ];
 
+    const PRIORITY_OPTIONS = [
+      { value: "must", label: "必做（第一期先上）", badge: "bg-rose-100 text-rose-900 border-rose-300" },
+      { value: "nice", label: "加分（第二期再做）", badge: "bg-amber-100 text-amber-900 border-amber-300" },
+      { value: "later", label: "暫緩（先不做）", badge: "bg-slate-200 text-slate-700 border-slate-300" }
+    ];
+
+    const MODULES_CONFIG = [
+      {
+        id: "litigation_type_switcher",
+        title: "0. 多訴訟類型切換意圖（未來擴充方向，目前僅對齊意圖）",
+        defaultPriority: "nice",
+        painChoices: [
+          "目前 Demo 以侵權損害賠償為主，但實務上還會碰到契約／債務、勞資、家事或行政等不同訴訟類型",
+          "不同訴訟類型的請求權基礎、舉證重點、爭點與書狀架構差異大，希望未來能切換對應模式",
+          "希望先確認核心工作流（卷證整理＋雙屏寫狀＋攻防反駁）穩固後，再逐步擴充各類訴訟模板"
+        ],
+        expectationPlaceholder: "例如：未來希望依訴訟類型切換常見爭點與書狀模板，但第一期先以常見民事案件為主即可。"
+      },
+      {
+        id: "evidence_hub",
+        title: "1. 卷證建檔、索引與時間軸整理",
+        defaultPriority: "must",
+        painChoices: [
+          "LINE 截圖、診斷書、估價單混在一起，整理原證編號與頁碼很花時間",
+          "日期與金額散落各份卷證，人工排大事記與爭執狀態容易漏看",
+          "卷證缺漏（例如少休養證明、折舊資料）常到寫狀或開庭前才發現"
+        ],
+        expectationPlaceholder: "例如：希望上傳後自動建議原證編號、標出缺漏資料，並由我或助理一鍵確認。"
+      },
+      {
+        id: "dual_pane_pleading",
+        title: "2. 雙屏書狀編輯與「可溯源引用」",
+        defaultPriority: "must",
+        painChoices: [
+          "寫起訴狀或準備書狀時，左看卷證/判決、右打字切換視窗很卡",
+          "擔心 AI 寫出不存在的判決字號，或把卷證頁碼寫錯",
+          "不同案件或不同律師習慣的論述語氣（嚴謹／攻勢／穩健）不同"
+        ],
+        expectationPlaceholder: "例如：點書狀裡的 [原證1, P.1] 或判決引用，左邊要直接跳出對應內容讓我核對。"
+      },
+      {
+        id: "rebuttal_and_check",
+        title: "3. 書狀弱點健檢與對造答辯狀反駁",
+        defaultPriority: "must",
+        painChoices: [
+          "對造答辯狀常抓折舊、休養天數、與有過失或慰撫金數額來打",
+          "遞狀前想先用對造或法官視角檢查哪裡舉證不夠",
+          "逐點把對造主張對應回我方卷證並寫成準備書狀反駁草稿很耗工"
+        ],
+        expectationPlaceholder: "例如：勾選對造抗辯重點後，自動帶出我方卷證與實務見解，產出準備書狀初稿。"
+      },
+      {
+        id: "calc_and_efiling",
+        title: "4. 裁判費／期間試算與司法院電子遞狀打包",
+        defaultPriority: "nice",
+        painChoices: [
+          "每次算裁判費、上訴 20 日期間或繕本份數都要重查一次",
+          "司法院線上起訴前整理 PDF 檔名與證物清單很瑣碎",
+          "希望匯出符合標楷體 14pt 排版習慣的 Word（.docx）檔案"
+        ],
+        expectationPlaceholder: "例如：輸入標的金額與送達日就自動算好費用與日期，並幫我排好遞狀檔案名稱。"
+      },
+      {
+        id: "firm_extra",
+        title: "5. 律所進階流程（利益衝突、多人審批、執行狀、當事人報告）",
+        defaultPriority: "later",
+        painChoices: [
+          "接案前需要比對當事人與對造是否有利益衝突",
+          "資深律師與受僱律師／法務助理之間需要修訂歷程與審批",
+          "勝訴後延伸的強制執行狀，或給當事人的白話進度說明"
+        ],
+        expectationPlaceholder: "例如：這塊先對齊需求即可，等核心寫狀與卷證流程順了再排入。"
+      }
+    ];
+
     function calcCivilFee(amount) {
       const val = Math.max(0, Number(amount) || 0);
       if (val === 0) return 0;
@@ -253,6 +328,33 @@
 
       const [newEvName, setNewEvName] = useState("");
       const [newEvQuote, setNewEvQuote] = useState("");
+
+      // 問卷狀態
+      const [lawyerName, setLawyerName] = useState("");
+      const [firmName, setFirmName] = useState("");
+      const [caseTypes, setCaseTypes] = useState(["車禍／侵權損害賠償", "一般契約／債務糾紛"]);
+      const [otherCaseType, setOtherCaseType] = useState("");
+      const [evidenceSources, setEvidenceSources] = useState(["LINE / 對話截圖", "診斷證明與醫療單據", "估價單 / 發票 / 薪資單"]);
+      const [aiBoundary, setAiBoundary] = useState("AI 擬稿與整理，律師逐段審閱核定（高風險引用需人工確認）");
+      const [switcherIntentNote, setSwitcherIntentNote] = useState(
+        "已納入「多訴訟類型切換意圖」：未來支援依訴訟類型切換對應模組與書狀架構，目前階段先對齊需求意圖、暫不實作。"
+      );
+
+      const [moduleStates, setModuleStates] = useState(() => {
+        const init = {};
+        MODULES_CONFIG.forEach((m) => {
+          init[m.id] = {
+            priority: m.defaultPriority,
+            pains: [m.painChoices[0]],
+            customPain: "",
+            expectation: ""
+          };
+        });
+        return init;
+      });
+
+      const [generalNote, setGeneralNote] = useState("");
+      const [copied, setCopied] = useState(false);
 
       const selectedEvidence = useMemo(
         () => evidences.find((e) => e.id === selectedEvId) || evidences[0],
@@ -322,6 +424,124 @@
         );
       }
 
+      function toggleListItem(setter, item) {
+        setter((prev) =>
+          prev.includes(item) ? prev.filter((x) => x !== item) : [...prev, item]
+        );
+      }
+
+      function updateModule(modId, patch) {
+        setModuleStates((prev) => ({
+          ...prev,
+          [modId]: { ...prev[modId], ...patch }
+        }));
+      }
+
+      function toggleModulePain(modId, painText) {
+        setModuleStates((prev) => {
+          const current = prev[modId].pains;
+          const nextPains = current.includes(painText)
+            ? current.filter((p) => p !== painText)
+            : [...current, painText];
+          return {
+            ...prev,
+            [modId]: { ...prev[modId], pains: nextPains }
+          };
+        });
+      }
+
+      const summaryMarkdown = useMemo(() => {
+        const allCaseTypes = [
+          ...caseTypes,
+          ...(otherCaseType.trim() ? [`其他：${otherCaseType.trim()}`] : [])
+        ];
+        const lines = [];
+        lines.push("# 律師訴訟輔助功能與卷證痛點確認單");
+        lines.push("");
+        lines.push(`- 填寫人：${lawyerName.trim() || "（未填寫）"}`);
+        lines.push(`- 事務所／團隊：${firmName.trim() || "（未填寫）"}`);
+        lines.push(`- 常見訴訟／案件類型：${allCaseTypes.length ? allCaseTypes.join("、") : "（未勾選）"}`);
+        lines.push(`- 常見卷證來源：${evidenceSources.length ? evidenceSources.join("、") : "（未勾選）"}`);
+        lines.push(`- 期望 AI 與律師分工方式：${aiBoundary}`);
+        lines.push(`- 多訴訟類型切換意圖說明：${switcherIntentNote.trim() || "（未填寫）"}`);
+        lines.push("");
+        lines.push("## 各模組優先級、痛點與期望");
+
+        MODULES_CONFIG.forEach((m) => {
+          const st = moduleStates[m.id];
+          const pLabel = PRIORITY_OPTIONS.find((p) => p.value === st.priority)?.label || st.priority;
+          const painList = [
+            ...st.pains,
+            ...(st.customPain.trim() ? [`補充痛點：${st.customPain.trim()}`] : [])
+          ];
+          lines.push("");
+          lines.push(`### ${m.title}`);
+          lines.push(`- 優先級：**${pLabel}**`);
+          lines.push(`- 痛點：${painList.length ? painList.join("；") : "（未勾選）"}`);
+          lines.push(`- 期望／補充：${st.expectation.trim() || "（未填寫）"}`);
+        });
+
+        if (generalNote.trim()) {
+          lines.push("");
+          lines.push("## 其他建議或開會討論重點");
+          lines.push(generalNote.trim());
+        }
+
+        return lines.join("\n");
+      }, [lawyerName, firmName, caseTypes, otherCaseType, evidenceSources, aiBoundary, switcherIntentNote, moduleStates, generalNote]);
+
+      const summaryJson = useMemo(() => {
+        const allCaseTypes = [
+          ...caseTypes,
+          ...(otherCaseType.trim() ? [`其他：${otherCaseType.trim()}`] : [])
+        ];
+        return JSON.stringify(
+          {
+            lawyerName: lawyerName.trim(),
+            firmName: firmName.trim(),
+            caseTypes: allCaseTypes,
+            evidenceSources,
+            aiBoundary,
+            litigationTypeSwitcherIntent: {
+              implemented: false,
+              stage: "intent_only",
+              note: switcherIntentNote.trim()
+            },
+            modules: MODULES_CONFIG.map((m) => ({
+              id: m.id,
+              title: m.title,
+              priority: moduleStates[m.id].priority,
+              pains: moduleStates[m.id].pains,
+              customPain: moduleStates[m.id].customPain.trim(),
+              expectation: moduleStates[m.id].expectation.trim()
+            })),
+            generalNote: generalNote.trim()
+          },
+          null,
+          2
+        );
+      }, [lawyerName, firmName, caseTypes, otherCaseType, evidenceSources, aiBoundary, switcherIntentNote, moduleStates, generalNote]);
+
+      async function handleCopy() {
+        try {
+          await navigator.clipboard.writeText(summaryMarkdown);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2500);
+        } catch {
+          alert("無法自動複製，請直接選取右側摘要文字複製。");
+        }
+      }
+
+      function handleDownload(filename, content, mime) {
+        const blob = new Blob([content], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
       const pinnedJudgments = judgments.filter((j) => j.pinned);
 
       return (
@@ -342,7 +562,7 @@
                     </span>
                   </div>
                   <p className="text-xs text-slate-300 mt-0.5">
-                    {CASE_INFO.title}（{CASE_INFO.plaintiff} vs. {CASE_INFO.defendant}）
+                    {CASE_INFO.title}（{CASE_INFO.plaintiff} vs. {CASE_INFO.defendant}）｜含互動 Demo 與需求確認問卷
                   </p>
                 </div>
               </div>
@@ -362,6 +582,12 @@
                   className="px-3 py-1.5 text-xs font-medium rounded-md bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold transition cursor-pointer"
                 >
                   匯出書狀 / 電子遞狀
+                </button>
+                <button
+                  onClick={() => setActiveTab("survey")}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition cursor-pointer"
+                >
+                  前往需求問卷
                 </button>
                 <button
                   onClick={() => setShowMemo((v) => !v)}
@@ -386,8 +612,8 @@
                   </div>
                   <p>
                     1. <strong>攻防與體檢</strong>：位於第 4 分頁「對造攻防與書狀健檢」，可檢視折舊計算、請假證明與缺漏證據提醒。
-                    2. <strong>卷證說明</strong>：卷證原則由律師／助理上傳建檔，系統會在每份卷證旁提供白話與法律說明，並指出尚缺哪些資料。
-                    3. <strong>尚未放入畫面的項目</strong>：利益衝突檢查、多人追蹤修訂審批、律所專屬歷史書狀庫、強制執行狀、工時與當事人白話進度報告，目前採文字說明對齊。
+                    2. <strong>多訴訟類型切換</strong>：僅保留「需求與痛點確認問卷」中的意圖對齊，目前不實作實際切換引擎。
+                    3. <strong>問卷整合</strong>：第 6 分頁已整合律師需求與痛點確認問卷，可一鍵複製或下載摘要。
                   </p>
                 </div>
                 <button
@@ -407,7 +633,8 @@
                 { id: "evidence", label: "2. 卷證與時間軸" },
                 { id: "research", label: "3. 實務見解檢索" },
                 { id: "check", label: "4. 對造攻防與書狀健檢" },
-                { id: "opponent", label: "5. 對造書狀比對與反駁" }
+                { id: "opponent", label: "5. 對造書狀比對與反駁" },
+                { id: "survey", label: "6. 需求與痛點確認問卷" }
               ].map((tab) => {
                 const active = activeTab === tab.id;
                 return (
@@ -599,8 +826,8 @@
                     <div className="space-y-1 mb-5 text-[16px]">
                       <div>案號：{CASE_INFO.caseNo}（依本案卷證與爭點擬定）</div>
                       <div>股別：{CASE_INFO.division}</div>
-                      <div>原告：林大明 住桃園市中壢區某路100號</div>
-                      <div>被告：陳志豪 住桃園市平鎮區某街55號</div>
+                      <div>原告：林大明　住桃園市中壢區某路100號</div>
+                      <div>被告：陳志豪　住桃園市平鎮區某街55號</div>
                     </div>
 
                     <div className="mb-5">
@@ -694,9 +921,9 @@
                     </div>
 
                     <div className="pt-4 border-t border-slate-200 text-[16px]">
-                      <div>謹 狀</div>
-                      <div>{CASE_INFO.court} 公鑒</div>
-                      <div className="mt-2">中 華 民 國 115 年 11 月 23 日</div>
+                      <div>謹　狀</div>
+                      <div>{CASE_INFO.court}　公鑒</div>
+                      <div className="mt-2">中　華　民　國　115　年　11　月　23　日</div>
                       <div className="mt-1">具狀人：林大明</div>
                     </div>
                   </div>
@@ -1032,6 +1259,296 @@
                     onChange={(e) => setGeneratedRebuttal(e.target.value)}
                     className="w-full p-3.5 text-xs leading-relaxed rounded-lg border border-slate-300 bg-slate-50 focus:bg-white focus:outline-none focus:border-amber-500"
                   />
+                </div>
+              </div>
+            )}
+
+            {activeTab === "survey" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                <div className="lg:col-span-7 space-y-5">
+                  <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-100 pb-2">
+                      <h2 className="text-sm font-bold text-slate-900">
+                        A. 基本背景、多訴訟類型切換意圖與辦案習慣
+                      </h2>
+                      <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-semibold">
+                        切換訴訟類型：僅對齊意圖，暫不實作
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          律師／填寫人稱呼（選填）
+                        </label>
+                        <input
+                          type="text"
+                          value={lawyerName}
+                          onChange={(e) => setLawyerName(e.target.value)}
+                          placeholder="例如：王律師 / 林法務"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          事務所或團隊名稱（選填）
+                        </label>
+                        <input
+                          type="text"
+                          value={firmName}
+                          onChange={(e) => setFirmName(e.target.value)}
+                          placeholder="例如：桃園民事訴訟團隊"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div className="font-semibold text-slate-700">
+                        常處理的訴訟／案件類型（可複選，用於對齊未來各類訴訟切換意圖）
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          "車禍／侵權損害賠償",
+                          "一般契約／債務糾紛",
+                          "工程／建築爭議",
+                          "不動產／租賃爭議",
+                          "勞資／行政／家事等其他訴訟"
+                        ].map((ct) => {
+                          const active = caseTypes.includes(ct);
+                          return (
+                            <button
+                              key={ct}
+                              type="button"
+                              onClick={() => toggleListItem(setCaseTypes, ct)}
+                              className={`px-3 py-1.5 rounded-lg border font-medium cursor-pointer transition ${
+                                active
+                                  ? "bg-slate-900 text-white border-slate-900"
+                                  : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
+                              }`}
+                            >
+                              {active ? `✓ ${ct}` : ct}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <input
+                        type="text"
+                        value={otherCaseType}
+                        onChange={(e) => setOtherCaseType(e.target.value)}
+                        placeholder="其他訴訟或案件類型補充（選填）"
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+
+                    <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
+                      <label className="block font-semibold text-slate-800">
+                        「能切換訴訟類型因應各類訴訟」的意圖備註（目前僅記錄意圖，尚未開發切換功能）
+                      </label>
+                      <input
+                        type="text"
+                        value={switcherIntentNote}
+                        onChange={(e) => setSwitcherIntentNote(e.target.value)}
+                        placeholder="說明未來希望依不同訴訟類型調整哪些重點（目前先不做功能）"
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div className="font-semibold text-slate-700">
+                        當事人最常拿來的卷證形式（可複選）
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          "LINE / 對話截圖",
+                          "診斷證明與醫療單據",
+                          "估價單 / 發票 / 薪資單",
+                          "警方研判表 / 筆錄",
+                          "合約 / 存證信函 / 掃描 PDF"
+                        ].map((ev) => {
+                          const active = evidenceSources.includes(ev);
+                          return (
+                            <button
+                              key={ev}
+                              type="button"
+                              onClick={() => toggleListItem(setEvidenceSources, ev)}
+                              className={`px-3 py-1.5 rounded-lg border font-medium cursor-pointer transition ${
+                                active
+                                  ? "bg-amber-100 text-amber-950 border-amber-400"
+                                  : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
+                              }`}
+                            >
+                              {active ? `✓ ${ev}` : ev}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 text-xs">
+                      <label className="block font-semibold text-slate-700">
+                        你最接受的 AI 與律師分工方式
+                      </label>
+                      <select
+                        value={aiBoundary}
+                        onChange={(e) => setAiBoundary(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-amber-500"
+                      >
+                        <option value="AI 擬稿與整理，律師逐段審閱核定（高風險引用需人工確認）">
+                          AI 擬稿與整理，律師逐段審閱核定（高風險引用需人工確認）
+                        </option>
+                        <option value="只先讓 AI 整理卷證索引、時間軸與缺漏清單，書狀仍由律師主筆">
+                          只先讓 AI 整理卷證索引、時間軸與缺漏清單，書狀仍由律師主筆
+                        </option>
+                        <option value="AI 產出完整初稿與反駁論述，律師做重點修改與最終定稿">
+                          AI 產出完整初稿與反駁論述，律師做重點修改與最終定稿
+                        </option>
+                      </select>
+                    </div>
+                  </section>
+
+                  {MODULES_CONFIG.map((mod) => {
+                    const st = moduleStates[mod.id];
+                    return (
+                      <section
+                        key={mod.id}
+                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3.5"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                          <h2 className="text-sm font-bold text-slate-900">{mod.title}</h2>
+                          <div className="flex items-center gap-1.5 text-xs flex-wrap">
+                            {PRIORITY_OPTIONS.map((p) => {
+                              const selected = st.priority === p.value;
+                              return (
+                                <button
+                                  key={p.value}
+                                  type="button"
+                                  onClick={() => updateModule(mod.id, { priority: p.value })}
+                                  className={`px-2.5 py-1 rounded-md border font-semibold cursor-pointer transition ${
+                                    selected
+                                      ? p.badge
+                                      : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
+                                  }`}
+                                >
+                                  {p.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 text-xs">
+                          <div className="font-semibold text-slate-700">
+                            這個環節目前遇到的痛點（可複選）：
+                          </div>
+                          <div className="space-y-1.5">
+                            {mod.painChoices.map((pain) => {
+                              const checked = st.pains.includes(pain);
+                              return (
+                                <label
+                                  key={pain}
+                                  className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition ${
+                                    checked
+                                      ? "bg-amber-50/70 border-amber-300 text-slate-900"
+                                      : "bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100"
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleModulePain(mod.id, pain)}
+                                    className="mt-0.5"
+                                  />
+                                  <span className="leading-relaxed">{pain}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">
+                              其他痛點補充（選填）
+                            </label>
+                            <input
+                              type="text"
+                              value={st.customPain}
+                              onChange={(e) => updateModule(mod.id, { customPain: e.target.value })}
+                              placeholder="輸入你實際碰到的其他問題"
+                              className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block font-semibold text-slate-700 mb-1">
+                              你希望系統怎麼幫你（選填）
+                            </label>
+                            <input
+                              type="text"
+                              value={st.expectation}
+                              onChange={(e) => updateModule(mod.id, { expectation: e.target.value })}
+                              placeholder={mod.expectationPlaceholder}
+                              className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
+                            />
+                          </div>
+                        </div>
+                      </section>
+                    );
+                  })}
+
+                  <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-2 text-xs">
+                    <label className="block font-bold text-sm text-slate-900">
+                      B. 其他建議或開會時想先確認的事
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={generalNote}
+                      onChange={(e) => setGeneralNote(e.target.value)}
+                      placeholder="例如：希望先拿一個真實或脫敏案件測試、對卷證保密與權限有什麼要求等。"
+                      className="w-full p-3 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500 leading-relaxed"
+                    />
+                  </section>
+                </div>
+
+                <div className="lg:col-span-5 lg:sticky lg:top-5 bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-100 pb-2.5">
+                    <div>
+                      <h2 className="text-sm font-bold text-slate-900">
+                        即時產出的「需求確認摘要」
+                      </h2>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        填寫完成後按「一鍵複製摘要」，貼到 LINE 或 Email 傳回即可
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={handleCopy}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer"
+                      >
+                        {copied ? "已複製 ✓" : "一鍵複製摘要"}
+                      </button>
+                      <button
+                        onClick={() =>
+                          handleDownload("律師訴訟需求確認.md", summaryMarkdown, "text/markdown;charset=utf-8")
+                        }
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold cursor-pointer"
+                      >
+                        .md
+                      </button>
+                      <button
+                        onClick={() =>
+                          handleDownload("lawyer-requirements.json", summaryJson, "application/json;charset=utf-8")
+                        }
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold cursor-pointer"
+                      >
+                        .json
+                      </button>
+                    </div>
+                  </div>
+
+                  <pre className="p-3.5 rounded-lg bg-slate-900 text-slate-100 text-xs leading-relaxed whitespace-pre-wrap max-h-[680px] overflow-y-auto custom-scrollbar">
+                    {summaryMarkdown}
+                  </pre>
                 </div>
               </div>
             )}
