@@ -22,6 +22,7 @@ export function attorneyProblem(s: string): string | null {
   const names = splitAttorneys(s)
   if (names.length > 10) return '訴訟代理人最多 10 位'
   if (names.some((n) => n.length > 100)) return '訴訟代理人每位最多 100 字'
+  if (names.some((n) => n.split('律師').length > 2)) return '多位訴訟代理人請用逗號分隔'
   return null
 }
 

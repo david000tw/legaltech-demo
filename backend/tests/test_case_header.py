@@ -307,6 +307,21 @@ def test_change_filer_of_uploaded_brief(lawyer_client):
 
 
 # ---- 最終審查 I2：每條主張的提出者由系統帶入起草與對應步驟，不靠 AI 在摘要裡寫名字 ----
+BRIEF_A = "被告宋文德主張原告之請求均無理由，應予駁回等語。"  # 對造
+BRIEF_B = "被告宋文琪主張系爭遺產應依應繼分比例分割等語。"  # 立場與我方相同
+
+
+def _upload_text(client, cid, round_id, filed_by, text):
+    r = client.post(f"/api/cases/{cid}/documents", data={"kind": "opponent_brief", "round_id": round_id,
+                                                          "filed_by_party_id": filed_by},
+                    files={"file": ("書狀.txt", text.encode(), "text/plain")})
+    assert r.status_code == 200, r.text
+
+
+def _claim(page_no, quote):
+    return {"page_no": page_no, "summary": "被告主張", "quote": quote}
+
+
 def test_draft_and_select_label_each_claims_filer(lawyer_client):
     from app.pipeline.candidates import select_for_claims
     from app.pipeline.claims import extract_claims
@@ -316,18 +331,38 @@ def test_draft_and_select_label_each_claims_filer(lawyer_client):
     cid = _estate_case(client)
     parties = client.put(f"/api/cases/{cid}/parties", json=PARTIES).json()
     rid = client.post(f"/api/cases/{cid}/rounds").json()["id"]
-    assert _upload(client, cid, rid, parties[1]["id"]).status_code == 200  # 第 1 頁：對造宋文德
-    assert _upload(client, cid, rid, parties[2]["id"]).status_code == 200  # 第 2 頁：立場相同的宋文琪
-    claims = {"claims": [{"page_no": 1, "summary": "被告主張請求無理由", "quote": "被告主張原告請求無理由等語。"},
-                         {"page_no": 2, "summary": "被告主張請求無理由", "quote": "被告主張原告請求無理由等語。"}]}
+    _upload_text(client, cid, rid, parties[1]["id"], BRIEF_A)  # 第 1 頁：對造宋文德
+    _upload_text(client, cid, rid, parties[2]["id"], BRIEF_B)  # 第 2 頁：立場相同的宋文琪
+    # 主張 3：AI 報第 1 頁，但原文其實在第 2 頁（對不上）→ 不能照頁碼標成對造
+    claims = {"claims": [_claim(1, BRIEF_A), _claim(2, BRIEF_B), _claim(1, BRIEF_B)]}
     with tenant_session(firm) as s:
         extract_claims(s, rid, FakeProvider({"claims": claims}), None)
     with tenant_session(firm) as s:
         text = draft_context(s, rid)
-    first, second = text.split("主張2：")
-    assert "提出者：被告 宋文德（對造）" in first.split("主張1：")[1]
-    assert "提出者：被告 宋文琪（立場與我方相同，不得反駁）" in second
+    import re
+    blocks = dict(re.findall(r"^主張(\d+)：(.*?)(?=^主張\d+：|^【|\Z)", text, re.M | re.S))
+    c1, c2, c3 = blocks["1"], blocks["2"], blocks["3"]
+    assert "提出者：被告 宋文德（對造）" in c1
+    assert "提出者：被告 宋文琪（立場與我方相同，不得反駁）" in c2
+    assert "提出者：未確認" in c3 and "提出者：被告" not in c3
     fake = FakeProvider({"select": {"claims": []}})
     with tenant_session(firm) as s:
         select_for_claims(s, rid, fake, None)
     assert "提出者：被告 宋文琪（立場與我方相同，不得反駁）" in fake.calls[0]["user"]
+    assert "提出者：未確認" in fake.calls[0]["user"]
+
+
+def test_single_filer_labels_even_unverified_quotes(lawyer_client):
+    """本輪對造書狀都是同一人遞的：原文對不上也確定是誰說的。"""
+    from app.pipeline.claims import extract_claims
+    from app.pipeline.drafting import draft_context
+    from tests.fakes.fake_provider import FakeProvider
+    client, firm, _ = lawyer_client
+    cid = _estate_case(client)
+    parties = client.put(f"/api/cases/{cid}/parties", json=PARTIES).json()
+    rid = client.post(f"/api/cases/{cid}/rounds").json()["id"]
+    _upload_text(client, cid, rid, parties[2]["id"], BRIEF_B)
+    with tenant_session(firm) as s:
+        extract_claims(s, rid, FakeProvider({"claims": {"claims": [_claim(1, "這段原文不在書狀裡，是AI自己改寫的摘要")]}}), None)
+    with tenant_session(firm) as s:
+        assert "提出者：被告 宋文琪（立場與我方相同，不得反駁）" in draft_context(s, rid)

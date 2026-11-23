@@ -186,7 +186,8 @@ def test_unreadable_case_number_warns():
     assert procedure_warning("spousal_rights", "  ") is None  # 沒填不算
 
 
-@pytest.mark.parametrize("number", ["尚未分案", "待補", "（未定）", "N/A", "—", "?", "113-5", "待補113"])
+@pytest.mark.parametrize("number", ["尚未分案", "待補", "（未定）", "N/A", "—", "?", "113-5", "待補113",
+                                    "113年度○○字第○○號", "113年度　字第　號", "113年度XX字第XX號", "113年度待補字第5號"])
 def test_placeholder_case_number_keeps_case_type_procedure(number):
     """律師常先填暫代文字：不能把遺產案翻成民事（書狀名稱、受文都會錯）。"""
     assert procedure_for("estate_partition", number) == "family"
@@ -276,3 +277,12 @@ def test_other_type_best_match_keeps_a_slot(db):
         same = _long_judgment(s, "遺產判決二", [query], ["estate_partition"])
         got = search_passages(s, query, 8, case_type="estate_partition")
         assert got[0].judgment_id == same.id and nominee.id not in {p.judgment_id for p in got}
+
+
+@pytest.mark.parametrize("number,word", [("113年度台上字第1號", "台上"), ("113年度簡上字第2號", "簡上"),
+                                         ("113年度消債字第3號", "消債"), ("113年度司票字第4號", "司票"),
+                                         ("113消債5", "消債"), ("113司拍5", "司拍")])
+def test_real_civil_case_words_still_read(number, word):
+    """暫代文字擋掉之後，真的民事字別（含簡寫格式）仍要讀得出來。"""
+    assert procedure_for("estate_partition", number) == "civil"
+    assert word in procedure_warning("estate_partition", number)

@@ -13,6 +13,12 @@ describe('attorneys', () => {
     expect(splitAttorneys('王大明 律師， David Wang律師 ')).toEqual(['王大明 律師', 'David Wang律師'])
   })
 
+  it('asks for commas when one entry holds two lawyers', () => {
+    // 空白不再分隔：「王律師 李律師」會變成一位，先在畫面上提醒
+    expect(attorneyProblem('王律師 李律師')).toBe('多位訴訟代理人請用逗號分隔')
+    expect(attorneyProblem('王律師，李律師')).toBeNull()
+  })
+
   it('reports too many or too long names', () => {
     expect(attorneyProblem(Array.from({ length: 10 }, (_, i) => `律師${i}`).join('，'))).toBeNull()
     expect(attorneyProblem(Array.from({ length: 11 }, (_, i) => `律師${i}`).join('，'))).toBe('訴訟代理人最多 10 位')

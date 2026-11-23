@@ -46,13 +46,18 @@ ALIGNED_RULE = "只反駁歸屬為「對造」的當事人；「立場與我方�
 PROCEDURES: dict[str, tuple[str, str]] = {"civil": ("民事準備書狀", "民事庭"), "family": ("家事準備書狀", "家事法庭")}
 PROCEDURE_LABEL = {"civil": "民事", "family": "家事"}
 
-_CASE_WORD = re.compile(r"年度?(\D+?)字第")
+# 「年度」的「度」用佔有量詞：「113年度　字第　號」不能把「度」當成字別
+_CASE_WORD = re.compile(r"年度?+(\D+?)字第")
 # 案號不是完整格式時（「113家訴5」「113年度家訴字5號」）：去掉數字與年度、字、第、號，剩下的就是字別
 _NOT_WORD = re.compile(r"[\d〇零一二三四五六七八九十百千\s年度字第號()（）]")
 _DIGIT = re.compile(r"[\d〇零一二三四五六七八九十百千]")
-# 寬鬆判讀時，剩下的字要像字別：1～6 個漢字，且含常見字別用字。「尚未分案」「待補」「N/A」這類暫代文字不算。
-_LOOSE_WORD = re.compile(r"^[\u4e00-\u9fff]{1,6}$")
-_WORD_CHARS = set("訴簡上抗調繼聲執全家婚親再救小促重移監輔護養財非易")
+# 字別要像字別：1～8 個漢字，且含常見字別用字。「尚未分案」「待補」「○○」「XX」這類暫代文字不算（最終審查 I1）。
+_WORD_SHAPE = re.compile(r"^[\u4e00-\u9fff]{1,8}$")
+_WORD_CHARS = set("訴簡上抗調繼聲執全家婚親再救小促重移監輔護養財非易司債票拍消勞智國交選原金醫建審")
+
+
+def _looks_like_word(word: str) -> bool:
+    return bool(_WORD_SHAPE.match(word)) and bool(_WORD_CHARS & set(word))
 
 
 def case_type_of(code: str | None) -> CaseType:
@@ -64,11 +69,11 @@ def _word(case_number: str | None) -> str | None:
     text = normalize_text(case_number or "")
     m = _CASE_WORD.search(text)
     if m:
-        return m.group(1)
+        return m.group(1) if _looks_like_word(m.group(1)) else None
     if not _DIGIT.search(text):
         return None
     rest = _NOT_WORD.sub("", text)
-    return rest if _LOOSE_WORD.match(rest) and _WORD_CHARS & set(rest) else None
+    return rest if _looks_like_word(rest) else None
 
 
 def procedure_for(case_type: str | None, case_number: str | None) -> str:

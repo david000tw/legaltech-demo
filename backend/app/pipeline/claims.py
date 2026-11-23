@@ -49,18 +49,39 @@ def _filers(s: Session, round_id: UUID) -> dict:
     return out
 
 
+UNCONFIRMED_FILER = "未確認（原文對不上頁面，請律師確認是誰的主張）"
+
+
+def _filer_label(party: CaseParty) -> str:
+    note = "立場與我方相同，不得反駁" if party.alignment == "aligned" else ALIGNMENT_LABEL[party.alignment]
+    return f"{party.role} {party.name}（{note}）"
+
+
 def claim_filers(s: Session, claims: list[Claim]) -> dict[UUID, str]:
-    """每條主張的提出者：主張所在頁 → 對造書狀 → 遞狀人。由系統帶入起草與對應步驟，不靠 AI 在摘要裡寫名字；
-    立場與我方相同者直接標明不得反駁（設計 5.2）。看不出頁或沒選遞狀人的主張不標。"""
+    """每條主張的提出者，由系統帶入對應與起草步驟，不靠 AI 在摘要裡寫名字；立場與我方相同者標明不得反駁（設計 5.2）。
+    - 本輪對造書狀都是同一位遞狀人：每條主張都是他說的。
+    - 否則以主張所在頁 → 書狀 → 遞狀人判定，但只信原文逐字對得上該頁的主張（頁碼是 AI 報的，可能報錯）；
+      對不上的標「未確認」（最終審查 critic）。沒選遞狀人的書狀不標。"""
+    if not claims:
+        return {}
+    rnd = s.get(Round, claims[0].round_id)
+    docs = s.scalars(select(Document).where(Document.round_id == rnd.id, Document.kind == "opponent_brief")).all()
+    parties = {d.id: s.get(CaseParty, d.filed_by_party_id) for d in docs if d.filed_by_party_id}
+    parties = {doc_id: p for doc_id, p in parties.items() if p is not None and p.case_id == rnd.case_id}
+    if not parties:
+        return {}
+    only = {p.id: p for p in parties.values()}
+    if len(only) == 1 and len(parties) == len(docs):
+        label = _filer_label(next(iter(only.values())))
+        return {c.id: label for c in claims}
     out: dict[UUID, str] = {}
     for c in claims:
         page = s.get(Page, c.page_id) if c.page_id else None
-        doc = s.get(Document, page.document_id) if page else None
-        party = s.get(CaseParty, doc.filed_by_party_id) if doc and doc.filed_by_party_id else None
-        if party is None or party.case_id != doc.case_id:
-            continue
-        note = "立場與我方相同，不得反駁" if party.alignment == "aligned" else ALIGNMENT_LABEL[party.alignment]
-        out[c.id] = f"{party.role} {party.name}（{note}）"
+        party = parties.get(page.document_id) if page else None
+        if c.quote_verified and party is not None:
+            out[c.id] = _filer_label(party)
+        elif not (c.quote_verified and page is not None and page.document_id not in parties):
+            out[c.id] = UNCONFIRMED_FILER
     return out
 
 
