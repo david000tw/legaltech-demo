@@ -3,20 +3,26 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api'
+import { OPTIONS } from '../test/caseOptions'
 import CaseDetail from './CaseDetail'
 
 vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
   return { ...real, getCase: vi.fn(), getRound: vi.fn(), createRound: vi.fn(), runRound: vi.fn(), uploadDocument: vi.fn(),
-    renumberExhibit: vi.fn() }
+    renumberExhibit: vi.fn(), getCaseOptions: vi.fn(), patchCase: vi.fn(), putParties: vi.fn() }
 })
+
+const emptyHeader: api.CaseHeader = { court: null, case_number: null, division: null, cause: null, addressee: null,
+  attorneys: [], reference_date: null }
 
 const baseCase: api.CaseDetail = {
   id: 'c1', title: '林大明車禍案', our_side: 'plaintiff', case_type: 'traffic_tort',
+  header: emptyHeader, parties: [], procedure: 'civil', brief_title: '民事準備書狀', addressee_default: '民事庭',
+  procedure_warning: null, reference_date_label: '事故發生日',
   documents: [
-    { id: 'd1', kind: 'evidence', filename: '01_研判表.txt', round_id: null, page_count: 1,
+    { id: 'd1', kind: 'evidence', filename: '01_研判表.txt', round_id: null, filed_by_party_id: null, page_count: 1,
       pages: [{ id: 'p1', page_no: 1, needs_ocr: false }] },
-    { id: 'd2', kind: 'evidence', filename: '02_掃描收據.pdf', round_id: null, page_count: 1,
+    { id: 'd2', kind: 'evidence', filename: '02_掃描收據.pdf', round_id: null, filed_by_party_id: null, page_count: 1,
       pages: [{ id: 'p2', page_no: 1, needs_ocr: true }] },
   ],
   exhibits: [
@@ -34,8 +40,12 @@ function renderAt() {
   )
 }
 
+beforeEach(() => {
+  vi.resetAllMocks()
+  vi.mocked(api.getCaseOptions).mockResolvedValue(OPTIONS)
+})
+
 describe('CaseDetail', () => {
-  beforeEach(() => vi.resetAllMocks())
 
   it('lists exhibits with numbers and marks scanned pages as 待辨識', async () => {
     vi.mocked(api.getCase).mockResolvedValue(baseCase)
@@ -90,5 +100,88 @@ describe('CaseDetail references', () => {
     expect(await screen.findByText('系統對回：民法第184條第1項前段')).toBeInTheDocument()
     expect(screen.getByText('對到判決但無法確定段落：臺灣臺中地方法院113年度中簡字第3946號民事判決')).toBeInTheDocument()
     expect(screen.getByText('不在候選清單：民法第1030條之1')).toBeInTheDocument()
+  })
+})
+
+const PARTIES: api.Party[] = [
+  { id: 'pt1', seq: 1, name: '宋文彬', role: '原告', alignment: 'ours', legal_rep: null, position_note: null },
+  { id: 'pt2', seq: 2, name: '宋文德', role: '被告', alignment: 'opposing', legal_rep: null, position_note: null },
+  { id: 'pt3', seq: 3, name: '宋文琪', role: '被告', alignment: 'aligned', legal_rep: null,
+    position_note: '同意分割，但爭執遺產範圍' },
+]
+const WARNING = '案號字別「家訴」屬家事程序，與「侵害配偶權」預設的民事程序不同，書狀名稱與受文已依案號改為家事'
+
+describe('CaseDetail header and parties', () => {
+  it('shows a procedure warning', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, case_type: 'spousal_rights', procedure: 'family',
+      brief_title: '家事準備書狀', addressee_default: '臺灣臺北地方法院家事法庭', procedure_warning: WARNING,
+      header: { ...emptyHeader, court: '臺灣臺北地方法院', case_number: '113年度家訴字第5號' }, rounds: [] })
+    renderAt()
+    expect(await screen.findByText(WARNING)).toHaveClass('bg-yellow-50')
+    expect(screen.getByText('家事準備書狀')).toBeInTheDocument()
+    expect(screen.getByText('113年度家訴字第5號')).toBeInTheDocument()
+    expect(screen.getByText(/預設：臺灣臺北地方法院家事法庭/)).toBeInTheDocument()  // 受文沒填時顯示系統預設
+  })
+
+  it('has no warning when the procedure matches', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
+    renderAt()
+    expect(await screen.findByText('民事準備書狀')).toBeInTheDocument()
+    expect(screen.queryByText(/案號字別/)).not.toBeInTheDocument()
+  })
+
+  it('lists the parties with their alignment', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: PARTIES, rounds: [] })
+    renderAt()
+    const rows = await screen.findAllByRole('listitem', { name: /當事人/ })
+    expect(rows.map((r) => r.textContent)).toEqual([
+      expect.stringContaining('原告 宋文彬（我方）'),
+      expect.stringContaining('被告 宋文德（對造）'),
+      expect.stringContaining('被告 宋文琪（立場與我方相同）'),
+    ])
+    expect(rows[2]).toHaveTextContent('同意分割，但爭執遺產範圍')
+  })
+
+  it('edits the header and the parties', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: PARTIES.slice(0, 1), rounds: [],
+      header: { ...emptyHeader, attorneys: ['王大明律師'] } })
+    vi.mocked(api.patchCase).mockResolvedValue({ id: 'c1', title: '林大明車禍案', our_side: 'plaintiff',
+      case_type: 'traffic_tort' })
+    vi.mocked(api.putParties).mockResolvedValue([])
+    renderAt()
+    await userEvent.click(await screen.findByRole('button', { name: '修改狀頭' }))
+    expect(screen.getByLabelText('訴訟代理人（以逗號分隔）')).toHaveValue('王大明律師')
+    await userEvent.type(screen.getByLabelText('案號'), '113年度訴字第1號')
+    await userEvent.type(screen.getByLabelText('受文'), '臺灣臺中地方法院民事庭')
+    const before = vi.mocked(api.getCase).mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: '儲存狀頭' }))
+    expect(api.patchCase).toHaveBeenCalledWith('c1', expect.objectContaining({ case_type: 'traffic_tort',
+      case_number: '113年度訴字第1號', addressee: '臺灣臺中地方法院民事庭', court: null, attorneys: ['王大明律師'] }))
+    expect(vi.mocked(api.getCase).mock.calls.length).toBe(before + 1)
+
+    await userEvent.click(screen.getByRole('button', { name: '修改當事人' }))
+    await userEvent.click(screen.getByRole('button', { name: '新增當事人' }))
+    await userEvent.type(screen.getByLabelText('當事人2 姓名'), '林大華')
+    await userEvent.selectOptions(screen.getByLabelText('當事人2 角色'), '被告')
+    await userEvent.click(screen.getByRole('button', { name: '儲存當事人' }))
+    expect(api.putParties).toHaveBeenCalledWith('c1', [
+      { id: 'pt1', name: '宋文彬', role: '原告', alignment: 'ours', legal_rep: null, position_note: null },
+      { name: '林大華', role: '被告', alignment: 'opposing', legal_rep: null, position_note: null },
+    ])
+  })
+
+  it('uploads an opponent brief with its filer', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: PARTIES,
+      rounds: [{ id: 'r1', seq: 1, status: 'created', error: null }] })
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'created', stale: false, draft_id: null,
+      error: null, claims: [] })
+    vi.mocked(api.uploadDocument).mockResolvedValue({ id: 'd9', page_count: 1 })
+    renderAt()
+    const filer = await screen.findByLabelText('遞狀人')
+    expect(filer).toHaveValue('pt2')  // 預設第一位對造
+    await userEvent.selectOptions(filer, 'pt3')
+    const file = new File(['被告主張原告請求無理由等語。'], '答辯狀.txt', { type: 'text/plain' })
+    await userEvent.upload(screen.getByLabelText('上傳對造書狀'), file)
+    expect(api.uploadDocument).toHaveBeenCalledWith('c1', file, 'opponent_brief', 'r1', 'pt3')
   })
 })

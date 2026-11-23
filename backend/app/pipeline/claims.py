@@ -11,7 +11,7 @@ from app.ai.prompts import load_prompt
 from app.ai.provider import AIProvider, record_usage
 from app.ai.schemas import CLAIMS_SCHEMA
 from app.ingest.service import current_page_text
-from app.models import Case, Claim, Document, Page, PageText, Round
+from app.models import Case, CaseParty, Claim, Document, Page, PageText, Round
 from app.text_norm import find_quote, quote_length
 
 MIN_QUOTE = 15
@@ -38,6 +38,17 @@ def opponent_pages(s: Session, round_id: UUID) -> list[OpponentPage]:
     return out
 
 
+def _filers(s: Session, round_id: UUID) -> dict:
+    """每份對造書狀的遞狀人標示（有選遞狀人才標），放在該書狀每頁開頭。"""
+    out = {}
+    for d in s.scalars(select(Document).where(Document.round_id == round_id, Document.kind == "opponent_brief")):
+        if d.filed_by_party_id:
+            party = s.get(CaseParty, d.filed_by_party_id)
+            if party is not None:
+                out[d.id] = f"【遞狀人：{party.name}】\n"
+    return out
+
+
 def format_pages(pages: list[tuple[int, str]]) -> str:
     return "\n\n".join(f"【第{n}頁】\n{text}" for n, text in pages)
 
@@ -46,9 +57,10 @@ def extract_claims(s: Session, round_id: UUID, provider: AIProvider, member_id: 
     rnd = s.get(Round, round_id)
     case = s.get(Case, rnd.case_id)
     pages = [op for op in opponent_pages(s, round_id) if op.text is not None]
+    filers = _filers(s, round_id)
     user = (case_context(s, case) + "\n\n"
             f"我方立場：{SIDE_LABEL[case.our_side]}。以下是對造書狀全文，請拆成主張清單。\n\n"
-            + format_pages([(op.page_no, op.text.text) for op in pages]))
+            + format_pages([(op.page_no, filers.get(op.page.document_id, "") + op.text.text) for op in pages]))
     result = provider.run(step="claims", system=load_prompt("claims"), user=user, schema=CLAIMS_SCHEMA,
                           effort="medium")
     record_usage(s, rnd.firm_id, case.id, member_id, "claims", result)

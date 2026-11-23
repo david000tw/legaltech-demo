@@ -35,6 +35,11 @@ CASE_TYPES: dict[str, CaseType] = {ct.code: ct for ct in (
 DEFAULT_CASE_TYPE = "traffic_tort"
 SIDE_LABEL = {"plaintiff": "原告", "defendant": "被告"}
 
+# 當事人（設計 5.2）：角色從固定清單選；歸屬分我方、對造、立場與我方相同三種
+PARTY_ROLES = ("原告", "被告", "上訴人", "被上訴人", "反訴原告", "反訴被告", "聲請人", "相對人")
+ALIGNMENTS = ("ours", "opposing", "aligned")
+ALIGNMENT_LABEL = {"ours": "我方", "opposing": "對造", "aligned": "立場與我方相同"}
+
 # 程序決定書狀名稱與預設受文：(書狀名稱, 受文的庭別)
 PROCEDURES: dict[str, tuple[str, str]] = {"civil": ("民事準備書狀", "民事庭"), "family": ("家事準備書狀", "家事法庭")}
 PROCEDURE_LABEL = {"civil": "民事", "family": "家事"}

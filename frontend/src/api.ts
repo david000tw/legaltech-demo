@@ -23,12 +23,32 @@ export type Me = { id: string; firm_id: string; email: string; display_name: str
   bar_number: string | null; bar_verified: boolean }
 export type CaseSummary = { id: string; title: string; our_side: 'plaintiff' | 'defendant'; case_type: string }
 export type DocPage = { id: string; page_no: number; needs_ocr: boolean }
+// filed_by_party_id：對造書狀的遞狀人（當事人被刪掉後變 null）
 export type CaseDocument = { id: string; kind: 'evidence' | 'opponent_brief'; filename: string; round_id: string | null;
-  page_count: number; pages: DocPage[] }
+  filed_by_party_id: string | null; page_count: number; pages: DocPage[] }
 export type Exhibit = { id: string; label: string; prefix: string; number: number; document_id: string;
   filename: string | null }
 export type RoundSummary = { id: string; seq: number; status: RoundStatus; error: string | null }
-export type CaseDetail = CaseSummary & { documents: CaseDocument[]; exhibits: Exhibit[]; rounds: RoundSummary[] }
+// 狀頭欄位（設計 5.2）：都可以空著，匯出時留空白讓律師補；reference_date 是 YYYY-MM-DD
+export type CaseHeader = { court: string | null; case_number: string | null; division: string | null; cause: string | null
+  addressee: string | null; attorneys: string[]; reference_date: string | null }
+// 歸屬：我方、對造、立場與我方相同（AI 不得反駁立場相同者）
+export type Alignment = 'ours' | 'opposing' | 'aligned'
+export type Party = { id: string; seq: number; name: string; role: string; alignment: Alignment; legal_rep: string | null
+  position_note: string | null }
+export type PartyInput = { id?: string; name: string; role: string; alignment: Alignment; legal_rep: string | null
+  position_note: string | null }
+export type Procedure = 'civil' | 'family'
+export type CaseTypeOption = { code: string; label: string; procedure: Procedure; reference_date_label: string }
+export type CaseOptions = { case_types: CaseTypeOption[]; party_roles: string[]
+  alignments: { code: Alignment; label: string }[] }
+// procedure 依案號字別判斷（例：家訴＝家事）；與案型預設不同時 procedure_warning 有內容
+export type CaseDetail = CaseSummary & { header: CaseHeader; parties: Party[]; procedure: Procedure; brief_title: string
+  addressee_default: string; procedure_warning: string | null; reference_date_label: string
+  documents: CaseDocument[]; exhibits: Exhibit[]; rounds: RoundSummary[] }
+// 建立／修改案件：狀頭欄位傳 null 代表清空；attorneys 建立時不傳＝預設帶入建立者（律師）
+export type CaseInput = Partial<Omit<CaseHeader, 'attorneys'>> & { title: string; our_side: 'plaintiff' | 'defendant'
+  case_type: string; attorneys?: string[] }
 export type RoundStatus = 'created' | 'running' | 'drafted' | 'failed'
 // AI 想引用、但沒用候選代碼填的項目（設計 5.7）：mapped＝系統對回；ambiguous_passage＝對到判決但段落不確定；unmatched＝不在候選清單
 export type ReferenceView = { text: string; status: 'mapped' | 'ambiguous_passage' | 'unmatched'; code: string | null }
@@ -72,16 +92,21 @@ export const login = (email: string, password: string) => req<{ id: string }>('/
 export const logout = () => req<{ ok: boolean }>('/auth/logout', json('POST'))
 export const me = () => req<Me>('/me')
 export const listCases = () => req<CaseSummary[]>('/cases')
-export const createCase = (title: string, our_side: 'plaintiff' | 'defendant') =>
-  req<CaseSummary>('/cases', json('POST', { title, our_side }))
+export const getCaseOptions = () => req<CaseOptions>('/case-options')
+export const createCase = (body: CaseInput) => req<CaseSummary>('/cases', json('POST', body))
+export const patchCase = (id: string, body: Partial<CaseInput>) => req<CaseSummary>(`/cases/${id}`, json('PATCH', body))
+// 依序整批替換：帶 id 的保留原列，沒列到的刪除（其遞狀人變空白）
+export const putParties = (id: string, parties: PartyInput[]) => req<Party[]>(`/cases/${id}/parties`, json('PUT', parties))
 export const getCase = (id: string) => req<CaseDetail>(`/cases/${id}`)
 export const createRound = (caseId: string) => req<{ id: string; seq: number }>(`/cases/${caseId}/rounds`, json('POST'))
 
-export function uploadDocument(caseId: string, file: File, kind: 'evidence' | 'opponent_brief', roundId?: string) {
+export function uploadDocument(caseId: string, file: File, kind: 'evidence' | 'opponent_brief', roundId?: string,
+  filedByPartyId?: string) {
   const form = new FormData()
   form.append('file', file)
   form.append('kind', kind)
   if (roundId) form.append('round_id', roundId)
+  if (filedByPartyId) form.append('filed_by_party_id', filedByPartyId)
   return req<{ id: string; page_count: number }>(`/cases/${caseId}/documents`, { method: 'POST', body: form })
 }
 

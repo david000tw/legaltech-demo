@@ -20,7 +20,7 @@ from app.auth import hash_password
 from app.corpus.seed_loader import load_seed
 from app.db import admin_session
 from app.ingest.service import ingest_document
-from app.models import Case, Firm, Member, Round
+from app.models import Case, CaseParty, Firm, Member, Round
 
 
 def _firm_by_name(s, name: str) -> Firm:
@@ -56,16 +56,29 @@ def import_testcase(folder: Path, firm_name: str) -> tuple[UUID, UUID]:
     with admin_session() as s:
         firm = _firm_by_name(s, firm_name)
         case = Case(firm_id=firm.id, title=meta["title"], our_side=meta["our_side"],
-                    case_type=meta.get("case_type", "traffic_tort"))  # 計畫 1B：試跑時這欄被忽略
+                    case_type=meta.get("case_type", "traffic_tort"),  # 計畫 1B：試跑時這欄被忽略
+                    court=meta.get("court"), case_number=meta.get("case_number"), division=meta.get("division"),
+                    cause=meta.get("cause"), addressee=meta.get("addressee"), attorneys=meta.get("attorneys", []))
         s.add(case)
         s.flush()
+        parties = []
+        for seq, p in enumerate(meta.get("parties", []), start=1):
+            party = CaseParty(firm_id=firm.id, case_id=case.id, seq=seq, name=p["name"], role=p["role"],
+                              alignment=p["alignment"], legal_rep=p.get("legal_rep"),
+                              position_note=p.get("position_note"))
+            s.add(party)
+            parties.append(party)
+        s.flush()
+        filer = parties[meta["opponent_filed_by"] - 1].id if meta.get("opponent_filed_by") else None
         rnd = Round(firm_id=firm.id, case_id=case.id, seq=1, status="created")
         s.add(rnd)
         s.flush()
         for kind, sub, round_id in (("evidence", "evidence", None), ("opponent_brief", "opponent", rnd.id)):
             for f in sorted((folder / sub).glob("*")):
                 if f.is_file():
-                    ingest_document(s, firm.id, case.id, kind, f.name, f.read_bytes(), round_id)
+                    doc = ingest_document(s, firm.id, case.id, kind, f.name, f.read_bytes(), round_id)
+                    if kind == "opponent_brief":
+                        doc.filed_by_party_id = filer
         return case.id, rnd.id
 
 

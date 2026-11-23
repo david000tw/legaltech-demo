@@ -16,7 +16,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.case_types import CASE_TYPES
+from app.case_types import ALIGNMENTS, CASE_TYPES, PARTY_ROLES
 
 
 class Base(DeclarativeBase):
@@ -102,8 +102,36 @@ class Case(Base):
     title: Mapped[str] = mapped_column(String(300))
     our_side: Mapped[str] = mapped_column(String(20))
     case_type: Mapped[str] = mapped_column(String(50), default="traffic_tort")
+    # 狀頭欄位（設計 5.2）：都可以先空著，匯出時留空白讓律師補
+    court: Mapped[str | None] = mapped_column(String(100))
+    case_number: Mapped[str | None] = mapped_column(String(100))
+    division: Mapped[str | None] = mapped_column(String(50))
+    cause: Mapped[str | None] = mapped_column(String(200))
+    addressee: Mapped[str | None] = mapped_column(String(200))  # 受文，空白時依法院與程序產生預設值
+    attorneys: Mapped[list] = _tags()  # 訴訟代理人名單（字串陣列），匯出狀頭用這份，不用匯出者
+    reference_date: Mapped[date | None] = mapped_column(Date)  # 基準日，名稱依案型
     created_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
     created_at: Mapped[datetime] = _created()
+
+
+class CaseParty(Base):
+    """案件當事人：狀頭與給 AI 的補充資訊。不存地址與身分證字號。"""
+    __tablename__ = "case_parties"
+    __table_args__ = (
+        _enum("role", PARTY_ROLES, "ck_party_role"),
+        _enum("alignment", ALIGNMENTS, "ck_party_alignment"),
+        _tenant_key("case_parties"),
+        _tfk("case_id", "cases", "CASCADE"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    firm_id: Mapped[uuid.UUID] = _firm()
+    case_id: Mapped[uuid.UUID] = _ref()
+    seq: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(200))
+    role: Mapped[str] = mapped_column(String(20))
+    alignment: Mapped[str] = mapped_column(String(20))
+    legal_rep: Mapped[str | None] = mapped_column(String(200))  # 法定代理人
+    position_note: Mapped[str | None] = mapped_column(Text)  # 立場說明，例如「同意分割，但爭執遺產範圍」
 
 
 class Round(Base):
@@ -131,11 +159,14 @@ class Document(Base):
         _tenant_key("documents"),
         _tfk("case_id", "cases", "CASCADE"),
         _tfk("round_id", "rounds"),
+        # 當事人被刪掉時只把遞狀人清成空白，firm_id 保留（PostgreSQL 15 起支援指定欄位的 SET NULL）
+        _tfk("filed_by_party_id", "case_parties", "SET NULL (filed_by_party_id)"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
     case_id: Mapped[uuid.UUID] = _ref()
     round_id: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    filed_by_party_id: Mapped[uuid.UUID | None] = _ref(nullable=True)  # 對造書狀的遞狀人
     kind: Mapped[str] = mapped_column(String(20))
     filename: Mapped[str] = mapped_column(String(500))
     storage_key: Mapped[str] = mapped_column(String(300))

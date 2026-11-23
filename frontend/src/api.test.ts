@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ExportBlockedError, exportDraft, patchParagraph, reviewParagraph } from './api'
+import { ExportBlockedError, exportDraft, patchParagraph, reviewParagraph, uploadDocument } from './api'
 
 function respond(status: number, body: unknown) {
   const f = vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }))
@@ -38,5 +38,14 @@ describe('api', () => {
     const [, init] = f.mock.calls[0] as unknown as [string, RequestInit]
     expect(init.method).toBe('PATCH')
     expect(JSON.parse(init.body as string)).toEqual({ text: '內文', citations: [], heading: '㈠標題' })
+  })
+
+  it('sends the filer with an opponent brief upload', async () => {
+    const f = respond(200, { id: 'd1', page_count: 1 })
+    await uploadDocument('c1', new File(['x'], 'a.txt'), 'opponent_brief', 'r1', 'pt2')
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('/api/cases/c1/documents')
+    const form = init.body as FormData
+    expect([form.get('kind'), form.get('round_id'), form.get('filed_by_party_id')]).toEqual(['opponent_brief', 'r1', 'pt2'])
   })
 })
