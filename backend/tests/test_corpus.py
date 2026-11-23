@@ -53,7 +53,7 @@ def test_seed_statutes_match_raw_snapshot():
 
 def test_seed_judgments_match_raw_pdf():
     files = sorted((SEED / "judgments").glob("*.json"))
-    assert len(files) == 18  # 計畫 1B：外遇 5、分割遺產 4、借名 4、車禍 5
+    assert len(files) == 19  # 計畫 1B：外遇 6（多數 4、少數 2）、分割遺產 4、借名 4、車禍 5
     for f in files:
         data = json.loads(f.read_text(encoding="utf-8"))
         assert data["full_text"] == pdf_text(SEED / "raw" / data["raw_file"])
@@ -107,9 +107,9 @@ def test_load_seed_idempotent(db):
         first = load_seed(s, SEED)
     with admin_session() as s:
         second = load_seed(s, SEED)
-        assert s.scalar(select(func.count()).select_from(Judgment)) == 18  # 計畫 1B：15 → 18
+        assert s.scalar(select(func.count()).select_from(Judgment)) == 19  # 計畫 1B：15 → 19
         assert s.scalar(select(func.count()).select_from(StatuteArticle)) == 150  # 計畫 1B：42 → 150
-    assert first == (18, 150)
+    assert first == (19, 150)
     assert second == (0, 0)
 
 
@@ -343,6 +343,9 @@ def test_seed_coverage_per_case_type():
     assert count["spousal_rights"] >= 5 and count["estate_partition"] >= 4 and count["nominee_registration"] >= 4
     minority = [s for s, d in seeds.items() if "spousal_rights" in d["case_types"] and d.get("annotation")]
     assert minority and all(seeds[s]["annotation"].startswith("少數見解") for s in minority)
+    # 設計 T3：外遇案至少 4 件多數見解（沒有少數見解註記）的判決
+    majority = [s for s, d in seeds.items() if "spousal_rights" in d["case_types"] and not d.get("annotation")]
+    assert len(majority) >= 4, majority
     assert all(seeds[s]["case_types"] == ["traffic_tort"] for s in PLAN1_TRAFFIC)
 
 
