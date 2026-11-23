@@ -1,6 +1,8 @@
+from urllib.parse import quote as urlquote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -8,6 +10,7 @@ from app.auth import CurrentMember, current_member, require_lawyer
 from app.corpus.search import article_display
 from app.db import tenant_session
 from app.exhibit_labels import evidence_label
+from app.export.docx_export import ExportBlocked, export_draft
 from app.models import (
     Citation, Document, Draft, Exhibit, Judgment, JudgmentPassage, Page, PageText, Paragraph, Round,
     StatuteArticle,
@@ -133,3 +136,21 @@ def patch_exhibit(exhibit_id: UUID, body: ExhibitBody, m: CurrentMember = Depend
         except ReviewRuleError as e:
             raise HTTPException(409, str(e))
         return {"id": str(ex.id), "label": f"{ex.prefix}{ex.number}", "number": ex.number}
+
+
+DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+@router.get("/drafts/{draft_id}/export")
+def export(draft_id: UUID, m: CurrentMember = Depends(current_member)):
+    with tenant_session(m.firm_id) as s:
+        _get_or_404(s, Draft, draft_id, "草稿")
+        require_lawyer(m)
+        try:
+            data = export_draft(s, draft_id, m)
+        except ExportBlocked as e:
+            return JSONResponse(status_code=409, content={
+                "blockers": [{"paragraph_seq": b.paragraph_seq, "reason": b.reason} for b in e.blockers]})
+    name = urlquote("民事準備書狀.docx")
+    return Response(content=data, media_type=DOCX_TYPE,
+                    headers={"Content-Disposition": f"attachment; filename=draft.docx; filename*=UTF-8''{name}"})
