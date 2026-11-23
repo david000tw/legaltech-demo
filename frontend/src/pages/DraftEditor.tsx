@@ -147,7 +147,7 @@ export default function DraftEditor() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = '民事準備書狀.docx'
+      a.download = `${draft?.brief_title ?? '書狀'}.docx`  // 書狀名稱依程序（民事／家事）
       a.click()
       setTimeout(() => URL.revokeObjectURL(url), 60_000)  // 立刻釋放可能讓部分瀏覽器中斷下載
     } catch (e) {
@@ -175,10 +175,15 @@ export default function DraftEditor() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <Link to={`/cases/${draft.case_id}`} className="text-sm text-indigo-700 underline">← 回到案件</Link>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">民事準備書狀（草稿）</h1>
+          <h1 className="mt-1 text-2xl font-bold text-slate-900">{draft.brief_title}（草稿）</h1>
           <p className="text-xs text-amber-700">AI 產出的初稿，須由律師逐段審核；判決引用須逐筆讀原文確認。</p>
         </div>
-        <ExportButton blockers={draft.blockers} onExport={doExport} />
+        <div data-testid="export-area" className="max-w-md space-y-2">
+          {draft.procedure_warning && (
+            <p className="rounded bg-yellow-50 p-2 text-sm text-yellow-800">{draft.procedure_warning}</p>
+          )}
+          <ExportButton blockers={draft.blockers} onExport={doExport} />
+        </div>
       </div>
       {error && <p className="text-sm text-red-700">{error}</p>}
       <div className="grid gap-4 lg:grid-cols-2">

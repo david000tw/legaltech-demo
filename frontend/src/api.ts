@@ -64,8 +64,9 @@ export type ParagraphView = { id: string; seq: number; heading: string; display_
   text: string; rendered_text: string;
   version: string; status: 'unreviewed' | 'reviewed'; verify_reasons: string[]; reviewed_bar_number: string | null;
   reviewed_at: string | null; citations: CitationView[] }
-export type DraftView = { id: string; round_id: string; case_id: string; can_review: boolean;
-  paragraphs: ParagraphView[]; blockers: Blocker[] }
+// brief_title：依程序的書狀名稱（民事／家事準備書狀）；procedure_warning：案號與案型程序不一致時的提醒（不阻擋匯出）
+export type DraftView = { id: string; round_id: string; case_id: string; can_review: boolean; brief_title: string
+  procedure_warning: string | null; paragraphs: ParagraphView[]; blockers: Blocker[] }
 export type CitationSource = { kind: string; title: string; text: string; span: [number, number] | null
   annotation?: string | null }
 export type CitationInput = { code: string; quote: string }

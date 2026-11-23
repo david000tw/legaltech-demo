@@ -13,7 +13,7 @@ vi.mock('../api', async (orig) => {
 })
 
 const draft: api.DraftView = {
-  id: 'dr1', round_id: 'r1', case_id: 'c1', can_review: true,
+  id: 'dr1', round_id: 'r1', case_id: 'c1', can_review: true, brief_title: '民事準備書狀', procedure_warning: null,
   blockers: [{ paragraph_seq: 1, reason: 'unreviewed' }, { paragraph_seq: 1, reason: 'judgment_unconfirmed:J1' }],
   paragraphs: [{
     id: 'p1', seq: 1, heading: '㈠關於路權', display_heading: '㈡關於路權', heading_text: '關於路權',
@@ -214,5 +214,36 @@ describe('DraftEditor numbering', () => {
     const label = reasonLabel('numbered_cross_reference:如前(二)所述')
     expect(label).toContain('如前(二)所述')
     expect(label).not.toContain('其他問題')
+  })
+})
+
+describe('DraftEditor procedure', () => {
+  const WARNING = '案號字別「家訴」屬家事程序，與「侵害配偶權」預設的民事程序不同'
+  beforeEach(() => vi.resetAllMocks())
+
+  it('shows the procedure warning next to export', async () => {
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft, blockers: [], brief_title: '家事準備書狀',
+      procedure_warning: WARNING })
+    vi.mocked(api.exportDraft).mockResolvedValue(new Blob(['x']))
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    renderEditor()
+    expect(await screen.findByRole('heading', { name: '家事準備書狀（草稿）' })).toBeInTheDocument()
+    const warning = screen.getByText(WARNING)
+    expect(warning).toHaveClass('bg-yellow-50')
+    const area = screen.getByTestId('export-area')
+    expect(within(area).getByText(WARNING)).toBe(warning)
+    const button = within(area).getByRole('button', { name: '匯出 Word' })
+    expect(button).toBeEnabled()  // 提醒但不阻擋
+    await userEvent.click(button)
+    await waitFor(() => expect(click).toHaveBeenCalled())
+    expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe('家事準備書狀.docx')
+  })
+
+  it('has no warning for a matching procedure', async () => {
+    vi.mocked(api.getDraft).mockResolvedValue(draft)
+    renderEditor()
+    expect(await screen.findByRole('heading', { name: '民事準備書狀（草稿）' })).toBeInTheDocument()
+    expect(screen.queryByText(/案號字別/)).not.toBeInTheDocument()
   })
 })

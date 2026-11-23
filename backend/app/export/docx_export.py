@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+from datetime import date, datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import docx
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
@@ -13,13 +15,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import CurrentMember
-from app.models import Citation, Document, Exhibit, ExportRecord, Page, PageText, Paragraph
+from app.case_types import SIDE_LABEL, brief_title, default_addressee, procedure_for
+from app.models import Case, CaseParty, Citation, Document, Draft, Exhibit, ExportRecord, Page, PageText, Paragraph, Round
 from app.numbering import display_heading
 from app.render import render_text
 from app.verify.citations import INVALID_XML_CHARS, Blocker, export_blockers, is_removed
 
 FONT = "標楷體"
-TITLE = "民事準備書狀"
+TAIPEI = ZoneInfo("Asia/Taipei")
 
 
 class ExportBlocked(Exception):
@@ -41,6 +44,50 @@ def _setup(d: docx.Document) -> None:
     pf.space_before = pf.space_after = Pt(0)  # 預設範本有段後距，會讓行距不是固定 24pt
 
 
+def roc_date(d: date) -> str:
+    """民國紀年：date(2026, 11, 23) → 中華民國115年11月23日。"""
+    return f"中華民國{d.year - 1911}年{d.month}月{d.day}日"
+
+
+def _clean(v: str | None) -> str:
+    """狀頭欄位來自律師輸入：先去掉 Word 存不了的控制字元。"""
+    return INVALID_XML_CHARS.sub("", v or "").strip()
+
+
+def _case_of(s: Session, draft_id: UUID) -> Case:
+    return s.get(Case, s.get(Round, s.get(Draft, draft_id).round_id).case_id)
+
+
+def _procedure(case: Case) -> str:
+    return procedure_for(case.case_type, _clean(case.case_number))
+
+
+def export_brief_title(s: Session, draft_id: UUID) -> str:
+    """書狀名稱依程序（設計 5.1）：案號字別優先，否則用案型預設。下載檔名也用它。"""
+    return brief_title(_procedure(_case_of(s, draft_id)))
+
+
+def _attorneys(case: Case) -> list[str]:
+    return [a for a in (_clean(x) for x in case.attorneys or []) if a]
+
+
+def _party_lines(case: Case, parties: list[CaseParty]) -> list[str]:
+    """依順序「角色　姓名」；有法定代理人下一行列出；我方（連續的一組）之後列訴訟代理人。"""
+    counsel = [f"訴訟代理人　{a}" for a in _attorneys(case)]
+    if not parties:  # 計畫 1 的案件沒有當事人：留我方與對造的位置給律師填
+        other = "defendant" if case.our_side == "plaintiff" else "plaintiff"
+        return [f"{SIDE_LABEL[case.our_side]}　", *counsel, f"{SIDE_LABEL[other]}　"]
+    out: list[str] = []
+    for i, p in enumerate(parties):
+        out.append(f"{p.role}　{_clean(p.name)}")
+        if _clean(p.legal_rep):
+            out.append(f"法定代理人　{_clean(p.legal_rep)}")
+        last_of_ours = p.alignment == "ours" and (i + 1 == len(parties) or parties[i + 1].alignment != "ours")
+        if last_of_ours:
+            out.extend(counsel)
+    return out
+
+
 def _cited_exhibits(s: Session, paragraph_ids: list[UUID]) -> list[tuple[Exhibit, str]]:
     rows = s.execute(
         select(Exhibit, Document.filename).join(Document, Document.id == Exhibit.document_id)
@@ -51,7 +98,8 @@ def _cited_exhibits(s: Session, paragraph_ids: list[UUID]) -> list[tuple[Exhibit
     return sorted(((ex, name) for ex, name in rows), key=lambda r: (r[0].prefix, r[0].number))
 
 
-def export_draft(s: Session, draft_id: UUID, member: CurrentMember) -> bytes:
+def export_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date | None = None) -> bytes:
+    """狀頭內容與順序照設計 5.6；today 預設為台灣時區的今天（測試可指定）。"""
     # 先鎖住整份草稿的段落（依 id 排序避免互鎖），檢查到產生檔案之間別人不能改段落或確認引用
     s.scalars(select(Paragraph.id).where(Paragraph.draft_id == draft_id).order_by(Paragraph.id)
               .with_for_update(read=True)).all()
@@ -61,21 +109,36 @@ def export_draft(s: Session, draft_id: UUID, member: CurrentMember) -> bytes:
     paragraphs = [p for p in s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id).order_by(Paragraph.seq))
                   if not is_removed(p)]
 
+    case = _case_of(s, draft_id)
+    parties = list(s.scalars(select(CaseParty).where(CaseParty.case_id == case.id).order_by(CaseParty.seq)))
+    procedure = _procedure(case)
+
     d = docx.Document()
     _setup(d)
     title = d.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run(TITLE)
+    run = title.add_run(brief_title(procedure))
     run.bold, run.font.size = True, Pt(18)
+    d.add_paragraph(f"案號：{_clean(case.case_number)}　股別：{_clean(case.division)}")
+    for line in _party_lines(case, parties):
+        d.add_paragraph(line)
+    d.add_paragraph(f"為{_clean(case.cause) or '　　'}事件，依法提出準備書狀事：")
     for n, p in enumerate(paragraphs, start=1):
         d.add_paragraph(display_heading(n, p.heading))  # 編號依未刪除段落的順序重排，與畫面一致
         for line in render_text(s, p).split("\n"):
             d.add_paragraph(line)
+    d.add_paragraph("謹狀")
+    addressee = _clean(case.addressee) or _clean(default_addressee(case.court, procedure))
+    d.add_paragraph(f"{addressee}　公鑒")
     exhibits = _cited_exhibits(s, [p.id for p in paragraphs])
     if exhibits:
-        d.add_paragraph("證物清單")
+        d.add_paragraph("證物名稱及件數")
         for ex, filename in exhibits:
             d.add_paragraph(f"{ex.prefix}{ex.number}　{INVALID_XML_CHARS.sub('', filename or '')}")
+    d.add_paragraph(roc_date(today or datetime.now(TAIPEI).date()))
+    d.add_paragraph("具狀人：" + "、".join(_clean(p.name) for p in parties if p.alignment == "ours"))
+    counsel = _attorneys(case)
+    d.add_paragraph("撰狀人：" + (f"訴訟代理人{'、'.join(counsel)}" if counsel else ""))
 
     buf = io.BytesIO()
     d.save(buf)

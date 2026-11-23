@@ -82,7 +82,7 @@ def test_export_has_no_markers_and_renders_exhibit(db):
     text = all_text(d)
     assert "{{" not in text and "原證1第1頁" in text and "㈠關於路權" in text
     assert "臺灣臺中地方法院113年度中簡字第3946號民事判決" in text and f"「{J_REASONING}」" in text
-    assert "證物清單" in text and "原證1" in text.split("證物清單")[1] and "01_研判表.txt" in text
+    assert "證物名稱及件數" in text and "原證1" in text.split("證物名稱及件數")[1] and "01_研判表.txt" in text
 
 
 def test_export_uses_renumbered_exhibit(db):
@@ -175,3 +175,112 @@ def test_export_keeps_paragraphs_locked_until_done(db, monkeypatch):
     t.join()
     assert r.status_code == 200, r.text
     assert "被告應負全部責任" not in all_text(docx.Document(io.BytesIO(r.content)))
+
+
+
+# ---- 計畫 1B Task 9：依程序產生書狀名稱、受文與完整狀頭（設計 5.6） ----
+from datetime import date  # noqa: E402
+from urllib.parse import quote  # noqa: E402
+
+from app.auth import CurrentMember  # noqa: E402
+from app.export.docx_export import export_draft, roc_date  # noqa: E402
+from app.models import Case, CaseParty, Member  # noqa: E402
+
+DAY = date(2026, 11, 23)
+ESTATE_PARTIES = [("宋文彬", "原告", "ours", None), ("宋文德", "被告", "opposing", "宋大德"),
+                  ("宋文琪", "被告", "aligned", None)]
+
+
+def test_roc_date():
+    assert roc_date(date(2026, 11, 23)) == "中華民國115年11月23日"
+    assert roc_date(date(2012, 1, 5)) == "中華民國101年1月5日"
+
+
+def _set_case(ctx, parties=(), **fields):
+    with tenant_session(ctx["firm"]) as s:
+        case = s.get(Case, ctx["case_id"])
+        for key, value in fields.items():
+            setattr(case, key, value)
+        for seq, (name, role, alignment, rep) in enumerate(parties, start=1):
+            s.add(CaseParty(firm_id=ctx["firm"], case_id=ctx["case_id"], seq=seq, name=name, role=role,
+                            alignment=alignment, legal_rep=rep))
+
+
+def _export(ctx, db, heading="關於遺產範圍"):
+    """一段已審（強制）的草稿，用固定日期匯出；回傳 (每段文字, 律師 client)。"""
+    make_paragraph(ctx, TEXT, [("J1", J_REASONING), ("E1", E_QUOTE)], heading=heading)
+    cs = clients(ctx, db)
+    force_reviewed(ctx["firm"], ctx["draft_id"])
+    with tenant_session(ctx["firm"]) as s:
+        mid = s.scalars(select(Member.id).where(Member.email == "lawyer@a.test")).one()
+        member = CurrentMember(id=mid, firm_id=ctx["firm"], role="lawyer", bar_number=BAR, bar_verified=True)
+        data = export_draft(s, ctx["draft_id"], member, today=DAY)
+    return [p.text for p in docx.Document(io.BytesIO(data)).paragraphs], cs["lawyer"]
+
+
+def _in_order(lines, expected):
+    idx = [lines.index(x) for x in expected]  # 每一項都要是完整的一段
+    assert idx == sorted(idx), list(zip(expected, idx))
+
+
+def test_family_case_header(db):
+    ctx = setup_verify_round()
+    _set_case(ctx, ESTATE_PARTIES, case_type="estate_partition", court="臺灣臺北地方法院",
+              case_number="113年度家繼訴字第89號", division="忠", cause="分割遺產", attorneys=["王大明律師"])
+    lines, _ = _export(ctx, db)
+    text = "\n".join(lines)
+    assert lines[0] == "家事準備書狀"
+    assert "案號：113年度家繼訴字第89號" in text and "股別：忠" in text
+    _in_order(lines, ["原告　宋文彬", "訴訟代理人　王大明律師", "被告　宋文德", "法定代理人　宋大德", "被告　宋文琪",
+                      "為分割遺產事件，依法提出準備書狀事：", "㈠關於遺產範圍", "謹狀", "臺灣臺北地方法院家事法庭　公鑒",
+                      "證物名稱及件數", "原證1　01_研判表.txt", "中華民國115年11月23日", "具狀人：宋文彬",
+                      "撰狀人：訴訟代理人王大明律師"])
+    assert "證物清單" not in text and "民事準備書狀" not in text and "民事庭" not in text
+
+
+def test_case_number_overrides_type_procedure(db):
+    ctx = setup_verify_round()
+    _set_case(ctx, case_type="spousal_rights", court="臺灣臺北地方法院", case_number="113年度家訴字第5號")
+    lines, lawyer = _export(ctx, db, heading="關於配偶權")
+    assert lines[0] == "家事準備書狀" and "臺灣臺北地方法院家事法庭　公鑒" in lines
+    r = lawyer.post(f"/api/drafts/{ctx['draft_id']}/export")
+    assert r.status_code == 200 and quote("家事準備書狀.docx") in r.headers["content-disposition"]
+    body = lawyer.get(f"/api/drafts/{ctx['draft_id']}").json()
+    assert body["brief_title"] == "家事準備書狀" and "家訴" in body["procedure_warning"]
+
+
+def test_addressee_override(db):
+    ctx = setup_verify_round()
+    _set_case(ctx, court="臺灣臺中地方法院", addressee="臺灣臺中地方法院臺中簡易庭")
+    lines, _ = _export(ctx, db)
+    assert "臺灣臺中地方法院臺中簡易庭　公鑒" in lines and "臺灣臺中地方法院民事庭　公鑒" not in lines
+
+
+def test_empty_header_and_parties_export(db):
+    ctx = setup_verify_round()
+    _set_case(ctx, case_type="estate_partition")
+    lines, lawyer = _export(ctx, db)
+    assert lines[0] == "家事準備書狀"
+    assert any(x.startswith("案號：") for x in lines) and any(x.startswith("具狀人：") for x in lines)
+    assert "家事法庭　公鑒" in lines  # 沒填法院：受文只剩庭別，律師自己補
+    assert lawyer.get(f"/api/drafts/{ctx['draft_id']}").json()["procedure_warning"] is None
+
+
+def test_control_chars_in_header_dropped(db):
+    ctx = setup_verify_round()
+    _set_case(ctx, [("宋文\x0b彬", "原告", "ours", None)], case_type="estate_partition",
+              case_number="113年度家繼訴字第\x0b89號", cause="分割\x0c遺產", attorneys=["王大明\x0b律師"])
+    lines, _ = _export(ctx, db)
+    text = "\n".join(lines)
+    assert "原告　宋文彬" in lines and "案號：113年度家繼訴字第89號" in text and "為分割遺產事件，依法提出準備書狀事：" in lines
+    assert "撰狀人：訴訟代理人王大明律師" in lines
+
+
+def test_legacy_traffic_draft_still_exports(db):
+    """計畫 1 的案件：沒有狀頭、沒有當事人 → 仍可匯出，民事準備書狀，我方位置留空白給律師填。"""
+    ctx = setup_verify_round()
+    lines, lawyer = _export(ctx, db, heading="㈠關於路權")
+    assert lines[0] == "民事準備書狀" and "原告　" in lines and "被告　" in lines and "民事庭　公鑒" in lines
+    _in_order(lines, ["原告　", "被告　", "㈠關於路權", "謹狀"])
+    body = lawyer.get(f"/api/drafts/{ctx['draft_id']}").json()
+    assert body["brief_title"] == "民事準備書狀" and body["procedure_warning"] is None

@@ -7,12 +7,13 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.auth import CurrentMember, current_member, require_lawyer
+from app.case_types import procedure_warning
 from app.corpus.search import article_display
 from app.db import tenant_session
 from app.exhibit_labels import evidence_label
-from app.export.docx_export import ExportBlocked, export_draft
+from app.export.docx_export import ExportBlocked, export_brief_title, export_draft
 from app.models import (
-    Citation, Document, Draft, Exhibit, Judgment, JudgmentPassage, Page, PageText, Paragraph, Round,
+    Case, Citation, Document, Draft, Exhibit, Judgment, JudgmentPassage, Page, PageText, Paragraph, Round,
     StatuteArticle,
 )
 from app.numbering import display_heading, strip_heading_number
@@ -75,8 +76,12 @@ def get_draft(draft_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
         blockers = export_blockers(s, draft_id)  # 會重新驗證每一段
         paragraphs = s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id).order_by(Paragraph.seq))
         rnd = s.get(Round, draft.round_id)
+        case = s.get(Case, rnd.case_id)
         return {"id": str(draft.id), "round_id": str(rnd.id), "case_id": str(rnd.case_id),
                 "can_review": m.role == "lawyer" and m.bar_verified,
+                # 書狀名稱依程序；程序警示在匯出前再提示一次，但不阻擋（設計 5.6）
+                "brief_title": export_brief_title(s, draft_id),
+                "procedure_warning": procedure_warning(case.case_type, case.case_number),
                 "paragraphs": [paragraph_json(s, p, n) for n, p in
                                enumerate((p for p in paragraphs if not is_removed(p)), start=1)],
                 "blockers": [{"paragraph_seq": b.paragraph_seq, "paragraph_no": b.paragraph_no, "reason": b.reason}
@@ -192,10 +197,11 @@ def export(draft_id: UUID, m: CurrentMember = Depends(current_member)):
         require_lawyer(m)
         try:
             data = export_draft(s, draft_id, m)
+            title = export_brief_title(s, draft_id)
         except ExportBlocked as e:
             return JSONResponse(status_code=409, content={
                 "blockers": [{"paragraph_seq": b.paragraph_seq, "paragraph_no": b.paragraph_no, "reason": b.reason}
                              for b in e.blockers]})
-    name = urlquote("民事準備書狀.docx")
+    name = urlquote(f"{title}.docx")
     return Response(content=data, media_type=DOCX_TYPE,
                     headers={"Content-Disposition": f"attachment; filename=draft.docx; filename*=UTF-8''{name}"})
