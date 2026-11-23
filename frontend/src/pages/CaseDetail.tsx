@@ -101,6 +101,49 @@ function RoundPanel({ caseId, round, onChanged }: { caseId: string; round: api.R
   )
 }
 
+function ExhibitRow({ exhibit, scanned, onSaved, onError }: {
+  exhibit: api.Exhibit
+  scanned: boolean
+  onSaved: () => Promise<void>
+  onError: (m: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [num, setNum] = useState(String(exhibit.number))
+
+  async function save() {
+    try {
+      await api.renumberExhibit(exhibit.id, Number(num))
+      setEditing(false)
+      await onSaved()
+    } catch (e) {
+      onError((e as Error).message)
+    }
+  }
+
+  return (
+    <li className="flex items-center gap-3 px-4 py-2 text-sm">
+      <span className="font-medium text-slate-900">{exhibit.label}</span>
+      <span className="text-slate-600">{exhibit.filename}</span>
+      {scanned && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">待辨識</span>}
+      <span className="ml-auto flex items-center gap-2">
+        {editing ? (
+          <>
+            <input type="number" min={1} value={num} onChange={(e) => setNum(e.target.value)}
+              aria-label={`${exhibit.label} 新號碼`} className="w-16 rounded border border-slate-300 px-1 py-0.5" />
+            <button type="button" onClick={save} disabled={!(Number(num) >= 1)}
+              className="rounded bg-indigo-600 px-2 py-0.5 text-xs text-white disabled:opacity-50">儲存號碼</button>
+            <button type="button" onClick={() => { setEditing(false); setNum(String(exhibit.number)) }}
+              className="rounded border px-2 py-0.5 text-xs">取消</button>
+          </>
+        ) : (
+          <button type="button" onClick={() => setEditing(true)} aria-label={`改號 ${exhibit.label}`}
+            className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-700">改號</button>
+        )}
+      </span>
+    </li>
+  )
+}
+
 export default function CaseDetail() {
   const { caseId = '' } = useParams()
   const [data, setData] = useState<api.CaseDetail | null>(null)
@@ -153,16 +196,10 @@ export default function CaseDetail() {
       <section>
         <h2 className="text-lg font-semibold text-slate-800">卷證</h2>
         <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-          {data.exhibits.map((e) => {
-            const scanned = docs.get(e.document_id)?.pages.some((p) => p.needs_ocr)
-            return (
-              <li key={e.id} className="flex items-center gap-3 px-4 py-2 text-sm">
-                <span className="font-medium text-slate-900">{e.label}</span>
-                <span className="text-slate-600">{e.filename}</span>
-                {scanned && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">待辨識</span>}
-              </li>
-            )
-          })}
+          {data.exhibits.map((e) => (
+            <ExhibitRow key={`${e.id}-${e.number}`} exhibit={e} onSaved={load} onError={setError}
+              scanned={!!docs.get(e.document_id)?.pages.some((p) => p.needs_ocr)} />
+          ))}
           {data.exhibits.length === 0 && <li className="px-4 py-2 text-sm text-slate-500">尚未上傳卷證</li>}
         </ul>
         <label className="mt-2 block text-sm text-slate-700">

@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api'
@@ -6,7 +7,8 @@ import CaseDetail from './CaseDetail'
 
 vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
-  return { ...real, getCase: vi.fn(), getRound: vi.fn(), createRound: vi.fn(), runRound: vi.fn(), uploadDocument: vi.fn() }
+  return { ...real, getCase: vi.fn(), getRound: vi.fn(), createRound: vi.fn(), runRound: vi.fn(), uploadDocument: vi.fn(),
+    renumberExhibit: vi.fn() }
 })
 
 const baseCase: api.CaseDetail = {
@@ -43,6 +45,20 @@ describe('CaseDetail', () => {
     expect(await screen.findByText('原證1')).toBeInTheDocument()
     expect(screen.getByText('原證2')).toBeInTheDocument()
     expect(screen.getByText('待辨識')).toBeInTheDocument()
+  })
+
+  it('renumbers an exhibit and reloads the case', async () => {
+    vi.mocked(api.getCase).mockResolvedValue(baseCase)
+    vi.mocked(api.renumberExhibit).mockResolvedValue({ id: 'e1', label: '原證7', number: 7 })
+    renderAt()
+    await userEvent.click(await screen.findByRole('button', { name: '改號 原證1' }))
+    const box = screen.getByRole('spinbutton', { name: '原證1 新號碼' })
+    await userEvent.clear(box)
+    await userEvent.type(box, '7')
+    const before = vi.mocked(api.getCase).mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: '儲存號碼' }))
+    expect(api.renumberExhibit).toHaveBeenCalledWith('e1', 7)
+    expect(vi.mocked(api.getCase).mock.calls.length).toBe(before + 1)
   })
 
   it('shows the error of a failed round', async () => {
