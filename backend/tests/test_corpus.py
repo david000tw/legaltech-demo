@@ -147,3 +147,16 @@ def test_search_pages_skips_scanned_and_other_cases(db):
         ingest_document(s, firm, c1.id, "opponent_brief", "答辯.txt", "右腕骨折休養六週過長".encode())
         hits = search_pages(s, c1.id, "右腕 骨折 休養", k=5)
         assert len(hits) == 1 and "診斷證明書" in hits[0].text
+
+
+def test_page_footers_removed_in_all_seed_judgments():
+    for f in sorted((SEED / "judgments").glob("*.json")):
+        data = json.loads(f.read_text(encoding="utf-8"))
+        for _, text in split_judgment(data["full_text"]):
+            for line in text.split("\n"):
+                assert not re.fullmatch(r"\s*第\s*[一二三四五六七八九十百\d]+\s*頁\s*", line), (f.name, line)
+
+
+def test_procedural_tail_is_other():
+    kinds = {k for k, t in passages_3946() if "職權宣告假執行" in normalize_text(t)}
+    assert kinds == {"other"}
