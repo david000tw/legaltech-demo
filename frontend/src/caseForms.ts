@@ -14,8 +14,16 @@ export function headerDraftFrom(c: api.CaseDetail): HeaderDraft {
     reference_date: h.reference_date ?? '' }
 }
 
-// 訴訟代理人可用半形、全形逗號或頓號分隔
-export const splitAttorneys = (s: string) => s.split(/[,，、]/).map((t) => t.trim()).filter(Boolean)
+// 訴訟代理人可用半形／全形逗號、分號、頓號或空白分隔
+export const splitAttorneys = (s: string) => s.split(/[,，、;；\s]+/).map((t) => t.trim()).filter(Boolean)
+
+// 與後端上限一致（最多 10 位、每位 100 字）；先在畫面上擋，不讓律師看到看不懂的 422
+export function attorneyProblem(s: string): string | null {
+  const names = splitAttorneys(s)
+  if (names.length > 10) return '訴訟代理人最多 10 位'
+  if (names.some((n) => n.length > 100)) return '訴訟代理人每位最多 100 字'
+  return null
+}
 
 // 送給後端的狀頭（不含受文；受文只在修改狀頭時送）：空白欄位送 null＝清空
 export function headerInput(d: HeaderDraft) {

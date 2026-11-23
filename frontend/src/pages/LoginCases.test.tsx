@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api'
 import Cases from './Cases'
@@ -45,12 +45,17 @@ describe('Login', () => {
   })
 })
 
+function CasePageProbe() {
+  const notice = (useLocation().state as { notice?: string } | null)?.notice
+  return <p>案件頁{notice ? `：${notice}` : ''}</p>
+}
+
 function renderCases() {
   return render(
     <MemoryRouter initialEntries={['/cases']}>
       <Routes>
         <Route path="/cases" element={<Cases />} />
-        <Route path="/cases/:caseId" element={<p>案件頁</p>} />
+        <Route path="/cases/:caseId" element={<CasePageProbe />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -70,6 +75,30 @@ describe('Cases', () => {
     expect(vi.mocked(api.createCase).mock.calls[0][0].attorneys).toBeUndefined()  // 沒填：後端預設帶入建立者
     expect(api.putParties).not.toHaveBeenCalled()
     expect(await screen.findByText('案件頁')).toBeInTheDocument()
+  })
+
+  it('opens the new case with a notice when the parties fail to save', async () => {
+    vi.mocked(api.listCases).mockResolvedValue([])
+    vi.mocked(api.createCase).mockResolvedValue({ id: 'c3', title: '甲', our_side: 'plaintiff', case_type: 'traffic_tort' })
+    vi.mocked(api.putParties).mockRejectedValue(new api.ApiError(500, '網路中斷'))
+    renderCases()
+    await userEvent.type(screen.getByLabelText('案件名稱'), '甲')
+    await userEvent.click(screen.getByRole('button', { name: '新增當事人' }))
+    await userEvent.type(screen.getByLabelText('當事人1 姓名'), '林大明')
+    await userEvent.click(screen.getByRole('button', { name: '建立案件' }))
+    expect(await screen.findByText(/案件頁：案件已建立，但當事人沒有存成功：網路中斷/)).toBeInTheDocument()
+    expect(api.createCase).toHaveBeenCalledTimes(1)
+  })
+
+  it('checks the attorney list before creating', async () => {
+    vi.mocked(api.listCases).mockResolvedValue([])
+    renderCases()
+    await userEvent.type(screen.getByLabelText('案件名稱'), '甲')
+    const names = Array.from({ length: 11 }, (_, i) => `律師${i}`).join('，')
+    await userEvent.type(screen.getByLabelText('訴訟代理人（以逗號分隔）'), names)
+    await userEvent.click(screen.getByRole('button', { name: '建立案件' }))
+    expect(await screen.findByText('訴訟代理人最多 10 位')).toBeInTheDocument()
+    expect(api.createCase).not.toHaveBeenCalled()
   })
 
   it('creates a case with type and parties', async () => {

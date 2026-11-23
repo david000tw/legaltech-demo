@@ -15,7 +15,7 @@ from app.models import Case, CaseParty, Claim, Document, Page, PageText, Round
 from app.text_norm import find_quote, quote_length
 
 MIN_QUOTE = 15
-from app.case_types import SIDE_LABEL  # noqa: E402,F401  沿用舊的匯入位置
+from app.case_types import ALIGNMENT_LABEL, SIDE_LABEL  # noqa: E402,F401  沿用舊的匯入位置
 from app.pipeline.case_context import case_context  # noqa: E402
 
 
@@ -45,7 +45,7 @@ def _filers(s: Session, round_id: UUID) -> dict:
         if d.filed_by_party_id:
             party = s.get(CaseParty, d.filed_by_party_id)
             if party is not None:
-                out[d.id] = f"【遞狀人：{party.name}】\n"
+                out[d.id] = f"【遞狀人：{party.role} {party.name}（{ALIGNMENT_LABEL[party.alignment]}）】\n"
     return out
 
 

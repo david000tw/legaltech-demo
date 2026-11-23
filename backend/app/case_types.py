@@ -39,12 +39,16 @@ SIDE_LABEL = {"plaintiff": "原告", "defendant": "被告"}
 PARTY_ROLES = ("原告", "被告", "上訴人", "被上訴人", "反訴原告", "反訴被告", "聲請人", "相對人")
 ALIGNMENTS = ("ours", "opposing", "aligned")
 ALIGNMENT_LABEL = {"ours": "我方", "opposing": "對造", "aligned": "立場與我方相同"}
+# 立場相同者的規則（設計 5.2）：案件背景與起草提示詞用同一句，沒有例外
+ALIGNED_RULE = "只反駁歸屬為「對造」的當事人；「立場與我方相同」的當事人提出的論點一律不得反駁，必要時說明我方同意之處；其立場說明中與我方意見不同的部分，不反駁也不表示同意，留給律師處理。"
 
 # 程序決定書狀名稱與預設受文：(書狀名稱, 受文的庭別)
 PROCEDURES: dict[str, tuple[str, str]] = {"civil": ("民事準備書狀", "民事庭"), "family": ("家事準備書狀", "家事法庭")}
 PROCEDURE_LABEL = {"civil": "民事", "family": "家事"}
 
 _CASE_WORD = re.compile(r"年度?(\D+?)字第")
+# 案號不是完整格式時（「113家訴5」「113年度家訴字5號」）：去掉數字與年度、字、第、號，剩下的就是字別
+_NOT_WORD = re.compile(r"[\d〇零一二三四五六七八九十百千\s年度字第號()（）]")
 
 
 def case_type_of(code: str | None) -> CaseType:
@@ -53,8 +57,11 @@ def case_type_of(code: str | None) -> CaseType:
 
 def _word(case_number: str | None) -> str | None:
     """案號的字別，例如「113年度家繼訴字第89號」→「家繼訴」。"""
-    m = _CASE_WORD.search(normalize_text(case_number or ""))
-    return m.group(1) if m else None
+    text = normalize_text(case_number or "")
+    m = _CASE_WORD.search(text)
+    if m:
+        return m.group(1)
+    return _NOT_WORD.sub("", text) or None
 
 
 def procedure_for(case_type: str | None, case_number: str | None) -> str:
@@ -67,9 +74,13 @@ def procedure_for(case_type: str | None, case_number: str | None) -> str:
 
 def procedure_warning(case_type: str | None, case_number: str | None) -> str | None:
     word = _word(case_number)
-    if word is None:
-        return None
     ct = case_type_of(case_type)
+    if word is None:
+        if not (case_number or "").strip():
+            return None
+        return (f"無法判讀案號「{case_number.strip()}」的字別，書狀名稱與受文先依「{ct.label}」預設的"
+                f"{PROCEDURE_LABEL[ct.procedure]}程序（{PROCEDURES[ct.procedure][0]}）；"
+                "請改成「113年度家訴字第5號」這種格式，或確認程序。")
     actual = procedure_for(case_type, case_number)
     if actual == ct.procedure:
         return None

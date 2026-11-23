@@ -48,4 +48,10 @@ describe('api', () => {
     const form = init.body as FormData
     expect([form.get('kind'), form.get('round_id'), form.get('filed_by_party_id')]).toEqual(['opponent_brief', 'r1', 'pt2'])
   })
+
+  it('turns a validation error list into readable text', async () => {
+    respond(422, { detail: [{ loc: ['body', 'case_number'], msg: 'String should have at most 100 characters' }] })
+    const err = await uploadDocument('c1', new File(['x'], 'a.txt'), 'evidence').catch((e) => e)
+    expect(err.message).toBe('輸入資料有誤：String should have at most 100 characters')
+  })
 })

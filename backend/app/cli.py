@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import date
 from pathlib import Path
 from uuid import UUID
 
@@ -58,7 +59,8 @@ def import_testcase(folder: Path, firm_name: str) -> tuple[UUID, UUID]:
         case = Case(firm_id=firm.id, title=meta["title"], our_side=meta["our_side"],
                     case_type=meta.get("case_type", "traffic_tort"),  # 計畫 1B：試跑時這欄被忽略
                     court=meta.get("court"), case_number=meta.get("case_number"), division=meta.get("division"),
-                    cause=meta.get("cause"), addressee=meta.get("addressee"), attorneys=meta.get("attorneys", []))
+                    cause=meta.get("cause"), addressee=meta.get("addressee"), attorneys=meta.get("attorneys", []),
+                    reference_date=date.fromisoformat(meta["reference_date"]) if meta.get("reference_date") else None)
         s.add(case)
         s.flush()
         parties = []

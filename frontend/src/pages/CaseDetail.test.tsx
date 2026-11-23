@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -9,7 +9,7 @@ import CaseDetail from './CaseDetail'
 vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
   return { ...real, getCase: vi.fn(), getRound: vi.fn(), createRound: vi.fn(), runRound: vi.fn(), uploadDocument: vi.fn(),
-    renumberExhibit: vi.fn(), getCaseOptions: vi.fn(), patchCase: vi.fn(), putParties: vi.fn() }
+    renumberExhibit: vi.fn(), getCaseOptions: vi.fn(), patchCase: vi.fn(), putParties: vi.fn(), setDocumentFiler: vi.fn() }
 })
 
 const emptyHeader: api.CaseHeader = { court: null, case_number: null, division: null, cause: null, addressee: null,
@@ -32,9 +32,9 @@ const baseCase: api.CaseDetail = {
   rounds: [{ id: 'r1', seq: 1, status: 'failed', error: "usage_limit: You've hit your session limit" }],
 }
 
-function renderAt() {
+function renderAt(state?: unknown) {
   return render(
-    <MemoryRouter initialEntries={['/cases/c1']}>
+    <MemoryRouter initialEntries={[{ pathname: '/cases/c1', state }]}>
       <Routes><Route path="/cases/:caseId" element={<CaseDetail />} /></Routes>
     </MemoryRouter>,
   )
@@ -178,10 +178,71 @@ describe('CaseDetail header and parties', () => {
     vi.mocked(api.uploadDocument).mockResolvedValue({ id: 'd9', page_count: 1 })
     renderAt()
     const filer = await screen.findByLabelText('遞狀人')
-    expect(filer).toHaveValue('pt2')  // 預設第一位對造
+    expect(filer).toHaveValue('pt2')  // 只有一位對造：預設就是他
+    expect(within(filer).queryByRole('option', { name: /宋文彬/ })).not.toBeInTheDocument()  // 我方不會是對造書狀的遞狀人
     await userEvent.selectOptions(filer, 'pt3')
     const file = new File(['被告主張原告請求無理由等語。'], '答辯狀.txt', { type: 'text/plain' })
     await userEvent.upload(screen.getByLabelText('上傳對造書狀'), file)
     expect(api.uploadDocument).toHaveBeenCalledWith('c1', file, 'opponent_brief', 'r1', 'pt3')
+  })
+})
+
+describe('CaseDetail brief filer and notices', () => {
+  const TWO_OPPOSING: api.Party[] = [...PARTIES,
+    { id: 'pt4', seq: 4, name: '宋文華', role: '被告', alignment: 'opposing', legal_rep: null, position_note: null }]
+  const created = [{ id: 'r1', seq: 1, status: 'created' as const, error: null }]
+
+  beforeEach(() => {
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'created', stale: false, draft_id: null,
+      error: null, claims: [] })
+  })
+
+  it('leaves the filer unspecified when there are several opposing parties', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: TWO_OPPOSING, rounds: created })
+    renderAt()
+    expect(await screen.findByLabelText('遞狀人')).toHaveValue('')
+    expect(screen.getByText(/對造有好幾位/)).toBeInTheDocument()
+  })
+
+  it('shows and changes the filer of an uploaded brief', async () => {
+    const brief: api.CaseDocument = { id: 'd3', kind: 'opponent_brief', filename: '答辯狀.txt', round_id: 'r1',
+      filed_by_party_id: 'pt2', page_count: 2, pages: [] }
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: TWO_OPPOSING, rounds: created,
+      documents: [...baseCase.documents, brief] })
+    vi.mocked(api.setDocumentFiler).mockResolvedValue({ id: 'd3', filed_by_party_id: 'pt4' })
+    renderAt()
+    const select = await screen.findByLabelText('答辯狀.txt 的遞狀人')
+    expect(select).toHaveValue('pt2')
+    const before = vi.mocked(api.getCase).mock.calls.length
+    await userEvent.selectOptions(select, 'pt4')
+    expect(api.setDocumentFiler).toHaveBeenCalledWith('d3', 'pt4')
+    await waitFor(() => expect(vi.mocked(api.getCase).mock.calls.length).toBe(before + 1))
+  })
+
+  it('shows the filer of a drafted round without letting it change', async () => {
+    const brief: api.CaseDocument = { id: 'd3', kind: 'opponent_brief', filename: '答辯狀.txt', round_id: 'r1',
+      filed_by_party_id: null, page_count: 2, pages: [] }
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: TWO_OPPOSING,
+      rounds: [{ id: 'r1', seq: 1, status: 'drafted', error: null }], documents: [brief] })
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', stale: false, draft_id: 'dr1',
+      error: null, claims: [] })
+    renderAt()
+    expect(await screen.findByText('答辯狀.txt：遞狀人未指定')).toBeInTheDocument()
+    expect(screen.queryByLabelText('答辯狀.txt 的遞狀人')).not.toBeInTheDocument()
+  })
+
+  it('clears the notice and old errors after the parties are saved', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: PARTIES.slice(0, 1), rounds: [] })
+    vi.mocked(api.patchCase).mockRejectedValueOnce(new api.ApiError(422, '案號太長'))
+    vi.mocked(api.putParties).mockResolvedValue([])
+    renderAt({ notice: '案件已建立，但當事人沒有存成功：網路中斷。請在案件頁重新填寫。' })
+    expect(await screen.findByText(/當事人沒有存成功/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '修改狀頭' }))
+    await userEvent.click(screen.getByRole('button', { name: '儲存狀頭' }))
+    expect(await screen.findByText('案號太長')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '修改當事人' }))
+    await userEvent.click(screen.getByRole('button', { name: '儲存當事人' }))
+    await waitFor(() => expect(screen.queryByText(/當事人沒有存成功/)).not.toBeInTheDocument())
+    expect(screen.queryByText('案號太長')).not.toBeInTheDocument()
   })
 })

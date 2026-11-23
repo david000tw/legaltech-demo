@@ -104,7 +104,7 @@ def create_case(body: CaseBody, m: CurrentMember = Depends(current_member)) -> d
         attorneys = body.attorneys
         if attorneys is None:  # 預設帶入建立者；助理不是訴訟代理人
             name = s.scalar(select(Member.display_name).where(Member.id == m.id))
-            attorneys = [f"{name}律師"] if m.role == "lawyer" and name else []
+            attorneys = [name if name.endswith("律師") else f"{name}律師"] if m.role == "lawyer" and name else []
         c = Case(firm_id=m.firm_id, title=body.title, our_side=body.our_side, case_type=body.case_type,
                  created_by=m.id, attorneys=attorneys,
                  **body.model_dump(include={"court", "case_number", "division", "cause", "addressee",
@@ -130,8 +130,12 @@ def patch_case(case_id: UUID, body: CasePatch, m: CurrentMember = Depends(curren
 def put_parties(case_id: UUID, body: Annotated[list[PartyBody], Field(max_length=50)],
                 m: CurrentMember = Depends(current_member)) -> list[dict]:
     """依序整批替換：有帶 id 的保留原列（遞狀人不受影響），沒帶到的刪除（遞狀人隨之變空白）。"""
+    ids = [b.id for b in body if b.id is not None]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(422, "同一位當事人出現兩次")
     with tenant_session(m.firm_id) as s:
-        _case_or_404(s, case_id)
+        if s.get(Case, case_id, with_for_update=True) is None:  # 鎖住案件列：兩個分頁同時儲存不會重複新增
+            raise HTTPException(404, "找不到案件")
         existing = {p.id: p for p in case_parties(s, case_id)}
         unknown = [str(b.id) for b in body if b.id is not None and b.id not in existing]
         if unknown:
@@ -218,6 +222,32 @@ def create_round(case_id: UUID, m: CurrentMember = Depends(current_member)) -> d
         return {"id": str(r.id), "seq": r.seq}
 
 
+def _check_filer(s, case_id: UUID, party_id: UUID | None) -> None:
+    if party_id is not None:
+        party = s.get(CaseParty, party_id)
+        if party is None or party.case_id != case_id:
+            raise HTTPException(422, "遞狀人不是本案的當事人")
+
+
+class FilerBody(BaseModel):
+    filed_by_party_id: UUID | None
+
+
+@router.patch("/documents/{document_id}")
+def set_filer(document_id: UUID, body: FilerBody, m: CurrentMember = Depends(current_member)) -> dict:
+    """改對造書狀的遞狀人（上傳時選錯、或原遞狀人被刪掉後重選）。下次執行起草才會用到。"""
+    with tenant_session(m.firm_id) as s:
+        doc = s.get(Document, document_id)
+        if doc is None:
+            raise HTTPException(404, "找不到文件")
+        if doc.kind != "opponent_brief":
+            raise HTTPException(422, "只有對造書狀有遞狀人")
+        _check_filer(s, doc.case_id, body.filed_by_party_id)
+        doc.filed_by_party_id = body.filed_by_party_id
+        s.flush()
+        return {"id": str(doc.id), "filed_by_party_id": str(doc.filed_by_party_id) if doc.filed_by_party_id else None}
+
+
 @router.post("/cases/{case_id}/documents")
 def upload_document(case_id: UUID, file: UploadFile,
                           kind: Literal["evidence", "opponent_brief"] = Form(...),
@@ -234,10 +264,7 @@ def upload_document(case_id: UUID, file: UploadFile,
             r = s.get(Round, round_id)
             if r is None or r.case_id != case_id:
                 raise HTTPException(404, "找不到輪次")
-        if filed_by_party_id is not None:
-            party = s.get(CaseParty, filed_by_party_id)
-            if party is None or party.case_id != case_id:
-                raise HTTPException(422, "遞狀人不是本案的當事人")
+        _check_filer(s, case_id, filed_by_party_id)
         try:
             doc = ingest_document(s, m.firm_id, case_id, kind, file.filename or "未命名", data, round_id)
             doc.filed_by_party_id = filed_by_party_id

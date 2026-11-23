@@ -229,8 +229,9 @@ def test_family_case_header(db):
               case_number="113年度家繼訴字第89號", division="忠", cause="分割遺產", attorneys=["王大明律師"])
     lines, _ = _export(ctx, db)
     text = "\n".join(lines)
-    assert lines[0] == "家事準備書狀"
-    assert "案號：113年度家繼訴字第89號" in text and "股別：忠" in text
+    assert lines[:8] == ["家事準備書狀", "案號：113年度家繼訴字第89號　股別：忠", "原告　宋文彬", "訴訟代理人　王大明律師",
+                         "被告　宋文德", "法定代理人　宋大德", "被告　宋文琪", "為分割遺產事件，依法提出準備書狀事："]
+    assert lines.count("訴訟代理人　王大明律師") == 1
     _in_order(lines, ["原告　宋文彬", "訴訟代理人　王大明律師", "被告　宋文德", "法定代理人　宋大德", "被告　宋文琪",
                       "為分割遺產事件，依法提出準備書狀事：", "㈠關於遺產範圍", "謹狀", "臺灣臺北地方法院家事法庭　公鑒",
                       "證物名稱及件數", "原證1　01_研判表.txt", "中華民國115年11月23日", "具狀人：宋文彬",
@@ -284,3 +285,13 @@ def test_legacy_traffic_draft_still_exports(db):
     _in_order(lines, ["原告　", "被告　", "㈠關於路權", "謹狀"])
     body = lawyer.get(f"/api/drafts/{ctx['draft_id']}").json()
     assert body["brief_title"] == "民事準備書狀" and body["procedure_warning"] is None
+
+
+def test_counsel_listed_once_after_co_parties(db):
+    """共同原告共用訴訟代理人：代理人列在連續的我方當事人之後，只列一次。"""
+    ctx = setup_verify_round()
+    _set_case(ctx, [("甲", "原告", "ours", None), ("乙", "原告", "ours", None), ("丙", "被告", "opposing", None)],
+              attorneys=["王大明律師", "李小華律師"])
+    lines, _ = _export(ctx, db)
+    assert lines[2:7] == ["原告　甲", "原告　乙", "訴訟代理人　王大明律師", "訴訟代理人　李小華律師", "被告　丙"]
+    assert "具狀人：甲、乙" in lines and "撰狀人：訴訟代理人王大明律師、李小華律師" in lines

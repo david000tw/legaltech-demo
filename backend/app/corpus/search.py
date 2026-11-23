@@ -15,10 +15,18 @@ from app.text_norm import normalize_text
 _KEEP = re.compile(r"[㐀-䶿一-鿿豈-﫿0-9]")
 CURATED_BOOST = 1.5
 TYPE_BOOST = 2.0  # 與案件同類型的判決、條文加權（設計 5.3）：只加權、不排除；沒有標籤的維持原分數
+# 註記為少數見解的判決降權：仍會出現在候選（帶註記），但同樣相關時排在多數見解後面。
+# 長篇少數見解判決切出的段落多，不降權會佔掉近半的同類候選（critic Task 6～9 M4）。
+MINORITY_PREFIX = "少數見解"
+MINORITY_WEIGHT = 0.6
 
 
 def _type_boost(case_type: str | None, tags: list | None) -> float:
     return TYPE_BOOST if case_type and case_type in (tags or []) else 1.0
+
+
+def _minority(annotation: str | None) -> float:
+    return MINORITY_WEIGHT if (annotation or "").startswith(MINORITY_PREFIX) else 1.0
 
 
 def bigrams(s: str) -> set[str]:
@@ -42,13 +50,13 @@ def search_passages(s: Session, query: str, k: int, passage_types: tuple[str, ..
                     case_type: str | None = None) -> list[JudgmentPassage]:
     q = bigrams(query)
     rows = s.execute(
-        select(JudgmentPassage, Judgment.curated, Judgment.case_types)
+        select(JudgmentPassage, Judgment.curated, Judgment.case_types, Judgment.annotation)
         .join(Judgment, Judgment.id == JudgmentPassage.judgment_id)
         .where(Judgment.status == "active", JudgmentPassage.status == "active",
                JudgmentPassage.passage_type.in_(passage_types))
     ).all()
-    return _top([(score(q, p.text) * (CURATED_BOOST if curated else 1.0) * _type_boost(case_type, tags), p)
-                 for p, curated, tags in rows], k)
+    return _top([(score(q, p.text) * (CURATED_BOOST if curated else 1.0) * _type_boost(case_type, tags)
+                  * _minority(note), p) for p, curated, tags, note in rows], k)
 
 
 def search_articles(s: Session, query: str, k: int, case_type: str | None = None) -> list[StatuteArticle]:

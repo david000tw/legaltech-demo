@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import * as api from '../api'
-import { emptyHeaderDraft, headerInput, toInputs, type HeaderDraft, type PartyDraft } from '../caseForms'
+import { attorneyProblem, emptyHeaderDraft, headerInput, toInputs, type HeaderDraft, type PartyDraft } from '../caseForms'
 import CaseHeaderFields from '../components/CaseHeaderFields'
 import PartiesEditor from '../components/PartiesEditor'
 
@@ -25,6 +25,11 @@ export default function Cases() {
 
   async function create(e: FormEvent) {
     e.preventDefault()
+    const problem = attorneyProblem(header.attorneys)
+    if (problem) {
+      setError(problem)
+      return
+    }
     setBusy(true)
     setError(null)
     try {

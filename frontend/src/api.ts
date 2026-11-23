@@ -74,7 +74,11 @@ export type CitationInput = { code: string; quote: string }
 async function detail(r: Response): Promise<string> {
   try {
     const body = await r.json()
-    return typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail ?? body)
+    if (typeof body.detail === 'string') return body.detail
+    if (Array.isArray(body.detail)) {  // 欄位驗證錯誤：只留說明文字
+      return `輸入資料有誤：${body.detail.map((e: { msg?: string }) => e.msg ?? '').filter(Boolean).join('；')}`
+    }
+    return JSON.stringify(body.detail ?? body)
   } catch {
     return r.statusText
   }
@@ -99,6 +103,10 @@ export const patchCase = (id: string, body: Partial<CaseInput>) => req<CaseSumma
 // 依序整批替換：帶 id 的保留原列，沒列到的刪除（其遞狀人變空白）
 export const putParties = (id: string, parties: PartyInput[]) => req<Party[]>(`/cases/${id}/parties`, json('PUT', parties))
 export const getCase = (id: string) => req<CaseDetail>(`/cases/${id}`)
+// 改對造書狀的遞狀人（null＝未指定）；下次執行起草才會用到
+export const setDocumentFiler = (id: string, filedByPartyId: string | null) =>
+  req<{ id: string; filed_by_party_id: string | null }>(`/documents/${id}`,
+    json('PATCH', { filed_by_party_id: filedByPartyId }))
 export const createRound = (caseId: string) => req<{ id: string; seq: number }>(`/cases/${caseId}/rounds`, json('POST'))
 
 export function uploadDocument(caseId: string, file: File, kind: 'evidence' | 'opponent_brief', roundId?: string,

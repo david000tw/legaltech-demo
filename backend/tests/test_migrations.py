@@ -42,3 +42,36 @@ def test_migrations_match_models(migrated_db):
     assert diff == []
     db_checks = {name: set(_LITERAL.findall(d)) for name, d in rows}
     assert db_checks == _model_checks()
+
+
+def test_0004_fills_attorneys_of_existing_cases(db):
+    """critic L2：計畫 1 的舊案件升級後，訴訟代理人帶入建立案件的律師（助理建立的維持空白）。"""
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(BACKEND / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", TEST_ADMIN_DB)
+    eng = create_engine(TEST_ADMIN_DB, isolation_level="AUTOCOMMIT")
+    command.downgrade(cfg, "0003")
+    try:
+        with eng.connect() as c:
+            firm = c.execute(text("INSERT INTO firms (id, name, is_internal_test) VALUES (gen_random_uuid(), '舊所', true) "
+                                  "RETURNING id")).scalar()
+            ids = {}
+            for who, role, name in (("a", "lawyer", "王大明"), ("b", "lawyer", "李小華律師"), ("c", "assistant", "助理甲")):
+                ids[who] = c.execute(text(
+                    "INSERT INTO members (id, firm_id, email, password_hash, display_name, role, bar_verified) "
+                    "VALUES (gen_random_uuid(), :f, :e, 'x', :n, :r, false) RETURNING id"),
+                    {"f": firm, "e": f"{who}@old.test", "n": name, "r": role}).scalar()
+                c.execute(text("INSERT INTO cases (id, firm_id, title, our_side, case_type, created_by) "
+                               "VALUES (gen_random_uuid(), :f, :t, 'plaintiff', 'traffic_tort', :m)"),
+                          {"f": firm, "t": f"舊案{who}", "m": ids[who]})
+            c.execute(text("INSERT INTO cases (id, firm_id, title, our_side, case_type) "
+                           "VALUES (gen_random_uuid(), :f, '舊案無建立者', 'plaintiff', 'traffic_tort')"), {"f": firm})
+    finally:
+        command.upgrade(cfg, "head")
+    with eng.connect() as c:
+        got = dict(c.execute(text("SELECT title, attorneys FROM cases WHERE title LIKE '舊案%'")).all())
+    eng.dispose()
+    assert got == {"舊案a": ["王大明律師"], "舊案b": ["李小華律師"], "舊案c": [], "舊案無建立者": []}

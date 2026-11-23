@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, useLocation, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import * as api from '../api'
-import { headerDraftFrom, headerInput, toDrafts, toInputs, type HeaderDraft, type PartyDraft } from '../caseForms'
+import {
+  attorneyProblem, headerDraftFrom, headerInput, toDrafts, toInputs, type HeaderDraft, type PartyDraft,
+} from '../caseForms'
 import CaseHeaderFields from '../components/CaseHeaderFields'
 import PartiesEditor from '../components/PartiesEditor'
 
@@ -10,17 +12,21 @@ const STATUS_LABEL: Record<api.RoundStatus, string> = {
   created: '尚未執行', running: '分析與起草中…', drafted: '草稿完成', failed: '執行失敗',
 }
 
-function RoundPanel({ caseId, round, parties, onChanged }: {
-  caseId: string; round: api.RoundSummary; parties: api.Party[]; onChanged: () => void
+const partyLabel = (p: api.Party) => `${p.role} ${p.name}`
+
+function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
+  caseId: string; round: api.RoundSummary; parties: api.Party[]; briefs: api.CaseDocument[]; onChanged: () => void
 }) {
   const [detail, setDetail] = useState<api.RoundDetail | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  // 遞狀人：預設第一位對造；選過的人被刪掉時回到預設
+  // 遞狀人只能是對造或立場相同者；只有一位對造時預設是他，好幾位時預設未指定（避免張冠李戴）
+  const filers = parties.filter((p) => p.alignment !== 'ours')
+  const opposing = parties.filter((p) => p.alignment === 'opposing')
   const [chosenFiler, setChosenFiler] = useState<string | null>(null)
-  const defaultFiler = parties.find((p) => p.alignment === 'opposing')?.id ?? ''
-  const filer = chosenFiler !== null && (chosenFiler === '' || parties.some((p) => p.id === chosenFiler))
+  const defaultFiler = opposing.length === 1 ? opposing[0].id : ''
+  const filer = chosenFiler !== null && (chosenFiler === '' || filers.some((p) => p.id === chosenFiler))
     ? chosenFiler : defaultFiler
 
   const refresh = useCallback(async () => {
@@ -58,6 +64,16 @@ function RoundPanel({ caseId, round, parties, onChanged }: {
     }
   }
 
+  async function changeFiler(doc: api.CaseDocument, partyId: string) {
+    setMessage(null)
+    try {
+      await api.setDocumentFiler(doc.id, partyId || null)
+      onChanged()
+    } catch (e) {
+      setMessage((e as Error).message)
+    }
+  }
+
   async function run() {
     setBusy(true)
     setMessage(null)
@@ -72,6 +88,8 @@ function RoundPanel({ caseId, round, parties, onChanged }: {
   }
 
   const error = detail?.error ?? round.error
+  const editable = status === 'created' || status === 'failed' || !!detail?.stale
+  const byId = new Map(parties.map((p) => [p.id, p]))
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between">
@@ -79,17 +97,42 @@ function RoundPanel({ caseId, round, parties, onChanged }: {
         <span className="text-sm text-slate-600">{STATUS_LABEL[status]}{detail?.stale ? '（逾時，可重跑）' : ''}</span>
       </div>
       {status === 'failed' && error && <p className="mt-2 rounded bg-red-50 p-2 text-sm text-red-700">{error}</p>}
-      {(status === 'created' || status === 'failed' || detail?.stale) && (
+      {briefs.length > 0 && (
+        <ul className="mt-2 space-y-1 text-sm text-slate-700">
+          {briefs.map((d) => (
+            <li key={d.id}>
+              {editable && filers.length > 0 ? (
+                <label>
+                  {d.filename}
+                  <select aria-label={`${d.filename} 的遞狀人`} value={d.filed_by_party_id ?? ''}
+                    onChange={(e) => changeFiler(d, e.target.value)}
+                    className="ml-2 rounded border border-slate-300 px-2 py-0.5 text-sm">
+                    <option value="">遞狀人未指定</option>
+                    {filers.map((p) => <option key={p.id} value={p.id}>{partyLabel(p)}</option>)}
+                  </select>
+                </label>
+              ) : (
+                <span>{d.filename}：{d.filed_by_party_id && byId.get(d.filed_by_party_id)
+                  ? `遞狀人 ${partyLabel(byId.get(d.filed_by_party_id)!)}` : '遞狀人未指定'}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {editable && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          {parties.length > 0 && (
+          {filers.length > 0 && (
             <label className="text-sm text-slate-700">
               遞狀人
               <select aria-label="遞狀人" value={filer} onChange={(e) => setChosenFiler(e.target.value)} disabled={busy}
                 className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm">
                 <option value="">（未指定）</option>
-                {parties.map((p) => <option key={p.id} value={p.id}>{p.role} {p.name}</option>)}
+                {filers.map((p) => <option key={p.id} value={p.id}>{partyLabel(p)}</option>)}
               </select>
             </label>
+          )}
+          {opposing.length > 1 && !filer && (
+            <span className="text-xs text-amber-700">對造有好幾位：請選這份書狀的遞狀人，AI 才知道是誰提出的主張。</span>
           )}
           <label className="text-sm text-slate-700">
             上傳對造書狀
@@ -148,6 +191,11 @@ function HeaderSection({ data, options, onSaved, onError }: {
   async function save(e: FormEvent) {
     e.preventDefault()
     if (!draft) return
+    const problem = attorneyProblem(draft.attorneys)
+    if (problem) {
+      onError(problem)
+      return
+    }
     try {
       await api.patchCase(data.id, { ...headerInput(draft), addressee: draft.addressee.trim() || null })
       setDraft(null)
@@ -291,6 +339,7 @@ function ExhibitRow({ exhibit, scanned, onSaved, onError }: {
 
 export default function CaseDetail() {
   const { caseId = '' } = useParams()
+  const navigate = useNavigate()
   const notice = (useLocation().state as { notice?: string } | null)?.notice
   const [data, setData] = useState<api.CaseDetail | null>(null)
   const [options, setOptions] = useState<api.CaseOptions | null>(null)
@@ -306,6 +355,15 @@ export default function CaseDetail() {
   }, [caseId])
 
   useEffect(() => { void load() }, [load])
+  // 儲存成功：清掉之前的錯誤；當事人存好了，「當事人沒有存成功」的提醒也一併拿掉（重新整理也不會再出現）
+  const saved = useCallback(async () => {
+    setError(null)
+    await load()
+  }, [load])
+  const partiesSaved = useCallback(async () => {
+    if (notice) navigate(`/cases/${caseId}`, { replace: true, state: null })
+    await saved()
+  }, [notice, navigate, caseId, saved])
   useEffect(() => { api.getCaseOptions().then(setOptions).catch((e: Error) => setError(e.message)) }, [])
 
   async function uploadEvidence() {
@@ -342,8 +400,8 @@ export default function CaseDetail() {
         {notice && <p className="mt-2 rounded bg-yellow-50 p-2 text-sm text-yellow-800">{notice}</p>}
       </div>
 
-      <HeaderSection data={data} options={options} onSaved={load} onError={setError} />
-      <PartiesSection data={data} options={options} onSaved={load} onError={setError} />
+      <HeaderSection data={data} options={options} onSaved={saved} onError={setError} />
+      <PartiesSection data={data} options={options} onSaved={partiesSaved} onError={setError} />
 
       <section>
         <h2 className="text-lg font-semibold text-slate-800">卷證</h2>
@@ -367,7 +425,10 @@ export default function CaseDetail() {
             建立新一輪
           </button>
         </div>
-        {data.rounds.map((r) => <RoundPanel key={r.id} caseId={caseId} round={r} parties={data.parties} onChanged={load} />)}
+        {data.rounds.map((r) => (
+          <RoundPanel key={r.id} caseId={caseId} round={r} parties={data.parties} onChanged={load}
+            briefs={data.documents.filter((d) => d.kind === 'opponent_brief' && d.round_id === r.id)} />
+        ))}
       </section>
       {error && <p className="text-sm text-red-700">{error}</p>}
     </div>

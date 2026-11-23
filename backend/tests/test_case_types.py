@@ -2,6 +2,7 @@
 import json
 from datetime import date
 
+import pytest
 from sqlalchemy import select
 
 from app.case_types import CASE_TYPES, procedure_for, procedure_warning
@@ -162,3 +163,52 @@ def test_annotation_reaches_citation_and_source(db):
     cite = c.get(f"/api/drafts/{ctx['draft_id']}").json()["paragraphs"][0]["citations"][0]
     assert cite["annotation"] == "少數見解：否定配偶權"
     assert c.get(f"/api/citations/{cite['id']}/source").json()["annotation"] == "少數見解：否定配偶權"
+
+
+
+# ---- critic（Task 6～9）M3：案號不是完整格式也要看得出字別；完全看不出來就提醒 ----
+@pytest.mark.parametrize("number", ["113年度家訴字5號", "113家訴5", "113年家訴第5號", "113 年度家訴字第 5 號",
+                                    "一一三年度家訴字第五號"])
+def test_procedure_reads_loose_case_numbers(number):
+    assert procedure_for("spousal_rights", number) == "family"
+    assert "家訴" in procedure_warning("spousal_rights", number)
+
+
+def test_loose_civil_case_number_on_family_type():
+    assert procedure_for("estate_partition", "113重訴1") == "civil"
+    assert "重訴" in procedure_warning("estate_partition", "113重訴1")
+
+
+def test_unreadable_case_number_warns():
+    assert procedure_for("spousal_rights", "第5號") == "civil"  # 看不出字別：照案型預設
+    assert "無法判讀" in procedure_warning("spousal_rights", "第5號")
+    assert procedure_warning("spousal_rights", "  ") is None  # 沒填不算
+
+
+# ---- critic（Task 6～9）M4：一份很長的判決不能佔滿候選（少數見解 45 段壓過多數見解） ----
+def _long_judgment(s, citation, texts, case_types):
+    j = Judgment(citation=citation, court="測試法院", court_level="district", decided_on=date(2024, 1, 1),
+                 source_url="https://example.invalid/", full_text="".join(texts), status="active", curated=False,
+                 case_types=case_types)
+    s.add(j)
+    s.flush()
+    for i, t in enumerate(texts, start=1):
+        s.add(JudgmentPassage(judgment_id=j.id, seq=i, passage_type="court_reasoning", text=t, status="active"))
+    s.flush()
+    return j
+
+
+def test_minority_view_ranks_below_majority_but_still_appears(db):
+    """M4：少數見解（註記開頭「少數見解」）降權：同樣相關時排在多數見解後面，但不會被排除。"""
+    from app.corpus.search import MINORITY_WEIGHT
+    text = "配偶身分法益受侵害，得請求非財產上損害之相當金額。"
+    with admin_session() as s:
+        minority = _long_judgment(s, "少數判決", [text], ["spousal_rights"])
+        minority.annotation = "少數見解：否定「配偶權」為法律上權利"
+        majority = _long_judgment(s, "多數判決", [text], ["spousal_rights"])
+        s.flush()
+        got = [p.judgment_id for p in search_passages(s, text, 5, case_type="spousal_rights")]
+        assert got == [majority.id, minority.id] and MINORITY_WEIGHT == 0.6
+        majority.annotation = "另有見解可參"  # 不是少數見解的註記不降權
+        s.flush()
+        assert len(search_passages(s, text, 5, case_type="spousal_rights")) == 2

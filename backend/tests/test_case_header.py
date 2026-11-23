@@ -127,9 +127,12 @@ def test_removing_party_clears_filed_by(lawyer_client):
     assert client.put(f"/api/cases/{cid}/parties", json=[{**PARTIES[0], "id": parties[0]["id"]}]).status_code == 200
     with tenant_session(firm) as s:
         assert s.get(Document, s.scalars(select(Document.id).where(Document.case_id == cid)).one()).filed_by_party_id is None
-    from tests.test_drafting import fake_all
-    client.app.state.provider_factory = lambda settings, f: fake_all()
-    assert client.post(f"/api/rounds/{rid}/run").status_code == 202  # 遞狀人變空白不擋執行
+    from app.pipeline.claims import extract_claims
+    from tests.fakes.fake_provider import FakeProvider
+    fake = FakeProvider({"claims": {"claims": []}})
+    with tenant_session(firm) as s:
+        extract_claims(s, rid, fake, None)  # 遞狀人變空白：照常拆主張，只是不標遞狀人
+    assert "【遞狀人" not in fake.calls[0]["user"]
 
 
 def test_case_context_lists_parties_and_rule(lawyer_client):
@@ -155,7 +158,7 @@ def test_claims_step_marks_the_filer(lawyer_client):
     fake = FakeProvider({"claims": {"claims": []}})
     with tenant_session(firm) as s:
         extract_claims(s, rid, fake, None)
-    assert "【遞狀人：宋文德】" in fake.calls[0]["user"]
+    assert "【遞狀人：被告 宋文德（對造）】" in fake.calls[0]["user"]  # critic N3：帶角色與歸屬
 
 
 def test_import_testcase_reads_header(db):
@@ -196,3 +199,108 @@ def test_case_options_list_types_roles_and_alignments(lawyer_client, db):
     assert body["alignments"] == [{"code": "ours", "label": "我方"}, {"code": "opposing", "label": "對造"},
                                   {"code": "aligned", "label": "立場與我方相同"}]
     assert TestClient(create_app(db)).get("/api/case-options").status_code == 401
+
+
+
+# ---- critic（Task 6～9） ----
+from app.case_types import ALIGNED_RULE  # noqa: E402
+from app.ai.prompts import load_prompt  # noqa: E402
+
+
+def test_aligned_rule_is_the_same_everywhere(lawyer_client):
+    """M1：立場相同的當事人一律不得反駁，沒有例外；案件背景與起草提示詞用同一句。"""
+    client, firm, _ = lawyer_client
+    cid = _estate_case(client)
+    client.put(f"/api/cases/{cid}/parties", json=PARTIES)
+    with tenant_session(firm) as s:
+        text = case_context(s, s.get(Case, cid))
+    assert ALIGNED_RULE in text and ALIGNED_RULE in load_prompt("draft")
+    assert "除外" not in text and "除外" not in load_prompt("draft")
+    assert "不得反駁" in ALIGNED_RULE and "留給律師" in ALIGNED_RULE
+
+
+def test_default_attorney_not_doubled(lawyer_client):
+    """L1：顯示名稱已經以「律師」結尾時不再加一次。"""
+    client, _, member = lawyer_client
+    from app.models import Member
+    with admin_session() as s:
+        s.get(Member, member).display_name = "王大明律師"
+    cid = client.post("/api/cases", json={"title": "x", "our_side": "plaintiff"}).json()["id"]
+    assert client.get(f"/api/cases/{cid}").json()["header"]["attorneys"] == ["王大明律師"]
+
+
+def test_put_parties_rejects_duplicate_ids(lawyer_client):
+    """N1：同一個 id 出現兩次 → 422，不會回傳重複的列。"""
+    client, _, _ = lawyer_client
+    cid = _estate_case(client)
+    first = client.put(f"/api/cases/{cid}/parties", json=PARTIES).json()
+    dup = {**PARTIES[0], "id": first[0]["id"]}
+    assert client.put(f"/api/cases/{cid}/parties", json=[dup, dup]).status_code == 422
+    assert len(client.get(f"/api/cases/{cid}").json()["parties"]) == 3
+
+
+def test_other_firm_cannot_touch_parties_or_use_them_as_filer(lawyer_client, db):
+    """測試缺口：跨事務所。乙所看不到甲所的案件，也不能把甲所的當事人當遞狀人。"""
+    client, _, _ = lawyer_client
+    cid = _estate_case(client)
+    parties = client.put(f"/api/cases/{cid}/parties", json=PARTIES).json()
+    other_firm = create_firm("乙事務所")
+    create_member(other_firm, "other@b.test")
+    other = TestClient(create_app(db))
+    assert login(other, "other@b.test").status_code == 200
+    assert other.put(f"/api/cases/{cid}/parties", json=PARTIES[:1]).status_code == 404
+    assert other.patch(f"/api/cases/{cid}", json={"case_number": "x"}).status_code == 404
+    own = other.post("/api/cases", json={"title": "乙案", "our_side": "plaintiff"}).json()["id"]
+    rid = other.post(f"/api/cases/{own}/rounds").json()["id"]
+    assert _upload(other, own, rid, parties[1]["id"]).status_code == 422
+    assert [p["name"] for p in client.get(f"/api/cases/{cid}").json()["parties"]] == ["宋文彬", "宋文德", "宋文琪"]
+
+
+def test_case_context_gives_reference_date(lawyer_client):
+    """N5：基準日（依案型命名）交給 AI，時效等爭點用得到。"""
+    client, firm, _ = lawyer_client
+    cid = _estate_case(client)
+    assert client.patch(f"/api/cases/{cid}", json={"reference_date": "2023-05-01"}).status_code == 200
+    with tenant_session(firm) as s:
+        assert "繼承開始日：2023-05-01" in case_context(s, s.get(Case, cid))
+
+
+def test_import_testcase_reads_reference_date(db, tmp_path):
+    import json as _json
+    import shutil
+    folder = tmp_path / "estate-x"
+    shutil.copytree(CASES / "estate-2", folder)
+    meta = _json.loads((folder / "case.json").read_text(encoding="utf-8"))
+    meta["reference_date"] = "2023-05-01"
+    (folder / "case.json").write_text(_json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    create_firm("內部測試所")
+    case_id, _ = import_testcase(folder, "內部測試所")
+    with admin_session() as s:
+        assert s.get(Case, case_id).reference_date.isoformat() == "2023-05-01"
+
+
+def test_change_filer_of_uploaded_brief(lawyer_client):
+    """critic M2：上傳後看得到、也改得了遞狀人；只能選本案當事人；卷證沒有遞狀人。"""
+    client, _, _ = lawyer_client
+    cid, other = _estate_case(client), _estate_case(client)
+    parties = client.put(f"/api/cases/{cid}/parties", json=PARTIES).json()
+    foreign = client.put(f"/api/cases/{other}/parties", json=PARTIES).json()
+    rid = client.post(f"/api/cases/{cid}/rounds").json()["id"]
+    doc = _upload(client, cid, rid).json()["id"]
+
+    def filer():
+        return next(d for d in client.get(f"/api/cases/{cid}").json()["documents"] if d["id"] == doc)["filed_by_party_id"]
+
+    assert filer() is None
+    r = client.patch(f"/api/documents/{doc}", json={"filed_by_party_id": parties[2]["id"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["filed_by_party_id"] == parties[2]["id"] and filer() == parties[2]["id"]
+    assert client.patch(f"/api/documents/{doc}", json={"filed_by_party_id": foreign[1]["id"]}).status_code == 422
+    assert filer() == parties[2]["id"]
+    assert client.patch(f"/api/documents/{doc}", json={"filed_by_party_id": None}).status_code == 200
+    assert filer() is None
+    ev = client.post(f"/api/cases/{cid}/documents", data={"kind": "evidence"},
+                     files={"file": ("收據.txt", "收據內容".encode(), "text/plain")}).json()["id"]
+    assert client.patch(f"/api/documents/{ev}", json={"filed_by_party_id": parties[1]["id"]}).status_code == 422
+    assert client.patch("/api/documents/00000000-0000-0000-0000-000000000000",
+                        json={"filed_by_party_id": None}).status_code == 404

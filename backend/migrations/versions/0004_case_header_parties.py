@@ -31,6 +31,14 @@ def upgrade() -> None:
     op.add_column("cases", sa.Column("attorneys", postgresql.JSONB(astext_type=sa.Text()),
                                      server_default=sa.text("'[]'::jsonb"), nullable=False))
     op.add_column("cases", sa.Column("reference_date", sa.Date(), nullable=True))
+    # 計畫 1 的舊案件：訴訟代理人帶入建立案件的律師（與新建案件的預設相同；助理建立的維持空白）。
+    # 結構檔以資料庫管理者身分執行，不受 RLS 限制。
+    op.execute("""
+        UPDATE cases c SET attorneys = jsonb_build_array(
+            CASE WHEN m.display_name LIKE '%律師' THEN m.display_name ELSE m.display_name || '律師' END)
+        FROM members m
+        WHERE m.id = c.created_by AND m.role = 'lawyer' AND c.attorneys = '[]'::jsonb
+    """)
 
     op.create_table(
         "case_parties",
