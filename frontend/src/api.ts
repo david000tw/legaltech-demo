@@ -35,9 +35,10 @@ export type RoundDetail = { id: string; seq: number; status: RoundStatus; error:
 export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgment' | 'statute'; quote: string;
   label: string | null; verify_status: 'ok' | 'failed'; verify_reasons: string[]; lawyer_confirmed: boolean }
 export type ParagraphView = { id: string; seq: number; heading: string; text: string; rendered_text: string;
-  status: 'unreviewed' | 'reviewed'; verify_reasons: string[]; reviewed_bar_number: string | null;
+  version: string; status: 'unreviewed' | 'reviewed'; verify_reasons: string[]; reviewed_bar_number: string | null;
   reviewed_at: string | null; citations: CitationView[] }
-export type DraftView = { id: string; round_id: string; case_id: string; paragraphs: ParagraphView[]; blockers: Blocker[] }
+export type DraftView = { id: string; round_id: string; case_id: string; can_review: boolean;
+  paragraphs: ParagraphView[]; blockers: Blocker[] }
 export type CitationSource = { kind: string; title: string; text: string; span: [number, number] | null }
 export type CitationInput = { code: string; quote: string }
 
@@ -85,12 +86,14 @@ export const patchParagraph = (id: string, text: string, citations: CitationInpu
 export const rewriteParagraph = (id: string, instruction: string) =>
   req<{ id: string; status: string; text: string }>(`/paragraphs/${id}/rewrite`, json('POST', { instruction }))
 export const confirmCitation = (id: string) => req<CitationView>(`/citations/${id}/confirm`, json('POST'))
-export const reviewParagraph = (id: string) => req<ParagraphView>(`/paragraphs/${id}/review`, json('POST'))
+// version：律師畫面上那一版的指紋；後端發現內容已變就回 409，不會把沒看過的版本記成已審
+export const reviewParagraph = (id: string, version: string) =>
+  req<ParagraphView>(`/paragraphs/${id}/review`, json('POST', { version }))
 export const renumberExhibit = (id: string, number: number) =>
   req<{ id: string; label: string; number: number }>(`/exhibits/${id}`, json('PATCH', { number }))
 
 export async function exportDraft(draftId: string): Promise<Blob> {
-  const r = await fetch(`/api/drafts/${draftId}/export`, { credentials: 'same-origin' })
+  const r = await fetch(`/api/drafts/${draftId}/export`, { method: 'POST', credentials: 'same-origin' })
   if (r.status === 409) throw new ExportBlockedError((await r.json()).blockers)
   if (!r.ok) throw new ApiError(r.status, await detail(r))
   return r.blob()

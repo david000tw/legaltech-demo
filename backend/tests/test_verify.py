@@ -302,3 +302,19 @@ def test_failed_citation_not_rendered_as_verified(db):
         out = render_text(s, p)
     assert fake not in out and "3946" not in out
     assert out.count("【未驗證：J1】") == 2
+
+
+def test_superseded_page_text_fails_citation(db):
+    """計畫 2 會加人工校正：同一頁有了較新的文字版本，引用舊版文字就不能再算通過。"""
+    from app.ingest.service import current_page_text
+    from app.models import Page, PageText
+    ctx = setup_verify_round()
+    pid = make_paragraph(ctx, "此有{{cite:E1}}可稽。", [("E1", E_QUOTE)])
+    assert para(ctx, pid)[1]["E1"].verify_status == "ok"
+    with tenant_session(ctx["firm"]) as s:
+        page = s.scalars(select(Page).where(Page.document_id == ctx["exhibit_doc"])).one()
+        old = current_page_text(s, page.id)
+        s.add(PageText(firm_id=ctx["firm"], page_id=page.id, version=old.version + 1, source="manual",
+                       text=old.text))
+    _, cites = para(ctx, pid)
+    assert cites["E1"].verify_status == "failed" and "source_superseded" in cites["E1"].verify_reasons

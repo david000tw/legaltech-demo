@@ -2,14 +2,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.ai.prompts import load_prompt
 from app.ai.provider import AIError
 from app.ai.schemas import DRAFT_SCHEMA, REWRITE_SCHEMA
 from app.db import tenant_session
 from app.main import create_app
-from app.models import Candidate, Citation, Claim, Draft, Paragraph, ReviewEvent, Round
+from app.models import Candidate, Citation, Claim, Draft, Paragraph, ReviewEvent, Round, UsageRecord
 from app.pipeline.drafting import draft_round, rewrite_paragraph
 from app.pipeline.run import RoundBusy, run_round, start_round
 from tests.fakes.fake_provider import FakeProvider
@@ -200,6 +200,27 @@ def test_rewrite_resets_review_status(api):
         assert p.status == "unreviewed" and p.reviewed_by is None and p.text == new["text"]
         ev = s.scalars(select(ReviewEvent).where(ReviewEvent.paragraph_id == pid)).one()
         assert ev.action == "rewrite" and ev.after_text == new["text"]
+
+
+def test_rewrite_conflicts_with_edit_made_while_ai_was_working(api):
+    client, firm, member, _ = api
+    _, round_id = round_with_evidence(firm)
+    client.post(f"/api/rounds/{round_id}/run")
+    with tenant_session(firm) as s:
+        pid = s.scalars(select(Paragraph.id).join(Draft).where(Draft.round_id == round_id)).one()
+
+    def ai_while_assistant_edits(call):
+        with tenant_session(firm) as s2:  # 助理在 AI 還在跑的時候存了修改
+            s2.execute(update(Paragraph).where(Paragraph.id == pid).values(text="助理剛改好的內文。"))
+        return {"text": "AI 重寫的內文，此有{{cite:E1}}可稽。", "citations": [{"code": "E1", "quote": E_QUOTE}]}
+
+    client.app.state.provider_factory = lambda settings, firm_: FakeProvider({"rewrite": ai_while_assistant_edits})
+    r = client.post(f"/api/paragraphs/{pid}/rewrite", json={"instruction": "語氣更精簡"})
+    assert r.status_code == 409, r.text
+    with tenant_session(firm) as s:
+        assert s.get(Paragraph, pid).text == "助理剛改好的內文。"
+        steps = [u.step for u in s.scalars(select(UsageRecord))]
+        assert "rewrite" in steps  # AI 已經跑了，用量仍要記
 
 
 def test_rewrite_function_uses_schema_and_instruction(db):

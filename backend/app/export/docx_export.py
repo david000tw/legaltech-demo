@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentMember
 from app.models import Citation, Document, Exhibit, ExportRecord, Page, PageText, Paragraph
 from app.render import render_text
-from app.verify.citations import Blocker, export_blockers
+from app.verify.citations import INVALID_XML_CHARS, Blocker, export_blockers
 
 FONT = "標楷體"
 TITLE = "民事準備書狀"
@@ -37,6 +37,7 @@ def _setup(d: docx.Document) -> None:
     pf = normal.paragraph_format
     pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
     pf.line_spacing = Pt(24)
+    pf.space_before = pf.space_after = Pt(0)  # 預設範本有段後距，會讓行距不是固定 24pt
 
 
 def _cited_exhibits(s: Session, paragraph_ids: list[UUID]) -> list[tuple[Exhibit, str]]:
@@ -50,6 +51,9 @@ def _cited_exhibits(s: Session, paragraph_ids: list[UUID]) -> list[tuple[Exhibit
 
 
 def export_draft(s: Session, draft_id: UUID, member: CurrentMember) -> bytes:
+    # 先鎖住整份草稿的段落（依 id 排序避免互鎖），檢查到產生檔案之間別人不能改段落或確認引用
+    s.scalars(select(Paragraph.id).where(Paragraph.draft_id == draft_id).order_by(Paragraph.id)
+              .with_for_update(read=True)).all()
     blockers = export_blockers(s, draft_id)  # 一律重新驗證
     if blockers:
         raise ExportBlocked(blockers)
@@ -70,7 +74,7 @@ def export_draft(s: Session, draft_id: UUID, member: CurrentMember) -> bytes:
     if exhibits:
         d.add_paragraph("證物清單")
         for ex, filename in exhibits:
-            d.add_paragraph(f"{ex.prefix}{ex.number}　{filename}")
+            d.add_paragraph(f"{ex.prefix}{ex.number}　{INVALID_XML_CHARS.sub('', filename or '')}")
 
     buf = io.BytesIO()
     d.save(buf)

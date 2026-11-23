@@ -18,10 +18,13 @@ from sqlalchemy.orm import Session
 from app.models import (
     Candidate, Citation, Draft, Judgment, JudgmentPassage, PageText, Paragraph, StatuteArticle,
 )
+from app.ingest.service import current_page_text
 from app.pipeline.claims import opponent_pages
 from app.text_norm import find_quote, normalize_text, quote_length
 
 MARKER_RE = re.compile(r"\{\{(cite|quote):([A-Z]\d+)\}\}")
+# Word（XML）不接受的字元：匯出時會讓 python-docx 丟例外
+INVALID_XML_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff\ud800-\udfff]")
 NUM = r"[〇零一二三四五六七八九十百千\d]+"
 _UNBOUND_PATTERNS = [
     re.compile(rf"{NUM}\s*年度?\s*[一-鿿]{{1,6}}?\s*字\s*第\s*{NUM}\s*號"),  # 判決字號（含憲判字、判例）
@@ -165,7 +168,11 @@ def verify_citation(s: Session, c: Citation) -> list[str]:
     if not target_ok:
         reasons = ["unknown_code"]
     elif c.kind == "evidence":
-        reasons = _quote_reasons(s.get(PageText, c.page_text_id).text, c.quote)
+        pt = s.get(PageText, c.page_text_id)
+        reasons = _quote_reasons(pt.text, c.quote)
+        latest = current_page_text(s, pt.page_id)
+        if latest is not None and latest.id != pt.id:  # 該頁文字已校正成新版本，舊版引用要重新確認
+            reasons.append("source_superseded")
         if _contains_case_number(c.quote):  # 卷證裡埋的字號逐字引用後，展開的書狀仍會出現字號
             reasons.append("quote_contains_case_number")
     elif c.kind == "judgment":
@@ -209,8 +216,12 @@ def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
     for code in sorted({code for kind, code in markers if kind == "quote"}):
         if code in cites and not cites[code].quote.strip():
             reasons.append(f"quote_marker_without_quote:{code}")
+    if MARKER_RE.search(p.heading or ""):  # 標題不展開標記，有標記就會原樣印進書狀
+        reasons.append("marker_in_heading")
     if has_malformed_marker(p.heading) or has_malformed_marker(p.text):
         reasons.append("malformed_marker")
+    if any(INVALID_XML_CHARS.search(x or "") for x in [p.heading, p.text, *(c.quote for c in cites.values())]):
+        reasons.append("control_char")
     for hit in scan_unbound_references(p.heading) + scan_unbound_references(p.text):
         reason = f"unbound_reference:{hit}"
         if reason not in reasons:
@@ -249,6 +260,9 @@ def paragraph_blockers(s: Session, p: Paragraph) -> list[str]:
 def export_blockers(s: Session, draft_id: UUID) -> list[Blocker]:
     """匯出前一律重新驗證，不信任先前存的結果。"""
     out: list[Blocker] = []
-    for p in s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id).order_by(Paragraph.seq)):
+    paragraphs = list(s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id).order_by(Paragraph.seq)))
+    if not paragraphs:
+        return [Blocker(0, "empty_draft")]
+    for p in paragraphs:
         out.extend(Blocker(p.seq, r) for r in paragraph_blockers(s, p))
     return out

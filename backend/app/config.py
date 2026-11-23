@@ -17,3 +17,6 @@ class Settings(BaseSettings):
     bind_host: str = "127.0.0.1"
     port: int = 8000
     session_secret: str = "dev-only-secret-change-me"
+    # 允許送出寫入請求的來源（Origin 標頭）；其他網站或本機其他埠一律拒絕
+    allowed_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173",
+                                  "http://127.0.0.1:8000", "http://localhost:8000"]

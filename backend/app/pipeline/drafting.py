@@ -71,6 +71,10 @@ def draft_round(s: Session, round_id: UUID, provider: AIProvider, member_id: UUI
     return draft
 
 
+class ParagraphChanged(Exception):
+    """AI 重寫期間段落被別人改過；不覆蓋對方的修改。"""
+
+
 def reset_review(p: Paragraph) -> None:
     p.status = "unreviewed"
     p.reviewed_by = None
@@ -100,6 +104,9 @@ def rewrite_paragraph(s: Session, paragraph_id: UUID, instruction: str, provider
                           effort="high")
     record_usage(s, rnd.firm_id, rnd.case_id, member_id, "rewrite", result)
     before = p.text
+    p = s.get(Paragraph, paragraph_id, with_for_update=True, populate_existing=True)  # AI 可能跑了好幾分鐘
+    if p is None or p.text != before:
+        raise ParagraphChanged("段落在 AI 重寫期間被修改，請重新載入後再要求重寫")
     replace_paragraph(s, p, str(result.data.get("text", "")), _items(result.data))
     s.add(ReviewEvent(firm_id=p.firm_id, paragraph_id=p.id, member_id=member_id, action="rewrite",
                       before_text=before, after_text=p.text))

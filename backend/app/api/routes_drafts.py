@@ -15,7 +15,7 @@ from app.models import (
     Citation, Document, Draft, Exhibit, Judgment, JudgmentPassage, Page, PageText, Paragraph, Round,
     StatuteArticle,
 )
-from app.render import citation_label, render_text
+from app.render import citation_label, content_version, render_text
 from app.review.service import (
     CitationInput, ReviewRuleError, confirm_citation, edit_paragraph, mark_reviewed, renumber_exhibit,
 )
@@ -41,8 +41,10 @@ def citation_json(s, c: Citation) -> dict:
 
 
 def paragraph_json(s, p: Paragraph) -> dict:
+    rendered = render_text(s, p)
     return {"id": str(p.id), "seq": p.seq, "heading": p.heading, "text": p.text,
-            "rendered_text": render_text(s, p), "status": p.status, "verify_reasons": p.verify_reasons,
+            "rendered_text": rendered, "version": content_version(p.heading, rendered),
+            "status": p.status, "verify_reasons": p.verify_reasons,
             "reviewed_bar_number": p.reviewed_bar_number,
             "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
             "citations": [citation_json(s, c) for c in paragraph_citations(s, p.id)]}
@@ -56,6 +58,7 @@ def get_draft(draft_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
         paragraphs = s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id).order_by(Paragraph.seq))
         rnd = s.get(Round, draft.round_id)
         return {"id": str(draft.id), "round_id": str(rnd.id), "case_id": str(rnd.case_id),
+                "can_review": m.role == "lawyer" and m.bar_verified,
                 "paragraphs": [paragraph_json(s, p) for p in paragraphs],
                 "blockers": [{"paragraph_seq": b.paragraph_seq, "reason": b.reason} for b in blockers]}
 
@@ -111,13 +114,19 @@ def confirm(citation_id: UUID, m: CurrentMember = Depends(current_member)) -> di
         return citation_json(s, c)
 
 
+class ReviewBody(BaseModel):
+    version: str
+
+
 @router.post("/paragraphs/{paragraph_id}/review")
-def review(paragraph_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+def review(paragraph_id: UUID, body: ReviewBody | None = None, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
         _get_or_404(s, Paragraph, paragraph_id, "段落")
         require_lawyer(m)
+        if body is None:  # 404、403 先判斷，再要求版本
+            raise HTTPException(422, "缺少段落版本（version）")
         try:
-            p = mark_reviewed(s, paragraph_id, m)
+            p = mark_reviewed(s, paragraph_id, m, body.version)
         except ReviewRuleError as e:
             raise HTTPException(409, str(e))
         return paragraph_json(s, p)
@@ -141,7 +150,7 @@ def patch_exhibit(exhibit_id: UUID, body: ExhibitBody, m: CurrentMember = Depend
 DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
-@router.get("/drafts/{draft_id}/export")
+@router.post("/drafts/{draft_id}/export")  # 會寫匯出紀錄，不用 GET
 def export(draft_id: UUID, m: CurrentMember = Depends(current_member)):
     with tenant_session(m.firm_id) as s:
         _get_or_404(s, Draft, draft_id, "草稿")

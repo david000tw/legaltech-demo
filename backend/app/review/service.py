@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentMember
 from app.models import Citation, Exhibit, Page, PageText, Paragraph, ReviewEvent
 from app.pipeline.drafting import replace_paragraph, reset_review
+from app.render import content_version, render_text
 from app.verify.citations import paragraph_blockers, verify_citation
 
 
@@ -36,9 +37,19 @@ def _event(s: Session, p: Paragraph, m: CurrentMember | None, action: str,
                       before_text=before, after_text=after))
 
 
+def lock_paragraph(s: Session, paragraph_id: UUID) -> Paragraph | None:
+    """鎖住段落列並讀最新內容：同一段落的審核、確認與修改不會交錯。"""
+    return s.get(Paragraph, paragraph_id, with_for_update=True, populate_existing=True)
+
+
 def confirm_citation(s: Session, citation_id: UUID, member: CurrentMember) -> Citation:
     _require_lawyer(member)
-    c = s.get(Citation, citation_id)
+    pid = s.scalar(select(Citation.paragraph_id).where(Citation.id == citation_id))
+    if pid is None or lock_paragraph(s, pid) is None:
+        raise ReviewRuleError("引用已變更，請重新載入後再確認")
+    c = s.get(Citation, citation_id, populate_existing=True)
+    if c is None:  # 等鎖的期間段落被改寫，舊引用已不存在
+        raise ReviewRuleError("引用已變更，請重新載入後再確認")
     verify_citation(s, c)
     if c.kind != "judgment" or c.verify_status != "ok":
         raise ReviewRuleError("只有通過驗證的判決引用可以確認")
@@ -48,15 +59,21 @@ def confirm_citation(s: Session, citation_id: UUID, member: CurrentMember) -> Ci
     return c
 
 
-def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember) -> Paragraph:
+def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version: str) -> Paragraph:
+    """version 是律師畫面上那一版的指紋；內容已變（別人改過、改了原證號）就不能記成已審。"""
     _require_lawyer(member)
-    p = s.get(Paragraph, paragraph_id)
+    p = lock_paragraph(s, paragraph_id)
+    if p is None:
+        raise ReviewRuleError("段落已不存在")
+    rendered = render_text(s, p)
+    if content_version(p.heading, rendered) != version:
+        raise ReviewRuleError("段落內容已變更，請重新載入後再審核")
     blockers = [b for b in paragraph_blockers(s, p) if b != "unreviewed"]
     if blockers:
         raise ReviewRuleError("尚有未解決的問題：" + "、".join(blockers))
     p.status, p.reviewed_by, p.reviewed_bar_number = "reviewed", member.id, member.bar_number
     p.reviewed_at = datetime.now(timezone.utc)
-    _event(s, p, member, "mark_reviewed")
+    _event(s, p, member, "mark_reviewed", after=rendered)  # 留下律師審過、也會匯出的那一版
     s.flush()
     return p
 

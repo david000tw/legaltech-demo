@@ -56,7 +56,7 @@ describe('ExportButton', () => {
       'citation_without_marker:J1', 'quote_marker_without_quote:J1', 'inline_quote_unverified:x',
       'citation_failed:J1', 'judgment_unconfirmed:J1', 'unknown_code', 'quote_not_found', 'quote_too_short',
       'not_court_reasoning', 'source_withdrawn', 'statute_missing', 'possible_party_claim',
-      'quote_contains_case_number']) {
+      'quote_contains_case_number', 'marker_in_heading', 'control_char', 'empty_draft', 'source_superseded']) {
       expect(reasonLabel(code)).not.toContain(code.split(':')[0])
     }
   })

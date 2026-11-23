@@ -1,6 +1,9 @@
 """把段落內的引用標記轉成顯示文字。出處與引文都由系統產生，原證號即時計算。"""
 from __future__ import annotations
 
+import hashlib
+import json
+
 from sqlalchemy.orm import Session
 
 from app.corpus.search import article_display
@@ -38,3 +41,8 @@ def render_text(s: Session, p: Paragraph) -> str:
         return citation_label(s, c) or f"【引用錯誤：{code}】"
 
     return MARKER_RE.sub(sub, p.text or "")
+
+
+def content_version(heading: str, rendered: str) -> str:
+    """律師畫面上看到（也就是會匯出）的內容指紋：標題＋展開後的內文。"""
+    return hashlib.sha256(json.dumps([heading, rendered], ensure_ascii=False).encode()).hexdigest()[:32]

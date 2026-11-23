@@ -5,11 +5,12 @@ import CitationTag from '../components/CitationTag'
 import ExportButton, { reasonLabel } from '../components/ExportButton'
 import SourcePane from '../components/SourcePane'
 
-function ParagraphCard({ p, onShowSource, onChanged, onError }: {
+function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
   p: api.ParagraphView
+  canReview: boolean
   onShowSource: (c: api.CitationView) => void
   onChanged: () => Promise<void>
-  onError: (m: string) => void
+  onError: (m: string | null) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(p.text)
@@ -18,11 +19,13 @@ function ParagraphCard({ p, onShowSource, onChanged, onError }: {
 
   async function act(f: () => Promise<unknown>) {
     setBusy(true)
+    onError(null)  // 新的操作開始，舊的錯誤訊息不再適用
     try {
       await f()
       await onChanged()
     } catch (e) {
       onError((e as Error).message)
+      await onChanged()  // 例如內容已被別人改過：重新載入，讓律師看到最新版本
     } finally {
       setBusy(false)
     }
@@ -64,7 +67,7 @@ function ParagraphCard({ p, onShowSource, onChanged, onError }: {
         {p.citations.map((c) => (
           <span key={c.id} className="inline-flex items-center gap-1">
             <CitationTag citation={c} onClick={() => onShowSource(c)} />
-            {c.kind === 'judgment' && c.verify_status === 'ok' && !c.lawyer_confirmed && (
+            {canReview && c.kind === 'judgment' && c.verify_status === 'ok' && !c.lawyer_confirmed && (
               <button type="button" disabled={busy} onClick={() => act(() => api.confirmCitation(c.id))}
                 className="rounded border border-amber-400 px-2 py-0.5 text-xs text-amber-800">已讀原文，確認</button>
             )}
@@ -78,8 +81,10 @@ function ParagraphCard({ p, onShowSource, onChanged, onError }: {
         <button type="button" disabled={busy || !instruction.trim()}
           onClick={() => act(async () => { await api.rewriteParagraph(p.id, instruction); setInstruction('') })}
           className="rounded border px-3 py-1 text-sm disabled:opacity-50">要求重寫</button>
-        <button type="button" disabled={busy} onClick={() => act(() => api.reviewParagraph(p.id))}
-          className="rounded bg-emerald-600 px-3 py-1 text-sm text-white disabled:opacity-50">標記已審</button>
+        {canReview && (
+          <button type="button" disabled={busy} onClick={() => act(() => api.reviewParagraph(p.id, p.version))}
+            className="rounded bg-emerald-600 px-3 py-1 text-sm text-white disabled:opacity-50">標記已審</button>
+        )}
       </div>
     </article>
   )
@@ -117,7 +122,7 @@ export default function DraftEditor() {
       a.href = url
       a.download = '民事準備書狀.docx'
       a.click()
-      URL.revokeObjectURL(url)
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)  // 立刻釋放可能讓部分瀏覽器中斷下載
     } catch (e) {
       setError((e as Error).message)
       await load()
@@ -142,7 +147,8 @@ export default function DraftEditor() {
         </aside>
         <div className="space-y-4">
           {draft.paragraphs.map((p) => (
-            <ParagraphCard key={`${p.id}-${p.text}`} p={p} onShowSource={showSource} onChanged={load} onError={setError} />
+            <ParagraphCard key={`${p.id}-${p.text}`} p={p} canReview={draft.can_review} onShowSource={showSource}
+              onChanged={load} onError={setError} />
           ))}
         </div>
       </div>

@@ -19,6 +19,10 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
   statute_missing: () => '查無此條文',
   possible_party_claim: () => '引文是法院轉述的當事人主張，不是法院見解',
   quote_contains_case_number: () => '卷證引文夾帶判決字號，請勿整段引用',
+  marker_in_heading: () => '標題不可放引用標記，請移到內文',
+  control_char: () => '內容含有無法放進 Word 的控制字元',
+  empty_draft: () => '草稿沒有任何段落',
+  source_superseded: () => '卷證文字已更新，請重新確認這筆引用',
 }
 
 export function reasonLabel(reason: string): string {

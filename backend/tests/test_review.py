@@ -1,6 +1,9 @@
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 
 from app.db import tenant_session
 from app.main import create_app
@@ -48,9 +51,19 @@ def events(ctx, pid):
                                             .order_by(ReviewEvent.created_at))]
 
 
+def version_of(ctx, client, pid):
+    body = client.get(f"/api/drafts/{ctx['draft_id']}").json()
+    return next(p["version"] for p in body["paragraphs"] if p["id"] == str(pid))
+
+
+def post_review(ctx, client, pid, version=None):
+    v = version if version is not None else version_of(ctx, client, pid)
+    return client.post(f"/api/paragraphs/{pid}/review", json={"version": v})
+
+
 def confirm_and_review(ctx, client, pid):
     assert client.post(f"/api/citations/{cite_id(ctx, pid, 'J1')}/confirm").status_code == 200
-    r = client.post(f"/api/paragraphs/{pid}/review")
+    r = post_review(ctx, client, pid)
     assert r.status_code == 200, r.text
 
 
@@ -79,14 +92,14 @@ def test_unverified_lawyer_cannot_review(env):
 def test_cannot_review_with_failed_citation(env):
     bad = make_paragraph(env, "{{cite:E1}}可稽。", [("E1", "未讓幹道車先行")], seq=2)
     c = env["client_for"]("lawyer@a.test")
-    r = c.post(f"/api/paragraphs/{bad}/review")
+    r = post_review(env, c, bad)
     assert r.status_code == 409 and "citation_failed:E1" in r.text
     assert paragraph(env, bad).status == "unreviewed"
 
 
 def test_cannot_review_with_unconfirmed_judgment(env):
     c = env["client_for"]("lawyer@a.test")
-    r = c.post(f"/api/paragraphs/{env['good']}/review")
+    r = post_review(env, c, env["good"])
     assert r.status_code == 409 and "judgment_unconfirmed:J1" in r.text
 
 
@@ -168,9 +181,102 @@ def test_cross_firm_routes_404(env, db):
     b = TestClient(create_app(db))
     assert login(b, "lawyer@b.test").status_code == 200
     cid = cite_id(env, env["good"], "J1")
+    with tenant_session(env["firm"]) as s:
+        ex_id = s.scalars(select(Exhibit.id).where(Exhibit.document_id == env["exhibit_doc"])).one()
     for method, url in [("get", f"/api/cases/{case_id}"), ("get", f"/api/drafts/{env['draft_id']}"),
                         ("get", f"/api/citations/{cid}/source"), ("get", f"/api/pages/{page_id}"),
                         ("post", f"/api/rounds/{round_id}/run"), ("post", f"/api/citations/{cid}/confirm"),
-                        ("post", f"/api/paragraphs/{env['good']}/review")]:
-        assert getattr(b, method)(url).status_code == 404, url
+                        ("post", f"/api/paragraphs/{env['good']}/review"),
+                        ("patch", f"/api/paragraphs/{env['good']}"), ("patch", f"/api/exhibits/{ex_id}"),
+                        ("post", f"/api/drafts/{env['draft_id']}/export")]:
+        kwargs = {"json": {"text": "x", "citations": [], "number": 9}} if method == "patch" else {}
+        assert getattr(b, method)(url, **kwargs).status_code == 404, url
     assert b.patch(f"/api/paragraphs/{env['good']}", json={"text": "x", "citations": []}).status_code == 404
+
+
+def test_draft_reports_version_and_can_review(env):
+    lawyer = env["client_for"]("lawyer@a.test").get(f"/api/drafts/{env['draft_id']}").json()
+    assistant = env["client_for"]("assistant@a.test").get(f"/api/drafts/{env['draft_id']}").json()
+    unverified = env["client_for"]("new@a.test").get(f"/api/drafts/{env['draft_id']}").json()
+    assert lawyer["can_review"] is True and assistant["can_review"] is False and unverified["can_review"] is False
+    assert lawyer["paragraphs"][0]["version"] == assistant["paragraphs"][0]["version"]
+    assert len(lawyer["paragraphs"][0]["version"]) >= 16
+
+
+def test_review_requires_version_422(env):
+    c = env["client_for"]("lawyer@a.test")
+    assert c.post(f"/api/citations/{cite_id(env, env['good'], 'J1')}/confirm").status_code == 200
+    assert c.post(f"/api/paragraphs/{env['good']}/review").status_code == 422
+    assert paragraph(env, env["good"]).status == "unreviewed"
+
+
+def test_review_with_stale_version_conflicts(env):
+    """律師畫面還是舊版、助理已改了內文：律師按「已審」不能把沒看過的新內文記成已審。"""
+    lawyer = env["client_for"]("lawyer@a.test")
+    stale = version_of(env, lawyer, env["good"])
+    assistant = env["client_for"]("assistant@a.test")
+    new_text = "按{{cite:J1}}認被告{{quote:J1}}。"
+    assert assistant.patch(f"/api/paragraphs/{env['good']}",
+                           json={"text": new_text, "citations": [{"code": "J1", "quote": J_REASONING}]}).status_code == 200
+    assert lawyer.post(f"/api/citations/{cite_id(env, env['good'], 'J1')}/confirm").status_code == 200
+    r = post_review(env, lawyer, env["good"], stale)
+    assert r.status_code == 409 and "已變更" in r.json()["detail"]
+    assert paragraph(env, env["good"]).status == "unreviewed"
+
+
+def test_review_after_renumber_with_stale_version_conflicts(env):
+    """改原證號後，畫面上的「原證1」已不是匯出會出現的字，舊畫面不能送審。"""
+    lawyer = env["client_for"]("lawyer@a.test")
+    assert lawyer.post(f"/api/citations/{cite_id(env, env['good'], 'J1')}/confirm").status_code == 200
+    stale = version_of(env, lawyer, env["good"])
+    with tenant_session(env["firm"]) as s:
+        ex = s.scalars(select(Exhibit).where(Exhibit.document_id == env["exhibit_doc"])).one().id
+    assert lawyer.patch(f"/api/exhibits/{ex}", json={"number": 4}).status_code == 200
+    assert post_review(env, lawyer, env["good"], stale).status_code == 409
+    assert post_review(env, lawyer, env["good"]).status_code == 200
+
+
+def test_review_event_records_reviewed_text(env):
+    lawyer = env["client_for"]("lawyer@a.test")
+    confirm_and_review(env, lawyer, env["good"])
+    rendered = lawyer.get(f"/api/drafts/{env['draft_id']}").json()["paragraphs"][0]["rendered_text"]
+    with tenant_session(env["firm"]) as s:
+        ev = s.scalars(select(ReviewEvent).where(ReviewEvent.action == "mark_reviewed")).one()
+        assert ev.after_text == rendered
+
+
+def _hold_concurrent_edit(ctx, pid, started: threading.Event, hold_s: float = 0.6):
+    """另一個連線改段落（刪掉引用、換內文）但先不提交，hold_s 秒後才提交。"""
+    with tenant_session(ctx["firm"]) as s:
+        s.execute(delete(Citation).where(Citation.paragraph_id == pid))
+        s.execute(update(Paragraph).where(Paragraph.id == pid).values(text="被告應負全部責任。", status="unreviewed"))
+        s.flush()
+        started.set()
+        time.sleep(hold_s)
+
+
+def test_review_waits_for_concurrent_edit_and_conflicts(env):
+    lawyer = env["client_for"]("lawyer@a.test")
+    assert lawyer.post(f"/api/citations/{cite_id(env, env['good'], 'J1')}/confirm").status_code == 200
+    stale = version_of(env, lawyer, env["good"])
+    started = threading.Event()
+    t = threading.Thread(target=_hold_concurrent_edit, args=(env, env["good"], started))
+    t.start()
+    assert started.wait(5)
+    r = post_review(env, lawyer, env["good"], stale)
+    t.join()
+    assert r.status_code == 409, r.text
+    p = paragraph(env, env["good"])
+    assert p.status == "unreviewed" and p.text == "被告應負全部責任。"
+
+
+def test_confirm_waits_for_concurrent_edit_and_conflicts(env):
+    lawyer = env["client_for"]("lawyer@a.test")
+    cid = cite_id(env, env["good"], "J1")
+    started = threading.Event()
+    t = threading.Thread(target=_hold_concurrent_edit, args=(env, env["good"], started))
+    t.start()
+    assert started.wait(5)
+    r = lawyer.post(f"/api/citations/{cid}/confirm")
+    t.join()
+    assert r.status_code in (404, 409), r.text

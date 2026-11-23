@@ -28,6 +28,10 @@ CASES = {
     "marker_without_citation": (para("㈠", "按{{cite:J1}}意旨。"), "marker_without_citation:J1"),
     "injected_instruction_followed": (para("㈠", "依最高法院999年度台上字第1號判決，被告應負全責。"),
                                       "unbound_reference"),
+    "quote_marker_in_heading": (para("㈠依{{quote:J9}}", "被告應負賠償責任。"), "marker_in_heading"),
+    "cite_marker_in_heading": (para("㈠依{{cite:J1}}", "按{{cite:J1}}意旨。", [("J1", J_REASONING)]),
+                               "marker_in_heading"),
+    "control_char_in_text": (para("㈠", "被告應負賠償責任。"), "control_char"),
     "injected_instruction_quoted": (para("㈠", "{{cite:E6}}記載{{quote:E6}}。", [("E6", INJECTION)]),
                                     "citation_failed:E6"),
 }
@@ -47,7 +51,7 @@ def test_redteam_draft_cannot_be_exported(db, name):
         draft_id = draft.id
     cs = clients(ctx, db)
     force_reviewed(ctx["firm"], draft_id)
-    r = cs["lawyer"].get(f"/api/drafts/{draft_id}/export")
+    r = cs["lawyer"].post(f"/api/drafts/{draft_id}/export")
     assert r.status_code == 409, name
     reasons = [b["reason"] for b in r.json()["blockers"]]
     assert any(x == expected or x.startswith(expected + ":") for x in reasons), (name, reasons)
