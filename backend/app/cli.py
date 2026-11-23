@@ -3,17 +3,22 @@
 python -m app.cli create-firm --name NAME [--internal]
 python -m app.cli create-member --firm NAME --email E --password P --role lawyer|assistant
                                 [--bar-number N --bar-verified]
+python -m app.cli import-testcase <dir> --firm NAME
 """
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
+from uuid import UUID
 
 from sqlalchemy import select
 
 from app.auth import hash_password
 from app.db import admin_session
-from app.models import Firm, Member
+from app.ingest.service import ingest_document
+from app.models import Case, Firm, Member, Round
 
 
 def _firm_by_name(s, name: str) -> Firm:
@@ -42,6 +47,31 @@ def cmd_create_member(a) -> None:
         print(f"member_id={m.id}")
 
 
+def import_testcase(folder: Path, firm_name: str) -> tuple[UUID, UUID]:
+    """匯入合成測試案件：建案件、依檔名順序上傳卷證、建第 1 輪並掛上對造書狀。"""
+    folder = Path(folder)
+    meta = json.loads((folder / "case.json").read_text(encoding="utf-8"))
+    with admin_session() as s:
+        firm = _firm_by_name(s, firm_name)
+        case = Case(firm_id=firm.id, title=meta["title"], our_side=meta["our_side"])
+        s.add(case)
+        s.flush()
+        rnd = Round(firm_id=firm.id, case_id=case.id, seq=1, status="created")
+        s.add(rnd)
+        s.flush()
+        for kind, sub, round_id in (("evidence", "evidence", None), ("opponent_brief", "opponent", rnd.id)):
+            for f in sorted((folder / sub).glob("*")):
+                if f.is_file():
+                    ingest_document(s, firm.id, case.id, kind, f.name, f.read_bytes(), round_id)
+        return case.id, rnd.id
+
+
+def cmd_import_testcase(a) -> None:
+    case_id, round_id = import_testcase(Path(a.dir), a.firm)
+    print(f"case_id={case_id}")
+    print(f"round_id={round_id}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -60,6 +90,11 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--bar-number")
     m.add_argument("--bar-verified", action="store_true")
     m.set_defaults(func=cmd_create_member)
+
+    t = sub.add_parser("import-testcase")
+    t.add_argument("dir")
+    t.add_argument("--firm", required=True)
+    t.set_defaults(func=cmd_import_testcase)
     return p
 
 
