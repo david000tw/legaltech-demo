@@ -1,6 +1,6 @@
 """探測本機 Claude Code 能否被乾淨地呼叫（計畫 1 Task 0）。
 
-執行：python -X utf8 scripts/probe_claude.py
+執行：uv run python -X utf8 scripts/probe_claude.py
 任一判準不符就以非 0 結束。通過時把正式格式（json）的輸出存成
 tests/fixtures/claude_p_sample.json，作為解析程式的依據。
 """
@@ -15,6 +15,9 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+
+from app.ai.claude_code import build_args, child_env  # noqa: E402  與正式程式同一份
 FIXTURE = HERE.parent / "tests" / "fixtures" / "claude_p_sample.json"
 
 SCHEMA = {
@@ -30,27 +33,6 @@ USER = (
 )
 STRIP_KEYS = ("session_id", "uuid", "credential_expires_at")
 TOKEN_LIMIT = 3000
-
-
-def child_env(base):
-    keep = {}
-    for k, v in base.items():
-        up = k.upper()
-        if up.startswith("CLAUDE") and up != "CLAUDE_CONFIG_DIR":
-            continue
-        if up in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
-            continue
-        keep[k] = v
-    return keep
-
-
-def build_args(cmd, *, model, effort, system_prompt_path, schema):
-    return [*cmd, "-p", "--output-format", "json", "--model", model, "--effort", effort,
-            "--safe-mode", "--setting-sources", "", "--strict-mcp-config",
-            "--disable-slash-commands", "--no-session-persistence",
-            "--system-prompt-file", system_prompt_path,
-            "--json-schema", json.dumps(schema, ensure_ascii=False),
-            "--tools", ""]
 
 
 def invoke(stream: bool):

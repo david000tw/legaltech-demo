@@ -1,5 +1,5 @@
 {
- "duration_api_ms": 1636,
+ "duration_api_ms": 1685,
  "stop_reason": "tool_use",
  "total_cost_usd": 0.004796,
  "usage": {
@@ -92,12 +92,12 @@
   "ok": true,
   "seen": false
  },
- "ttft_ms": 1745,
+ "ttft_ms": 1757,
  "type": "result",
- "duration_ms": 1763,
- "ttft_stream_ms": 1381,
- "time_to_request_ms": 126,
- "first_content_frame_ms": 1381,
+ "duration_ms": 1780,
+ "ttft_stream_ms": 1412,
+ "time_to_request_ms": 96,
+ "first_content_frame_ms": 1412,
  "queued_turn_count": 0,
  "result_index": 0
 }
