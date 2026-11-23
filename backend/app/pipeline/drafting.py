@@ -11,9 +11,9 @@ from app.ai.provider import AIProvider, record_usage
 from app.ai.schemas import DRAFT_SCHEMA, REWRITE_SCHEMA
 from app.models import Case, Citation, Claim, Draft, Paragraph, ReviewEvent, Round
 from app.numbering import strip_heading_number
-from app.pipeline.candidates import format_candidates, round_candidates
+from app.pipeline.candidates import filer_line, format_candidates, round_candidates
 from app.pipeline.case_context import case_context
-from app.pipeline.claims import SIDE_LABEL
+from app.pipeline.claims import SIDE_LABEL, claim_filers
 from app.verify.citations import MARKER_RE, attach_citations, verify_paragraph
 
 
@@ -27,12 +27,12 @@ def _selected_codes(claims: list[Claim]) -> list[str]:
     return out
 
 
-def _claim_lines(claims: list[Claim]) -> str:
+def _claim_lines(claims: list[Claim], filers: dict | None = None) -> str:
     lines = []
     for c in claims:
         sel = c.selection or {}
         ev = "、".join(f"{e['code']}（摘錄：「{e['quote']}」）" for e in sel.get("evidence", [])) or "無"
-        lines.append(f"主張{c.seq}：{c.summary}\n　原文：「{c.quote}」\n　可用卷證：{ev}\n"
+        lines.append(f"主張{c.seq}：{c.summary}{filer_line(filers, c)}\n　原文：「{c.quote}」\n　可用卷證：{ev}\n"
                      f"　可用判決：{'、'.join(sel.get('judgments', [])) or '無'}\n"
                      f"　可用法條：{'、'.join(sel.get('statutes', [])) or '無'}\n"
                      f"　說明：{sel.get('note', '')}")
@@ -47,7 +47,7 @@ def draft_context(s: Session, round_id: UUID, extra_codes: list[str] | None = No
     codes = [c for c in _selected_codes(claims) + (extra_codes or []) if c in cands]
     codes = list(dict.fromkeys(codes))
     return (case_context(s, case) + "\n\n"
-            f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張與對應結果】\n{_claim_lines(claims) or '（無）'}\n\n"
+            f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張與對應結果】\n{_claim_lines(claims, claim_filers(s, claims)) or '（無）'}\n\n"
             f"【可引用的資料原文】\n{format_candidates(s, [cands[c] for c in codes]) or '（無）'}")
 
 

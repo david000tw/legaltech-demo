@@ -49,6 +49,10 @@ PROCEDURE_LABEL = {"civil": "民事", "family": "家事"}
 _CASE_WORD = re.compile(r"年度?(\D+?)字第")
 # 案號不是完整格式時（「113家訴5」「113年度家訴字5號」）：去掉數字與年度、字、第、號，剩下的就是字別
 _NOT_WORD = re.compile(r"[\d〇零一二三四五六七八九十百千\s年度字第號()（）]")
+_DIGIT = re.compile(r"[\d〇零一二三四五六七八九十百千]")
+# 寬鬆判讀時，剩下的字要像字別：1～6 個漢字，且含常見字別用字。「尚未分案」「待補」「N/A」這類暫代文字不算。
+_LOOSE_WORD = re.compile(r"^[\u4e00-\u9fff]{1,6}$")
+_WORD_CHARS = set("訴簡上抗調繼聲執全家婚親再救小促重移監輔護養財非易")
 
 
 def case_type_of(code: str | None) -> CaseType:
@@ -61,7 +65,10 @@ def _word(case_number: str | None) -> str | None:
     m = _CASE_WORD.search(text)
     if m:
         return m.group(1)
-    return _NOT_WORD.sub("", text) or None
+    if not _DIGIT.search(text):
+        return None
+    rest = _NOT_WORD.sub("", text)
+    return rest if _LOOSE_WORD.match(rest) and _WORD_CHARS & set(rest) else None
 
 
 def procedure_for(case_type: str | None, case_number: str | None) -> str:

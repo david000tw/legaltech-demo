@@ -23,7 +23,7 @@ from app.models import (
     StatuteArticle,
 )
 from app.pipeline.case_context import case_context
-from app.pipeline.claims import SIDE_LABEL
+from app.pipeline.claims import SIDE_LABEL, claim_filers
 from app.text_norm import find_quote, normalize_text, quote_length
 
 EVIDENCE_TOKEN_BUDGET = 150_000
@@ -119,8 +119,13 @@ def format_candidates(s: Session, cands: list[Candidate]) -> str:
     return "\n\n".join(blocks)
 
 
-def format_claims(claims: list[Claim]) -> str:
-    return "\n".join(f"主張{c.seq}：{c.summary}\n　原文：「{c.quote}」" for c in claims)
+def filer_line(filers: dict | None, claim: Claim) -> str:
+    """主張的提出者（claims.claim_filers 算好的），接在主張摘要下一行。"""
+    return f"\n　提出者：{filers[claim.id]}" if filers and claim.id in filers else ""
+
+
+def format_claims(claims: list[Claim], filers: dict | None = None) -> str:
+    return "\n".join(f"主張{c.seq}：{c.summary}{filer_line(filers, c)}\n　原文：「{c.quote}」" for c in claims)
 
 
 def _empty_selection() -> dict:
@@ -182,7 +187,7 @@ def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_i
     claims = _claims(s, round_id)
     cands = round_candidates(s, round_id)
     user = (case_context(s, case) + "\n\n"
-            f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張】\n{format_claims(claims)}\n\n"
+            f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張】\n{format_claims(claims, claim_filers(s, claims))}\n\n"
             f"【候選資料】\n{format_candidates(s, list(cands.values()))}")
     if estimate_tokens(user) > SELECT_TOKEN_LIMIT:
         raise AIError("other", f"對應步驟的輸入過長（約 {estimate_tokens(user):,} token），請減少卷證或拆成多輪")

@@ -186,6 +186,13 @@ def test_unreadable_case_number_warns():
     assert procedure_warning("spousal_rights", "  ") is None  # 沒填不算
 
 
+@pytest.mark.parametrize("number", ["尚未分案", "待補", "（未定）", "N/A", "—", "?", "113-5", "待補113"])
+def test_placeholder_case_number_keeps_case_type_procedure(number):
+    """律師常先填暫代文字：不能把遺產案翻成民事（書狀名稱、受文都會錯）。"""
+    assert procedure_for("estate_partition", number) == "family"
+    assert "無法判讀" in procedure_warning("estate_partition", number)
+
+
 # ---- critic（Task 6～9）M4：一份很長的判決不能佔滿候選（少數見解 45 段壓過多數見解） ----
 def _long_judgment(s, citation, texts, case_types):
     j = Judgment(citation=citation, court="測試法院", court_level="district", decided_on=date(2024, 1, 1),
@@ -218,7 +225,7 @@ def test_minority_view_ranks_below_majority_but_still_appears(db):
 # ---- 計畫 1B 驗收：用 9 件真 AI 驗收時拆出的主張重播候選建立（不呼叫 AI） ----
 ACCEPTANCE = Path(__file__).resolve().parents[2] / "docs" / "acceptance"
 RECORDED = [ACCEPTANCE / "e2e_report_1b_run1.json", ACCEPTANCE / "e2e_report_1b_run2.json",
-            ACCEPTANCE / "e2e_report_1b_run3.json",
+            ACCEPTANCE / "e2e_report_1b_run3.json", ACCEPTANCE / "e2e_report_1b_run4.json",
             ACCEPTANCE / "e2e_report_1b.json"]  # 每次真 AI 拆出的主張不同，全部重播
 NEW_TYPE_CASES = ["spike-affair-1663", "spike-estate-159", "spike-nominee-524", "affair-2", "estate-2", "nominee-2"]
 
@@ -254,3 +261,18 @@ def test_same_type_minority_still_outranks_other_types(db):
         s.flush()
         got = [p.judgment_id for p in search_passages(s, text, 5, case_type="spousal_rights")]
         assert got.index(minority.id) < got.index(other.id)
+
+
+def test_other_type_best_match_keeps_a_slot(db):
+    """最終審查 I3：遺產案裡的借名爭點，借名判決在文字上最相關時，同類加權不能把它整個擠出候選（設計：只加權、不排除）。"""
+    query = "主張借名登記者應就借名契約之成立負舉證責任"
+    with admin_session() as s:
+        nominee = _long_judgment(s, "借名判決", [query], ["nominee_registration"])
+        _long_judgment(s, "遺產判決", [f"主張借名登記者，遺產分割方法第{i}項另議" for i in range(1, 10)],
+                       ["estate_partition"])
+        got = search_passages(s, query, 8, case_type="estate_partition")
+        assert len(got) == 8 and nominee.id in {p.judgment_id for p in got}
+        # 同類判決文字上一樣相關時，不另外保留他類的位置
+        same = _long_judgment(s, "遺產判決二", [query], ["estate_partition"])
+        got = search_passages(s, query, 8, case_type="estate_partition")
+        assert got[0].judgment_id == same.id and nominee.id not in {p.judgment_id for p in got}

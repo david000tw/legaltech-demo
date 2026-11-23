@@ -49,6 +49,21 @@ def _filers(s: Session, round_id: UUID) -> dict:
     return out
 
 
+def claim_filers(s: Session, claims: list[Claim]) -> dict[UUID, str]:
+    """每條主張的提出者：主張所在頁 → 對造書狀 → 遞狀人。由系統帶入起草與對應步驟，不靠 AI 在摘要裡寫名字；
+    立場與我方相同者直接標明不得反駁（設計 5.2）。看不出頁或沒選遞狀人的主張不標。"""
+    out: dict[UUID, str] = {}
+    for c in claims:
+        page = s.get(Page, c.page_id) if c.page_id else None
+        doc = s.get(Document, page.document_id) if page else None
+        party = s.get(CaseParty, doc.filed_by_party_id) if doc and doc.filed_by_party_id else None
+        if party is None or party.case_id != doc.case_id:
+            continue
+        note = "立場與我方相同，不得反駁" if party.alignment == "aligned" else ALIGNMENT_LABEL[party.alignment]
+        out[c.id] = f"{party.role} {party.name}（{note}）"
+    return out
+
+
 def format_pages(pages: list[tuple[int, str]]) -> str:
     return "\n\n".join(f"【第{n}頁】\n{text}" for n, text in pages)
 

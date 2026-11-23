@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { attorneyProblem, splitAttorneys } from './caseForms'
 
 describe('attorneys', () => {
-  it('splits on commas, semicolons, 頓號 and spaces', () => {
-    expect(splitAttorneys('王大明律師，李小華律師；陳一律師、林二律師 張三律師;趙四律師,錢五律師'))
-      .toEqual(['王大明律師', '李小華律師', '陳一律師', '林二律師', '張三律師', '趙四律師', '錢五律師'])
+  it('splits on commas, semicolons and 頓號', () => {
+    expect(splitAttorneys('王大明律師，李小華律師；陳一律師、趙四律師,錢五律師;孫六律師'))
+      .toEqual(['王大明律師', '李小華律師', '陳一律師', '趙四律師', '錢五律師', '孫六律師'])
     expect(splitAttorneys('  ')).toEqual([])
+  })
+
+  it('keeps a name with spaces as one attorney', () => {
+    // 最終審查：以空白分隔會把「王大明 律師」拆成兩位，狀頭印出「訴訟代理人　律師」
+    expect(splitAttorneys('王大明 律師， David Wang律師 ')).toEqual(['王大明 律師', 'David Wang律師'])
   })
 
   it('reports too many or too long names', () => {

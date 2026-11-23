@@ -304,3 +304,30 @@ def test_change_filer_of_uploaded_brief(lawyer_client):
     assert client.patch(f"/api/documents/{ev}", json={"filed_by_party_id": parties[1]["id"]}).status_code == 422
     assert client.patch("/api/documents/00000000-0000-0000-0000-000000000000",
                         json={"filed_by_party_id": None}).status_code == 404
+
+
+# ---- 最終審查 I2：每條主張的提出者由系統帶入起草與對應步驟，不靠 AI 在摘要裡寫名字 ----
+def test_draft_and_select_label_each_claims_filer(lawyer_client):
+    from app.pipeline.candidates import select_for_claims
+    from app.pipeline.claims import extract_claims
+    from app.pipeline.drafting import draft_context
+    from tests.fakes.fake_provider import FakeProvider
+    client, firm, _ = lawyer_client
+    cid = _estate_case(client)
+    parties = client.put(f"/api/cases/{cid}/parties", json=PARTIES).json()
+    rid = client.post(f"/api/cases/{cid}/rounds").json()["id"]
+    assert _upload(client, cid, rid, parties[1]["id"]).status_code == 200  # 第 1 頁：對造宋文德
+    assert _upload(client, cid, rid, parties[2]["id"]).status_code == 200  # 第 2 頁：立場相同的宋文琪
+    claims = {"claims": [{"page_no": 1, "summary": "被告主張請求無理由", "quote": "被告主張原告請求無理由等語。"},
+                         {"page_no": 2, "summary": "被告主張請求無理由", "quote": "被告主張原告請求無理由等語。"}]}
+    with tenant_session(firm) as s:
+        extract_claims(s, rid, FakeProvider({"claims": claims}), None)
+    with tenant_session(firm) as s:
+        text = draft_context(s, rid)
+    first, second = text.split("主張2：")
+    assert "提出者：被告 宋文德（對造）" in first.split("主張1：")[1]
+    assert "提出者：被告 宋文琪（立場與我方相同，不得反駁）" in second
+    fake = FakeProvider({"select": {"claims": []}})
+    with tenant_session(firm) as s:
+        select_for_claims(s, rid, fake, None)
+    assert "提出者：被告 宋文琪（立場與我方相同，不得反駁）" in fake.calls[0]["user"]

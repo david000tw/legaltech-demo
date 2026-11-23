@@ -16,10 +16,14 @@ _KEEP = re.compile(r"[㐀-䶿一-鿿豈-﫿0-9]")
 CURATED_BOOST = 1.5
 TYPE_BOOST = 4.0  # 與案件同類型的判決、條文加權（設計 5.3）：只加權、不排除；沒有標籤的維持原分數。
 # 由三次 9 件真 AI 驗收的主張重播決定：2.0／2.5 時外遇案、3.0 時遺產案（第 3 次）他類比例達 30%；
-# 4.0 時三次最高 0.09，遺產案裡的借名爭點仍拿得到借名判決（設計：遺產案常要引用借名判決）。
+# 4.0 時三次最高 0.09；但遺產案裡的借名爭點可能拿不到借名判決，所以另有下面的他類保留位置。
 # 搭配少數見解 0.6，排序是：同類多數（4.0）> 同類少數（2.4）> 他類精選（1.5）> 他類（1.0）。
 # 註記為少數見解的判決降權：仍會出現在候選（帶註記），但同樣相關時排在多數見解後面。
 # 長篇少數見解判決切出的段落多，不降權會佔掉近半的同類候選（critic Task 6～9 M4）。
+# 他類判決的保留位置（最終審查 I3）：不加權時，他類段落的分數比最好的同類段落高出 30% 以上，才保留一個位置給它。
+# 1.3 由四次真 AI 主張重播決定：1.0 時他類比例最高 0.296（貼著 30%）；1.3 時最高 0.16，
+# 第 4 次遺產案的借名主張拿得到借名判決；1.5 以上就拿不到了。
+OTHER_TYPE_MARGIN = 1.3
 MINORITY_PREFIX = "少數見解"
 MINORITY_WEIGHT = 0.6
 
@@ -58,8 +62,18 @@ def search_passages(s: Session, query: str, k: int, passage_types: tuple[str, ..
         .where(Judgment.status == "active", JudgmentPassage.status == "active",
                JudgmentPassage.passage_type.in_(passage_types))
     ).all()
-    return _top([(score(q, p.text) * (CURATED_BOOST if curated else 1.0) * _type_boost(case_type, tags)
-                  * _minority(note), p) for p, curated, tags, note in rows], k)
+    base = [(score(q, p.text) * (CURATED_BOOST if curated else 1.0) * _minority(note), p, tags)
+            for p, curated, tags, note in rows]
+    top = _top([(b * _type_boost(case_type, tags), p) for b, p, tags in base], k)
+    if not case_type or not top:
+        return top
+    # 只加權、不排除（設計 5.3）：不加權時文字上最相關的若是他類判決（例：遺產案裡的借名爭點），保留一個位置給它
+    same = max((b for b, _, tags in base if case_type in (tags or [])), default=0.0)
+    other_score, other = max(((b, p) for b, p, tags in base if case_type not in (tags or [])),
+                             key=lambda x: x[0], default=(0.0, None))
+    if other is not None and other_score > same * OTHER_TYPE_MARGIN and other not in top:
+        top = top[:k - 1] + [other] if len(top) >= k else top + [other]
+    return top
 
 
 def search_articles(s: Session, query: str, k: int, case_type: str | None = None) -> list[StatuteArticle]:

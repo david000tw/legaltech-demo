@@ -14,8 +14,8 @@ export function headerDraftFrom(c: api.CaseDetail): HeaderDraft {
     reference_date: h.reference_date ?? '' }
 }
 
-// 訴訟代理人可用半形／全形逗號、分號、頓號或空白分隔
-export const splitAttorneys = (s: string) => s.split(/[,，、;；\s]+/).map((t) => t.trim()).filter(Boolean)
+// 訴訟代理人可用半形／全形逗號、分號或頓號分隔；空白不算分隔（「王大明 律師」「David Wang」是一位）
+export const splitAttorneys = (s: string) => s.split(/[,，、;；]+/).map((t) => t.trim()).filter(Boolean)
 
 // 與後端上限一致（最多 10 位、每位 100 字）；先在畫面上擋，不讓律師看到看不懂的 422
 export function attorneyProblem(s: string): string | null {
