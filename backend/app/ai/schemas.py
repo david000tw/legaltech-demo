@@ -12,3 +12,13 @@ _INT = {"type": "integer"}
 CLAIMS_SCHEMA = _obj({
     "claims": {"type": "array", "items": _obj({"summary": _STR, "quote": _STR, "page_no": _INT})},
 })
+
+SELECT_SCHEMA = _obj({
+    "selections": {"type": "array", "items": _obj({
+        "claim_seq": _INT,
+        "evidence": {"type": "array", "items": _obj({"code": _STR, "quote": _STR})},
+        "judgments": {"type": "array", "items": _STR},
+        "statutes": {"type": "array", "items": _STR},
+        "note": _STR,
+    })},
+})
