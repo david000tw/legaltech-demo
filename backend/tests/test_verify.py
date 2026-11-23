@@ -233,3 +233,72 @@ def test_evidence_quote_containing_case_number_flagged(db):
     pid = make_paragraph(ctx, "{{cite:E6}}記載{{quote:E6}}。", [("E6", inj)])
     _, cites = para(ctx, pid)
     assert "quote_contains_case_number" in cites["E6"].verify_reasons
+
+
+# ---- phase 3 審查補強 ----
+
+def test_malformed_marker_flagged(db):
+    ctx = setup_verify_round()
+    pid = make_paragraph(ctx, "依{{cite:民法第184條第1項}}及{{quote:「捏造引文」}}。", [])
+    reasons, _ = para(ctx, pid)
+    assert "malformed_marker" in reasons
+    assert any(r.startswith("unbound_reference:") for r in reasons)
+
+
+def test_fullwidth_marker_flagged(db):
+    ctx = setup_verify_round()
+    pid = make_paragraph(ctx, "依｛｛cite:J1｝｝意旨。", [])
+    reasons, _ = para(ctx, pid)
+    assert "malformed_marker" in reasons
+
+
+def test_heading_inline_quote_flagged(db):
+    ctx = setup_verify_round()
+    pid = make_paragraph(ctx, "被告應負責。", [], heading="㈠『被告未注意車前狀況且未減速慢行致撞擊原告』")
+    reasons, _ = para(ctx, pid)
+    assert any(r.startswith("inline_quote_unverified:") for r in reasons)
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("text", [
+    "參照110台上1234判決", "參照釋字748號解釋", "依民法184條規定", "依§184規定", "此有上證1可稽",
+    "此有甲證1可稽", "此有原證物一可稽", "依最高法院99年度台上字第1​號判決", "依51年台上字第223號判例",
+])
+def test_more_unbound_forms_flagged(text):
+    assert scan_unbound_references(text), text
+
+
+@pytest.mark.parametrize("text", [
+    "按〝被告未注意車前狀況且未減速慢行致撞擊原告〞",
+    "按﹁被告未注意車前狀況且未減速慢行致撞擊原告﹂",
+    "按＂被告未注意車前狀況且未減速慢行致撞擊原告＂",
+    "按‘被告未注意車前狀況且未減速慢行致撞擊原告’",
+    "按「被告未注意車前狀況且未減速」『慢行致撞擊原告』",
+])
+def test_more_quote_forms_flagged(text):
+    assert scan_inline_quotes(text, ["被告主張原告與有過失"]), text
+
+
+@pytest.mark.parametrize("passage,quote,expected", [
+    ("原告則主張被告應負全部責任云云。本院認被告應負七成責任。", "原告則主張被告應負全部責任", True),
+    ("被告雖以原告超速為由云云置辯，惟查並無證據。", "被告雖以原告超速為由", True),
+    ("原告主張：被告未注意車前狀況。且車速過快等語。經查被告確有過失。", "且車速過快", True),
+    ("原告主張：被告未注意車前狀況。且車速過快等語。經查被告確有過失。", "經查被告確有過失", False),
+])
+def test_party_claim_variants(passage, quote, expected):
+    from app.verify.citations import _in_party_claim
+    assert _in_party_claim(passage, quote) is expected
+
+
+def test_failed_citation_not_rendered_as_verified(db):
+    ctx = setup_verify_round()
+    fake = "支線道車輛駕駛人應負擔全部之肇事責任無疑"
+    pid = make_paragraph(ctx, "{{cite:J1}}認：{{quote:J1}}。", [("J1", fake)])
+    with tenant_session(ctx["firm"]) as s:
+        p = s.get(Paragraph, pid)
+        verify_paragraph(s, p)
+        out = render_text(s, p)
+    assert fake not in out and "3946" not in out
+    assert out.count("【未驗證：J1】") == 2

@@ -22,27 +22,48 @@ from app.pipeline.claims import opponent_pages
 from app.text_norm import find_quote, normalize_text, quote_length
 
 MARKER_RE = re.compile(r"\{\{(cite|quote):([A-Z]\d+)\}\}")
-_ANY_MARKER = re.compile(r"\{\{(?:cite|quote):[^}]*\}\}")
 NUM = r"[〇零一二三四五六七八九十百千\d]+"
 _UNBOUND_PATTERNS = [
-    re.compile(rf"{NUM}\s*年度?\s*[一-鿿]{{1,6}}?\s*字\s*第\s*{NUM}\s*號"),  # 判決字號（含憲判字）
-    re.compile(rf"釋字\s*第\s*{NUM}\s*號"),
+    re.compile(rf"{NUM}\s*年度?\s*[一-鿿]{{1,6}}?\s*字\s*第\s*{NUM}\s*號"),  # 判決字號（含憲判字、判例）
+    re.compile(rf"{NUM}\s*[台臺][一-鿿]{{1,3}}\s*{NUM}"),  # 簡寫字號：110台上1234
+    re.compile(rf"釋字\s*第?\s*{NUM}\s*號?"),
     re.compile(rf"{NUM}\s*年度?\s*第\s*{NUM}\s*次\s*民事庭(?:會議)?決議"),
-    re.compile(rf"[原被]證\s*{NUM}"),
+    re.compile(rf"(?:[原被上甲乙丙丁]證|證物)\s*物?\s*(?:編號)?\s*{NUM}"),
     re.compile(rf"第\s*{NUM}\s*頁"),
     re.compile(rf"第\s*{NUM}\s*條(?:\s*之\s*{NUM})?"),
+    re.compile(rf"(?:法|規則|條例|辦法)\s*{NUM}\s*條"),  # 省略「第」：民法184條
+    re.compile(rf"§\s*{NUM}"),
 ]
-_CASE_NUMBER_PATTERNS = _UNBOUND_PATTERNS[:3]  # 判決字號、釋字、決議
-# 法院判斷段裡轉述的當事人主張：從「原告雖主張」之類開始，到「等語／云云／等情／置辯」或句號為止。
-_PARTY_START = re.compile(r"(?:原告|被告|上訴人|被上訴人)(?:雖|固|另|復)?(?:主張|辯稱|抗辯|辯以|陳稱|則以)")
-_PARTY_END = re.compile(r"等語|云云|等情|置辯|。")
-_QUOTED = re.compile(r"「([^「」]*)」|『([^『』]*)』|“([^“”]*)”|\"([^\"]*)\"")
+_CASE_NUMBER_PATTERNS = _UNBOUND_PATTERNS[:4]  # 判決字號、簡寫字號、釋字、決議
+# 法院判斷段裡轉述的當事人主張：從「原告雖主張」之類開始，優先到「等語／云云／等情／置辯」（一定長度內），
+# 找不到才到第一個句號為止。
+_PARTY_START = re.compile(r"(?:原告|被告|上訴人|被上訴人)(?:雖|固|另|復|則|亦|並|又)?"
+                          r"(?:起訴主張|主張|辯稱|抗辯|辯以|陳稱|則以|雖以|固以|答辯)")
+_PARTY_TERMINATOR = re.compile(r"等語|云云|等情|置辯")
+_COURT_TURN = re.compile(r"然查|惟查|經查|次查|又查|本院|按")  # 轉入法院自己的論述
+PARTY_SPAN_LIMIT = 400
+_OPEN_Q = "「『“〝﹁‘\""
+_CLOSE_Q = "」』”〞﹂’\""
+_QUOTED = re.compile(f"[{_OPEN_Q}]([^{_OPEN_Q}{_CLOSE_Q}]*)[{_CLOSE_Q}]")
+QUOTE_GROUP_GAP = 3  # 引號段之間只隔幾個字時，視為同一段引文（防止拆成兩段各 14 字）
 MIN_QUOTE = 15
 KIND_BY_PREFIX = {"E": "evidence", "J": "judgment", "S": "statute"}
 
 
+def _scan_form(text: str) -> str:
+    """去掉合法的引用標記後，做 NFKC 並刪除格式字元（零寬空白等），供掃描用。"""
+    t = unicodedata.normalize("NFKC", MARKER_RE.sub("", text or ""))
+    return "".join(c for c in t if unicodedata.category(c) != "Cf")
+
+
+def has_malformed_marker(text: str) -> bool:
+    """合法標記以外，只要還有大括號（含全形）就是格式錯誤的標記。"""
+    t = _scan_form(text)
+    return "{" in t or "}" in t
+
+
 def scan_unbound_references(text: str) -> list[str]:
-    t = _ANY_MARKER.sub("", unicodedata.normalize("NFKC", text or ""))
+    t = _scan_form(text)
     hits: list[tuple[int, str]] = []
     for pat in _UNBOUND_PATTERNS:
         hits.extend((m.start(), m.group(0)) for m in pat.finditer(t))
@@ -55,14 +76,21 @@ def scan_unbound_references(text: str) -> list[str]:
 
 
 def scan_inline_quotes(text: str, opponent_texts: list[str]) -> list[str]:
-    t = _ANY_MARKER.sub("", text or "")
-    out = []
+    t = _scan_form(text)
+    groups: list[list[re.Match]] = []
     for m in _QUOTED.finditer(t):
-        content = next(g for g in m.groups() if g is not None)
-        if quote_length(content) < MIN_QUOTE:
+        if groups and len(normalize_text(t[groups[-1][-1].end():m.start()])) <= QUOTE_GROUP_GAP:
+            groups[-1].append(m)
+        else:
+            groups.append([m])
+    out = []
+    for g in groups:
+        parts = [m.group(1) for m in g]
+        if sum(quote_length(p) for p in parts) < MIN_QUOTE:
             continue
-        if not any(find_quote(op, content) for op in opponent_texts):
-            out.append(normalize_text(content)[:10])
+        ok = all(any(find_quote(op, p) for op in opponent_texts) for p in parts if quote_length(p) > 0)
+        if not ok:
+            out.append(normalize_text("".join(parts))[:10])
     return out
 
 
@@ -102,15 +130,19 @@ def _in_party_claim(passage_text: str, quote: str) -> bool:
     if not q or pos < 0:
         return False
     for m in _PARTY_START.finditer(norm):
-        end_m = _PARTY_END.search(norm, m.end())
-        end = end_m.end() if end_m else len(norm)
+        term = _PARTY_TERMINATOR.search(norm, m.end(), m.end() + PARTY_SPAN_LIMIT)
+        if term and not _COURT_TURN.search(norm, m.end(), term.start()):
+            end = term.end()
+        else:
+            period = norm.find("。", m.end())
+            end = period + 1 if period >= 0 else len(norm)
         if m.start() < pos + len(q) and pos < end:
             return True
     return False
 
 
 def _contains_case_number(quote: str) -> bool:
-    t = unicodedata.normalize("NFKC", quote)
+    t = _scan_form(quote)
     return any(p.search(t) for p in _CASE_NUMBER_PATTERNS)
 
 
@@ -177,12 +209,14 @@ def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
     for code in sorted({code for kind, code in markers if kind == "quote"}):
         if code in cites and not cites[code].quote.strip():
             reasons.append(f"quote_marker_without_quote:{code}")
+    if has_malformed_marker(p.heading) or has_malformed_marker(p.text):
+        reasons.append("malformed_marker")
     for hit in scan_unbound_references(p.heading) + scan_unbound_references(p.text):
         reason = f"unbound_reference:{hit}"
         if reason not in reasons:
             reasons.append(reason)
     opp = [op.text.text for op in opponent_pages(s, _round_id_for(s, p)) if op.text is not None]
-    for head in scan_inline_quotes(p.text, opp):
+    for head in scan_inline_quotes(p.heading, opp) + scan_inline_quotes(p.text, opp):
         reasons.append(f"inline_quote_unverified:{head}")
     for c in cites.values():
         verify_citation(s, c)

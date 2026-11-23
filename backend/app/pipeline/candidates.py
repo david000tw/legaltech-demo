@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.prompts import load_prompt
-from app.ai.provider import AIProvider, record_usage
+from app.ai.provider import AIError, AIProvider, record_usage
 from app.ai.schemas import SELECT_SCHEMA
 from app.ai.tokens import estimate_tokens
 from app.corpus.search import article_display, search_articles, search_pages, search_passages
@@ -28,6 +28,7 @@ PAGES_PER_CLAIM = 20
 PASSAGES_PER_CLAIM = 8
 ARTICLES_PER_CLAIM = 5
 MIN_QUOTE = 15
+SELECT_TOKEN_LIMIT = 180_000  # 送出前估算；超過就明確失敗，不讓模型默默截斷
 KIND_PREFIX = {"evidence": "E", "judgment": "J", "statute": "S"}
 
 
@@ -128,6 +129,8 @@ def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_i
     cands = round_candidates(s, round_id)
     user = (f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張】\n{format_claims(claims)}\n\n"
             f"【候選資料】\n{format_candidates(s, list(cands.values()))}")
+    if estimate_tokens(user) > SELECT_TOKEN_LIMIT:
+        raise AIError("other", f"對應步驟的輸入過長（約 {estimate_tokens(user):,} token），請減少卷證或拆成多輪")
     result = provider.run(step="select", system=load_prompt("select"), user=user, schema=SELECT_SCHEMA,
                           effort="medium")
     record_usage(s, rnd.firm_id, case.id, member_id, "select", result)

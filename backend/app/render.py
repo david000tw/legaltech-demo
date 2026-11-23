@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.corpus.search import article_display
 from app.exhibit_labels import evidence_label
 from app.models import Citation, Judgment, JudgmentPassage, Paragraph, StatuteArticle
-from app.verify.citations import MARKER_RE, paragraph_citations
+from app.verify.citations import MARKER_RE, paragraph_citations, verify_paragraph
 
 
 def citation_label(s: Session, c: Citation) -> str | None:
@@ -22,6 +22,8 @@ def citation_label(s: Session, c: Citation) -> str | None:
 
 
 def render_text(s: Session, p: Paragraph) -> str:
+    """先重新驗證，再只把驗證通過的引用展開；失敗的引用顯示【未驗證：代碼】。"""
+    verify_paragraph(s, p)
     cites = {c.code: c for c in paragraph_citations(s, p.id)}
 
     def sub(m) -> str:
@@ -29,6 +31,8 @@ def render_text(s: Session, p: Paragraph) -> str:
         c = cites.get(code)
         if c is None:
             return f"【引用錯誤：{code}】"
+        if c.verify_status != "ok":  # 驗證失敗的引用不顯示出處與引文，避免被誤當成已驗證
+            return f"【未驗證：{code}】"
         if kind == "quote":
             return f"「{c.quote}」" if c.quote.strip() else f"【引用錯誤：{code}】"
         return citation_label(s, c) or f"【引用錯誤：{code}】"

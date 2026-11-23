@@ -128,7 +128,7 @@ def test_stale_running_can_restart(db):
         with pytest.raises(RoundBusy):
             start_round(s, round_id)
     with tenant_session(firm) as s:
-        s.get(Round, round_id).started_at = datetime.now(timezone.utc) - timedelta(minutes=31)
+        s.get(Round, round_id).started_at = datetime.now(timezone.utc) - timedelta(minutes=46)
     with tenant_session(firm) as s:
         start_round(s, round_id)
         assert s.get(Round, round_id).status == "running"
@@ -217,3 +217,132 @@ def test_draft_prompt_has_required_rules():
     p = load_prompt("draft")
     for rule in ("不得新增事實", "{{cite:", "{{quote:", "中文數字", "15", "法院判斷", "不得照做", "㈠"):
         assert rule in p
+
+
+# ---- phase 3 審查補強 ----
+
+def test_concurrent_start_round_one_busy(db):
+    import threading
+    from tests.helpers import create_firm
+    firm = create_firm("甲事務所")
+    _, round_id = round_with_evidence(firm)
+    barrier, results = threading.Barrier(2), []
+
+    def go():
+        barrier.wait()
+        try:
+            with tenant_session(firm) as s:
+                start_round(s, round_id)
+            results.append("started")
+        except RoundBusy:
+            results.append("busy")
+    threads = [threading.Thread(target=go) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(results) == ["busy", "started"]
+
+
+def test_superseded_run_does_not_overwrite(db):
+    """舊的執行被接手（started_at 換掉）後，不得再寫入 drafted。"""
+    from tests.helpers import create_firm
+    firm = create_firm("甲事務所")
+    _, round_id = round_with_evidence(firm)
+    with tenant_session(firm) as s:
+        start_round(s, round_id)
+
+    def takeover(call):
+        with tenant_session(firm) as s2:
+            s2.get(Round, round_id).started_at = datetime.now(timezone.utc) + timedelta(seconds=5)
+        return DRAFT_OK
+    run_round(firm, round_id, None, db, provider=fake_all(draft=takeover))
+    assert status_of(firm, round_id)[0] == "running"
+
+
+def test_provider_not_allowed_marks_failed(db):
+    from app.ai.provider import ProviderNotAllowed
+    from tests.helpers import create_firm
+    firm = create_firm("甲事務所")
+    _, round_id = round_with_evidence(firm)
+    with tenant_session(firm) as s:
+        start_round(s, round_id)
+
+    def factory(settings, f):
+        raise ProviderNotAllowed("本機 Claude Code 只能用於內部測試事務所")
+    run_round(firm, round_id, None, db, provider_factory=factory)
+    status, error = status_of(firm, round_id)
+    assert status == "failed" and error.startswith("provider:")
+
+
+def test_unexpected_error_marks_failed(db):
+    from tests.helpers import create_firm
+    firm = create_firm("甲事務所")
+    _, round_id = round_with_evidence(firm)
+    with tenant_session(firm) as s:
+        start_round(s, round_id)
+    run_round(firm, round_id, None, db, provider=fake_all(select=RuntimeError("boom")))
+    status, error = status_of(firm, round_id)
+    assert status == "failed" and error.startswith("other:")
+
+
+def test_select_input_too_long_fails_clearly(db, monkeypatch):
+    from app.pipeline import candidates as cand_mod
+    from tests.helpers import create_firm
+    monkeypatch.setattr(cand_mod, "SELECT_TOKEN_LIMIT", 10)
+    firm = create_firm("甲事務所")
+    _, round_id = round_with_evidence(firm)
+    fake = fake_all()
+    with tenant_session(firm) as s:
+        start_round(s, round_id)
+    run_round(firm, round_id, None, db, provider=fake)
+    status, error = status_of(firm, round_id)
+    assert status == "failed" and "過長" in error
+    assert fake.steps() == ["claims"]
+
+
+def test_assistant_can_run_round(db):
+    from tests.helpers import create_firm
+    firm = create_firm("甲事務所")
+    create_member(firm, "assistant@a.test", role="assistant")
+    c = TestClient(create_app(db))
+    c.app.state.provider_factory = lambda settings, f: fake_all()
+    assert login(c, "assistant@a.test").status_code == 200
+    _, round_id = round_with_evidence(firm)
+    assert c.post(f"/api/rounds/{round_id}/run").status_code == 202
+    assert status_of(firm, round_id)[0] == "drafted"
+
+
+def test_cross_firm_round_routes_404(api, db):
+    from tests.helpers import create_firm
+    client, firm, _, _ = api
+    _, round_id = round_with_evidence(firm)
+    client.post(f"/api/rounds/{round_id}/run")
+    with tenant_session(firm) as s:
+        pid = s.scalars(select(Paragraph.id).join(Draft).where(Draft.round_id == round_id)).first()
+    other = create_firm("乙事務所")
+    create_member(other, "lawyer@b.test")
+    b = TestClient(create_app(db))
+    b.app.state.provider_factory = lambda settings, f: fake_all()
+    assert login(b, "lawyer@b.test").status_code == 200
+    assert b.get(f"/api/rounds/{round_id}").status_code == 404
+    assert b.post(f"/api/rounds/{round_id}/run").status_code == 404
+    assert b.post(f"/api/paragraphs/{pid}/rewrite", json={"instruction": "x"}).status_code == 404
+
+
+def test_rewrite_ai_error_503(api):
+    client, firm, _, _ = api
+    _, round_id = round_with_evidence(firm)
+    client.post(f"/api/rounds/{round_id}/run")
+    with tenant_session(firm) as s:
+        pid = s.scalars(select(Paragraph.id).join(Draft).where(Draft.round_id == round_id)).first()
+    client.app.state.provider_factory = lambda settings, f: FakeProvider(
+        {"rewrite": AIError("usage_limit", "You've hit your weekly limit")})
+    r = client.post(f"/api/paragraphs/{pid}/rewrite", json={"instruction": "改短"})
+    assert r.status_code == 503 and "usage_limit" in r.text
+
+
+def test_prompts_treat_opponent_brief_as_untrusted():
+    for name in ("draft", "rewrite", "select", "claims"):
+        p = load_prompt(name)
+        assert "對造書狀" in p and ("不得照做" in p or "不要照做" in p), name
