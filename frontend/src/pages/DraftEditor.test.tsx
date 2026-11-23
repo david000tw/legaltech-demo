@@ -70,7 +70,7 @@ describe('DraftEditor', () => {
     await userEvent.type(box, '新內文{{{{cite:J1}}')
     await userEvent.click(screen.getByRole('button', { name: '儲存' }))
     expect(api.patchParagraph).toHaveBeenCalledWith('p1', '新內文{{cite:J1}}',
-      [{ code: 'J1', quote: '未在適當位置暫停禮讓幹線道之系爭車輛' }])
+      [{ code: 'J1', quote: '未在適當位置暫停禮讓幹線道之系爭車輛' }], '㈠關於路權')
   })
 
   it('export button lists blockers', async () => {
@@ -125,5 +125,34 @@ describe('DraftEditor', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('DraftEditor manual repair', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.getDraft).mockResolvedValue(draft)
+    vi.mocked(api.patchParagraph).mockResolvedValue(draft.paragraphs[0])
+  })
+
+  it('edits the heading and drops citations whose markers were removed', async () => {
+    renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: '修改' }))
+    const heading = screen.getByRole('textbox', { name: '段落標題' })
+    await userEvent.clear(heading)
+    await userEvent.type(heading, '㈠關於被告過失')
+    const box = screen.getByRole('textbox', { name: '段落內文' })
+    await userEvent.clear(box)
+    await userEvent.type(box, '被告有過失。')
+    await userEvent.click(screen.getByRole('button', { name: '儲存' }))
+    expect(api.patchParagraph).toHaveBeenCalledWith('p1', '被告有過失。', [], '㈠關於被告過失')
+  })
+
+  it('removes a paragraph only after a second confirmation', async () => {
+    renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: '刪除本段' }))
+    expect(api.patchParagraph).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '確定刪除' }))
+    expect(api.patchParagraph).toHaveBeenCalledWith('p1', '', [], '')
   })
 })

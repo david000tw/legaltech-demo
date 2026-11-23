@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentMember
 from app.models import Citation, Document, Exhibit, ExportRecord, Page, PageText, Paragraph
 from app.render import render_text
-from app.verify.citations import INVALID_XML_CHARS, Blocker, export_blockers
+from app.verify.citations import INVALID_XML_CHARS, Blocker, export_blockers, is_removed
 
 FONT = "標楷體"
 TITLE = "民事準備書狀"
@@ -57,7 +57,8 @@ def export_draft(s: Session, draft_id: UUID, member: CurrentMember) -> bytes:
     blockers = export_blockers(s, draft_id)  # 一律重新驗證
     if blockers:
         raise ExportBlocked(blockers)
-    paragraphs = list(s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id).order_by(Paragraph.seq)))
+    paragraphs = [p for p in s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id).order_by(Paragraph.seq))
+                  if not is_removed(p)]
 
     d = docx.Document()
     _setup(d)

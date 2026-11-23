@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ExportBlockedError, exportDraft, reviewParagraph } from './api'
+import { ExportBlockedError, exportDraft, patchParagraph, reviewParagraph } from './api'
 
 function respond(status: number, body: unknown) {
   const f = vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }))
@@ -30,5 +30,13 @@ describe('api', () => {
     expect(url).toBe('/api/paragraphs/p1/review')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ version: 'v1' })
+  })
+
+  it('sends the heading with a paragraph edit', async () => {
+    const f = respond(200, {})
+    await patchParagraph('p1', '內文', [], '㈠標題')
+    const [, init] = f.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body as string)).toEqual({ text: '內文', citations: [], heading: '㈠標題' })
   })
 })

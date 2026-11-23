@@ -50,6 +50,9 @@ def main() -> None:
                                 result="You've hit your session limit · resets 3pm"), ensure_ascii=False)
     elif mode == "not_logged_in":
         out = json.dumps(result(is_error=True, result="Not logged in · Please run /login"), ensure_ascii=False)
+    elif mode == "cli_error":
+        sys.stderr.buffer.write("error: unknown option '--safe-mode'\n".encode("utf-8"))
+        raise SystemExit(1)
     elif mode == "sleep":
         time.sleep(30)
         out = "{}"

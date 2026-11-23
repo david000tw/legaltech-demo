@@ -26,18 +26,28 @@ MARKER_RE = re.compile(r"\{\{(cite|quote):([A-Z]\d+)\}\}")
 # Word（XML）不接受的字元：匯出時會讓 python-docx 丟例外
 INVALID_XML_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff\ud800-\udfff]")
 NUM = r"[〇零一二三四五六七八九十百千\d]+"
-_UNBOUND_PATTERNS = [
-    re.compile(rf"{NUM}\s*年度?\s*[一-鿿]{{1,6}}?\s*字\s*第\s*{NUM}\s*號"),  # 判決字號（含憲判字、判例）
+NUMF = r"[〇零一二三四五六七八九十百千壹貳參叁肆伍陸柒捌玖拾佰仟\d]+"  # 含大寫數字（字號、條號用）
+_DASH = r"[-‐‑–—]"
+_CASE_NUMBER_PATTERNS = [  # 判決字號、簡寫字號、大法官解釋、決議
+    re.compile(rf"{NUMF}\s*年度?\s*[一-鿿]{{1,6}}?\s*字\s*第?\s*{NUMF}\s*號"),  # 含憲判字、判例；「第」可省
     re.compile(rf"{NUM}\s*[台臺][一-鿿]{{1,3}}\s*{NUM}"),  # 簡寫字號：110台上1234
-    re.compile(rf"釋字\s*第?\s*{NUM}\s*號?"),
+    re.compile(rf"{NUMF}\s*年度?\s*[台臺][一-鿿]{{1,3}}\s*字?\s*第?\s*{NUMF}\s*號"),  # 99年台上1號
+    re.compile(rf"釋字\s*第?\s*{NUMF}\s*號?"),
+    re.compile(rf"(?:大法官|司法院)[一-鿿]{{0,6}}?\s*第\s*{NUMF}\s*號"),
+    re.compile(rf"解釋\s*第?\s*{NUMF}\s*號"),
+    re.compile(rf"第\s*{NUMF}\s*號\s*解釋"),
     re.compile(rf"{NUM}\s*年度?\s*第\s*{NUM}\s*次\s*民事庭(?:會議)?決議"),
+]
+_UNBOUND_PATTERNS = _CASE_NUMBER_PATTERNS + [
     re.compile(rf"(?:[原被上甲乙丙丁]證|證物)\s*物?\s*(?:編號)?\s*{NUM}"),
     re.compile(rf"第\s*{NUM}\s*頁"),
-    re.compile(rf"第\s*{NUM}\s*條(?:\s*之\s*{NUM})?"),
-    re.compile(rf"(?:法|規則|條例|辦法)\s*{NUM}\s*條"),  # 省略「第」：民法184條
+    re.compile(rf"第\s*{NUMF}(?:\s*[、，,及與和]\s*第?\s*{NUMF})*\s*條(?:\s*之\s*{NUMF})?"),  # 第184、185條
+    re.compile(rf"第\s*{NUMF}\s*{_DASH}\s*{NUMF}\s*條"),  # 第191-2條
+    re.compile(rf"(?:法|規則|條例|辦法)\s*{NUMF}\s*(?:{_DASH}\s*{NUMF}\s*)?條"),  # 省略「第」：民法184條
     re.compile(rf"§\s*{NUM}"),
 ]
-_CASE_NUMBER_PATTERNS = _UNBOUND_PATTERNS[:4]  # 判決字號、簡寫字號、釋字、決議
+# 法條標記後面自己接「之N」，展開後就變成另一條沒驗證過的條文（第184條→第184條之1）；「第N項」仍在同一條內，允許
+_STATUTE_SUFFIX = re.compile(rf"\{{\{{(?:cite|quote):(S\d+)\}}\}}\s*之\s*({NUMF})")
 # 法院判斷段裡轉述的當事人主張：從「原告雖主張」之類開始，優先到「等語／云云／等情／置辯」（一定長度內），
 # 找不到才到第一個句號為止。
 _PARTY_START = re.compile(r"(?:原告|被告|上訴人|被上訴人)(?:雖|固|另|復|則|亦|並|又)?"
@@ -47,7 +57,8 @@ _COURT_TURN = re.compile(r"然查|惟查|經查|次查|又查|本院|按")  # �
 PARTY_SPAN_LIMIT = 400
 _OPEN_Q = "「『“〝﹁‘\""
 _CLOSE_Q = "」』”〞﹂’\""
-_QUOTED = re.compile(f"[{_OPEN_Q}]([^{_OPEN_Q}{_CLOSE_Q}]*)[{_CLOSE_Q}]")
+_ANY_QUOTE = re.compile(f"[{_OPEN_Q}{_CLOSE_Q}]")
+_SENTENCE_END = re.compile(r"[。！？!?\n]")
 QUOTE_GROUP_GAP = 3  # 引號段之間只隔幾個字時，視為同一段引文（防止拆成兩段各 14 字）
 MIN_QUOTE = 15
 KIND_BY_PREFIX = {"E": "evidence", "J": "judgment", "S": "statute"}
@@ -66,8 +77,9 @@ def has_malformed_marker(text: str) -> bool:
 
 
 def scan_unbound_references(text: str) -> list[str]:
+    raw = unicodedata.normalize("NFKC", text or "")
+    hits: list[tuple[int, str]] = [(-1, f"{m.group(1)}之{m.group(2)}") for m in _STATUTE_SUFFIX.finditer(raw)]
     t = _scan_form(text)
-    hits: list[tuple[int, str]] = []
     for pat in _UNBOUND_PATTERNS:
         hits.extend((m.start(), m.group(0)) for m in pat.finditer(t))
     seen, out = set(), []
@@ -78,22 +90,52 @@ def scan_unbound_references(text: str) -> list[str]:
     return out
 
 
+def _outer_quotes(t: str) -> list[tuple[int, int, int]]:
+    """最外層的引號段：(內容起點, 內容終點, 該段結束位置)。內層引號算在外層裡；沒關上的引號延伸到句末。"""
+    out = []
+    i, n = 0, len(t)
+    while i < n:
+        if t[i] not in _OPEN_Q:
+            i += 1
+            continue
+        stack, j = [t[i]], i + 1
+        while j < n and stack:
+            c = t[j]
+            if c == '"' and stack[-1] == '"':
+                stack.pop()
+            elif c in _OPEN_Q:
+                stack.append(c)
+            elif c in _CLOSE_Q:
+                stack.pop()
+            j += 1
+        if stack:
+            m = _SENTENCE_END.search(t, i + 1)
+            end = m.start() if m else n
+            out.append((i + 1, end, end))
+            i = max(end, i + 1)
+        else:
+            out.append((i + 1, j - 1, j))
+            i = j
+    return out
+
+
 def scan_inline_quotes(text: str, opponent_texts: list[str]) -> list[str]:
     t = _scan_form(text)
-    groups: list[list[re.Match]] = []
-    for m in _QUOTED.finditer(t):
-        if groups and len(normalize_text(t[groups[-1][-1].end():m.start()])) <= QUOTE_GROUP_GAP:
-            groups[-1].append(m)
+    groups: list[list[tuple[int, int, int]]] = []
+    for span in _outer_quotes(t):
+        if groups and len(normalize_text(t[groups[-1][-1][2]:span[0] - 1])) <= QUOTE_GROUP_GAP:
+            groups[-1].append(span)
         else:
-            groups.append([m])
+            groups.append([span])
     out = []
     for g in groups:
-        parts = [m.group(1) for m in g]
-        if sum(quote_length(p) for p in parts) < MIN_QUOTE:
+        parts = [(t[a:b], _ANY_QUOTE.sub("", t[a:b])) for a, b, _ in g]  # (原樣, 去掉內層引號)
+        if sum(quote_length(bare) for _, bare in parts) < MIN_QUOTE:
             continue
-        ok = all(any(find_quote(op, p) for op in opponent_texts) for p in parts if quote_length(p) > 0)
+        ok = all(any(find_quote(op, raw) or find_quote(op, bare) for op in opponent_texts)
+                 for raw, bare in parts if quote_length(bare) > 0)
         if not ok:
-            out.append(normalize_text("".join(parts))[:10])
+            out.append(normalize_text("".join(bare for _, bare in parts))[:10])
     return out
 
 
@@ -257,10 +299,16 @@ def paragraph_blockers(s: Session, p: Paragraph) -> list[str]:
     return out
 
 
+def is_removed(p: Paragraph) -> bool:
+    """標題與內文都清空的段落視為已刪除：不顯示、不審、不匯出（修改紀錄仍保留原文）。"""
+    return not (p.heading or "").strip() and not (p.text or "").strip()
+
+
 def export_blockers(s: Session, draft_id: UUID) -> list[Blocker]:
     """匯出前一律重新驗證，不信任先前存的結果。"""
     out: list[Blocker] = []
-    paragraphs = list(s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id).order_by(Paragraph.seq)))
+    paragraphs = [p for p in s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id)
+                                       .order_by(Paragraph.seq)) if not is_removed(p)]
     if not paragraphs:
         return [Blocker(0, "empty_draft")]
     for p in paragraphs:

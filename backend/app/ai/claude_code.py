@@ -69,7 +69,7 @@ class ClaudeCodeLocalProvider:
         self.model = model
 
     def _call(self, *, system: str, user: str, schema: dict, effort: str,
-              timeout_s: int) -> tuple[dict | None, str]:
+              timeout_s: int) -> tuple[dict | None, str, int]:
         fd, sp_path = tempfile.mkstemp(suffix=".md", prefix="sysprompt-")
         os.close(fd)
         work = tempfile.mkdtemp(prefix="claude-cwd-")
@@ -90,7 +90,7 @@ class ClaudeCodeLocalProvider:
                 payload = json.loads(p.stdout.decode("utf-8", "replace"))
             except ValueError:
                 payload = None
-            return (payload if isinstance(payload, dict) else None), stderr
+            return (payload if isinstance(payload, dict) else None), stderr, p.returncode
         finally:
             try:
                 os.remove(sp_path)
@@ -102,8 +102,10 @@ class ClaudeCodeLocalProvider:
             timeout_s: int = 600) -> AIResult:
         last = AIError("other", "未知錯誤")
         for _ in range(2):  # 輸出不合法或拒答時重試一次
-            payload, stderr = self._call(system=system, user=user, schema=schema, effort=effort,
-                                         timeout_s=timeout_s)
+            payload, stderr, code = self._call(system=system, user=user, schema=schema, effort=effort,
+                                               timeout_s=timeout_s)
+            if payload is None and code != 0:  # CLI 本身出錯（參數不認得、當掉）：保留原始訊息，不重試
+                raise classify_failure(None, stderr.strip() or f"Claude Code 異常結束（結束碼 {code}）")
             if payload is None:
                 last = AIError("invalid_output", f"步驟 {step}：Claude Code 輸出不是 JSON")
                 continue

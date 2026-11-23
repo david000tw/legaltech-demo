@@ -81,8 +81,8 @@ export const runRound = (roundId: string) => req<{ status: string }>(`/rounds/${
 export const getRound = (roundId: string) => req<RoundDetail>(`/rounds/${roundId}`)
 export const getDraft = (draftId: string) => req<DraftView>(`/drafts/${draftId}`)
 export const getCitationSource = (citationId: string) => req<CitationSource>(`/citations/${citationId}/source`)
-export const patchParagraph = (id: string, text: string, citations: CitationInput[]) =>
-  req<ParagraphView>(`/paragraphs/${id}`, json('PATCH', { text, citations }))
+export const patchParagraph = (id: string, text: string, citations: CitationInput[], heading: string) =>
+  req<ParagraphView>(`/paragraphs/${id}`, json('PATCH', { text, citations, heading }))
 export const rewriteParagraph = (id: string, instruction: string) =>
   req<{ id: string; status: string; text: string }>(`/paragraphs/${id}/rewrite`, json('POST', { instruction }))
 export const confirmCitation = (id: string) => req<CitationView>(`/citations/${id}/confirm`, json('POST'))

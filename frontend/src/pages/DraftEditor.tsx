@@ -13,6 +13,8 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
   onError: (m: string | null) => void
 }) {
   const [editing, setEditing] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [heading, setHeading] = useState(p.heading)
   const [text, setText] = useState(p.text)
   const [instruction, setInstruction] = useState('')
   const [busy, setBusy] = useState(false)
@@ -32,9 +34,15 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
   }
 
   const save = () => act(async () => {
-    await api.patchParagraph(p.id, text, p.citations.map((c) => ({ code: c.code, quote: c.quote })))
+    // 內文已拿掉標記的引用就不再送出，律師可以自己移除驗證失敗的引用
+    const used = new Set([...text.matchAll(/\{\{(?:cite|quote):([A-Z]\d+)\}\}/g)].map((m) => m[1]))
+    const kept = p.citations.filter((c) => used.has(c.code)).map((c) => ({ code: c.code, quote: c.quote }))
+    await api.patchParagraph(p.id, text, kept, heading)
     setEditing(false)
   })
+
+  // 標題與內文都清空＝刪除本段（後端保留修改紀錄）
+  const remove = () => act(() => api.patchParagraph(p.id, '', [], ''))
 
   return (
     <article className="space-y-2 rounded-lg border border-slate-200 bg-white p-4">
@@ -47,6 +55,11 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
       {editing ? (
         <div className="space-y-2">
           <label className="block text-xs text-slate-600">
+            段落標題
+            <input aria-label="段落標題" value={heading} onChange={(e) => setHeading(e.target.value)}
+              className="mt-1 w-full rounded border border-slate-300 p-2 text-sm" />
+          </label>
+          <label className="block text-xs text-slate-600">
             段落內文
             <textarea aria-label="段落內文" value={text} onChange={(e) => setText(e.target.value)} rows={6}
               className="mt-1 w-full rounded border border-slate-300 p-2 font-mono text-sm" />
@@ -54,7 +67,8 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
           <p className="text-xs text-slate-500">引用請保留 {'{{cite:代碼}}'}／{'{{quote:代碼}}'} 標記，不要直接寫字號、條號或原證號。</p>
           <div className="flex gap-2">
             <button type="button" onClick={save} disabled={busy} className="rounded bg-indigo-600 px-3 py-1 text-sm text-white">儲存</button>
-            <button type="button" onClick={() => { setEditing(false); setText(p.text) }} className="rounded border px-3 py-1 text-sm">取消</button>
+            <button type="button" onClick={() => { setEditing(false); setText(p.text); setHeading(p.heading) }}
+              className="rounded border px-3 py-1 text-sm">取消</button>
           </div>
         </div>
       ) : (
@@ -76,6 +90,16 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
       </div>
       <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
         <button type="button" onClick={() => setEditing(true)} className="rounded border px-3 py-1 text-sm">修改</button>
+        {confirmDelete ? (
+          <>
+            <button type="button" disabled={busy} onClick={remove}
+              className="rounded bg-red-600 px-3 py-1 text-sm text-white">確定刪除</button>
+            <button type="button" onClick={() => setConfirmDelete(false)} className="rounded border px-3 py-1 text-sm">不刪除</button>
+          </>
+        ) : (
+          <button type="button" onClick={() => setConfirmDelete(true)}
+            className="rounded border border-red-300 px-3 py-1 text-sm text-red-700">刪除本段</button>
+        )}
         <input value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="重寫指示，例如：語氣更精簡"
           aria-label="重寫指示" className="min-w-48 flex-1 rounded border border-slate-300 px-2 py-1 text-sm" />
         <button type="button" disabled={busy || !instruction.trim()}

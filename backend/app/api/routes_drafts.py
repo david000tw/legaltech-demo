@@ -20,7 +20,7 @@ from app.review.service import (
     CitationInput, ReviewRuleError, confirm_citation, edit_paragraph, mark_reviewed, renumber_exhibit,
 )
 from app.text_norm import find_quote
-from app.verify.citations import export_blockers, paragraph_citations
+from app.verify.citations import export_blockers, is_removed, paragraph_citations
 
 router = APIRouter(prefix="/api")
 PASSAGE_LABEL = {"court_reasoning": "法院判斷段", "party_claim": "當事人主張段", "main_text": "主文",
@@ -59,7 +59,7 @@ def get_draft(draft_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
         rnd = s.get(Round, draft.round_id)
         return {"id": str(draft.id), "round_id": str(rnd.id), "case_id": str(rnd.case_id),
                 "can_review": m.role == "lawyer" and m.bar_verified,
-                "paragraphs": [paragraph_json(s, p) for p in paragraphs],
+                "paragraphs": [paragraph_json(s, p) for p in paragraphs if not is_removed(p)],
                 "blockers": [{"paragraph_seq": b.paragraph_seq, "reason": b.reason} for b in blockers]}
 
 
@@ -92,13 +92,15 @@ class CitationBody(BaseModel):
 class ParagraphBody(BaseModel):
     text: str
     citations: list[CitationBody] = []
+    heading: str | None = None  # 不帶就不改標題
 
 
 @router.patch("/paragraphs/{paragraph_id}")
 def patch_paragraph(paragraph_id: UUID, body: ParagraphBody, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
         _get_or_404(s, Paragraph, paragraph_id, "段落")
-        p = edit_paragraph(s, paragraph_id, body.text, [CitationInput(c.code, c.quote) for c in body.citations], m)
+        p = edit_paragraph(s, paragraph_id, body.text, [CitationInput(c.code, c.quote) for c in body.citations], m,
+                           heading=body.heading)
         return paragraph_json(s, p)
 
 

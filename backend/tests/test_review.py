@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, update
 
+from app.auth import CurrentMember
 from app.db import tenant_session
 from app.main import create_app
 from app.models import Citation, Exhibit, Paragraph, ReviewEvent
@@ -280,3 +281,99 @@ def test_confirm_waits_for_concurrent_edit_and_conflicts(env):
     r = lawyer.post(f"/api/citations/{cid}/confirm")
     t.join()
     assert r.status_code in (404, 409), r.text
+
+
+def _race_setup(env):
+    """律師已確認判決；回傳 (審核用的 member, 律師畫面上的版本)。"""
+    from app.render import content_version, render_text
+    lawyer = env["client_for"]("lawyer@a.test")
+    assert lawyer.post(f"/api/citations/{cite_id(env, env['good'], 'J1')}/confirm").status_code == 200
+    mid = create_member(env["firm"], "race@a.test", bar_number=BAR)
+    m = CurrentMember(id=mid, firm_id=env["firm"], role="lawyer", bar_number=BAR, bar_verified=True)
+    with tenant_session(env["firm"]) as s:
+        p = s.get(Paragraph, env["good"])
+        return m, content_version(p.heading, render_text(s, p))
+
+
+def _while_review_uncommitted(env, m, version, other):
+    """律師的審核已寫入但還沒提交時，另一個請求（other）送進來；審核提交後等它做完。"""
+    from app.review.service import mark_reviewed
+    cm = tenant_session(env["firm"])
+    s = cm.__enter__()
+    mark_reviewed(s, env["good"], m, version)
+    t = threading.Thread(target=other)
+    t.start()
+    time.sleep(1.0)
+    cm.__exit__(None, None, None)
+    t.join(10)
+    assert not t.is_alive()
+
+
+def test_edit_arriving_during_review_still_reverts(env):
+    from app.review.service import CitationInput, edit_paragraph
+    m, version = _race_setup(env)
+    new_text = "按{{cite:J1}}認被告{{quote:J1}}，被告應負全部責任。"
+
+    def edit():
+        with tenant_session(env["firm"]) as s:
+            s.get(Paragraph, env["good"])  # 路由的 _get_or_404
+            edit_paragraph(s, env["good"], new_text, [CitationInput("J1", J_REASONING)], m)
+
+    _while_review_uncommitted(env, m, version, edit)
+    p = paragraph(env, env["good"])
+    assert p.text == new_text and p.status == "unreviewed"
+
+
+def test_renumber_arriving_during_review_still_reverts(env):
+    from app.review.service import renumber_exhibit
+    m, version = _race_setup(env)
+    with tenant_session(env["firm"]) as s:
+        ex_id = s.scalars(select(Exhibit.id).where(Exhibit.document_id == env["exhibit_doc"])).one()
+
+    def renumber():
+        with tenant_session(env["firm"]) as s:
+            renumber_exhibit(s, ex_id, 7, m)
+
+    _while_review_uncommitted(env, m, version, renumber)
+    assert paragraph(env, env["good"]).status == "unreviewed"
+
+
+# ---- 重要 6：律師能自己修標題、拿掉引用、刪掉整段 ----
+
+def test_patch_can_change_heading(env):
+    c = env["client_for"]("assistant@a.test")
+    r = c.patch(f"/api/paragraphs/{env['good']}",
+                json={"heading": "㈠關於路權", "text": "被告應負賠償責任。", "citations": []})
+    assert r.status_code == 200, r.text
+    p = paragraph(env, env["good"])
+    assert p.heading == "㈠關於路權" and p.text == "被告應負賠償責任。" and p.status == "unreviewed"
+
+
+def test_patch_without_heading_keeps_it(env):
+    c = env["client_for"]("assistant@a.test")
+    assert c.patch(f"/api/paragraphs/{env['good']}", json={"text": "被告應負賠償責任。", "citations": []}).status_code == 200
+    assert paragraph(env, env["good"]).heading == "㈠"
+
+
+def test_cleared_paragraph_is_removed_from_draft_and_export(env):
+    bad = make_paragraph(env, "依最高法院999年度台上字第1號判決，被告應負全責。", [], seq=2)
+    lawyer = env["client_for"]("lawyer@a.test")
+    confirm_and_review(env, lawyer, env["good"])
+    blocked = lawyer.post(f"/api/drafts/{env['draft_id']}/export")
+    assert blocked.status_code == 409 and any(b["paragraph_seq"] == 2 for b in blocked.json()["blockers"])
+    r = lawyer.patch(f"/api/paragraphs/{bad}", json={"heading": "", "text": "", "citations": []})
+    assert r.status_code == 200, r.text
+    body = lawyer.get(f"/api/drafts/{env['draft_id']}").json()
+    assert [p["seq"] for p in body["paragraphs"]] == [1] and body["blockers"] == []
+    assert lawyer.post(f"/api/drafts/{env['draft_id']}/export").status_code == 200
+    with tenant_session(env["firm"]) as s:  # 刪除留有紀錄，原文還查得到
+        ev = s.scalars(select(ReviewEvent).where(ReviewEvent.paragraph_id == bad, ReviewEvent.action == "edit")).one()
+        assert "999年度台上字第1號" in ev.before_text
+
+
+def test_draft_with_only_cleared_paragraphs_is_empty(env):
+    lawyer = env["client_for"]("lawyer@a.test")
+    assert lawyer.patch(f"/api/paragraphs/{env['good']}",
+                        json={"heading": " ", "text": "", "citations": []}).status_code == 200
+    r = lawyer.post(f"/api/drafts/{env['draft_id']}/export")
+    assert r.status_code == 409 and r.json()["blockers"] == [{"paragraph_seq": 0, "reason": "empty_draft"}]

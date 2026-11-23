@@ -79,9 +79,12 @@ def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version
 
 
 def edit_paragraph(s: Session, paragraph_id: UUID, text: str, citations: list[CitationInput],
-                   member: CurrentMember) -> Paragraph:
-    p = s.get(Paragraph, paragraph_id)
+                   member: CurrentMember, heading: str | None = None) -> Paragraph:
+    """鎖住後讀最新狀態：正在提交的「已審」也會被這次修改退回未審。標題與內文都清空＝刪除本段。"""
+    p = lock_paragraph(s, paragraph_id)
     before = p.text
+    if heading is not None:
+        p.heading = heading
     replace_paragraph(s, p, text, [(c.code, c.quote) for c in citations])
     _event(s, p, member, "edit", before, p.text)
     s.flush()
@@ -89,7 +92,7 @@ def edit_paragraph(s: Session, paragraph_id: UUID, text: str, citations: list[Ci
 
 
 def renumber_exhibit(s: Session, exhibit_id: UUID, new_number: int, member: CurrentMember) -> Exhibit:
-    ex = s.get(Exhibit, exhibit_id)
+    ex = s.get(Exhibit, exhibit_id, with_for_update=True, populate_existing=True)
     if new_number < 1:
         raise ReviewRuleError("證物號碼必須大於 0")
     taken = s.scalar(select(Exhibit.id).where(Exhibit.case_id == ex.case_id, Exhibit.prefix == ex.prefix,
@@ -105,8 +108,9 @@ def renumber_exhibit(s: Session, exhibit_id: UUID, new_number: int, member: Curr
         select(Citation.paragraph_id).join(PageText, PageText.id == Citation.page_text_id)
         .join(Page, Page.id == PageText.page_id).where(Page.document_id == ex.document_id).distinct()
     ).all()
-    for pid in paragraph_ids:
-        p = s.get(Paragraph, pid)
+    locked = s.scalars(select(Paragraph).where(Paragraph.id.in_(paragraph_ids)).order_by(Paragraph.id)
+                       .with_for_update().execution_options(populate_existing=True)).all()
+    for p in locked:  # 依 id 順序鎖，讀到的是最新狀態（含剛提交的已審）
         reset_review(p)
         _event(s, p, member, "revert")
     s.flush()

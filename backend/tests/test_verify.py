@@ -318,3 +318,43 @@ def test_superseded_page_text_fails_citation(db):
                        text=old.text))
     _, cites = para(ctx, pid)
     assert cites["E1"].verify_status == "failed" and "source_superseded" in cites["E1"].verify_reasons
+
+
+# ---- 最終審查：巢狀／未關閉的引號、更多字號與條號寫法 ----
+import pytest  # noqa: E402
+
+OPP_TEXT = ["原告行經無號誌路口時亦未減速慢行"]
+
+
+@pytest.mark.parametrize("text", [
+    "按「汽車行駛時駕駛人應注意車前狀況並隨時採取必要之安全措施此即『注意義務』被告違反之」{{cite:J1}}",
+    "按「汽車行駛時駕駛人應注意車前狀況並隨時採取必要之安全措施被告違反之{{cite:J1}}",
+    "按「汽車行駛時駕駛人應注意車前狀況並隨時採取必要之安全措施被告違反之。其餘不論。",
+])
+def test_nested_or_unclosed_quotes_flagged(text):
+    assert scan_inline_quotes(text, OPP_TEXT) != []
+
+
+@pytest.mark.parametrize("opp", [
+    "被告辯稱其已盡『注意義務』且原告亦未減速慢行等語",
+    "被告辯稱其已盡注意義務且原告亦未減速慢行等語",
+])
+def test_verbatim_quote_with_inner_quotes_passes(opp):
+    assert scan_inline_quotes("被告辯稱「其已盡『注意義務』且原告亦未減速慢行」云云。", [opp]) == []
+
+
+@pytest.mark.parametrize("text", [
+    "最高法院99年台上1號判決", "最高法院99年度台上字1號判決", "最高法院九十九年度台上字一號",
+    "依民法第184、185條規定", "依民法第191-2條規定", "司法院大法官第748號解釋", "大法官解釋第七四八號",
+    "民法第壹佰捌拾肆條", "依{{cite:S1}}之1規定",
+])
+def test_more_reference_forms_flagged(text):
+    assert scan_unbound_references(text) != []
+
+
+@pytest.mark.parametrize("text", [
+    "原告於114年3月8日晚上9時50分許駕車", "原告住臺中市北區和平街12號", "休養六週", "醫療費用550元",
+    "新臺幣150,000元", "依{{cite:S1}}第1項前段規定", "雙方於113年間多次協商",
+])
+def test_ordinary_text_not_flagged(text):
+    assert scan_unbound_references(text) == []

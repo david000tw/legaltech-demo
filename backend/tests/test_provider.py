@@ -194,3 +194,10 @@ def test_record_usage_stores_no_content(db):
 def test_estimate_tokens():
     assert estimate_tokens("一二三四五六七八九十") == 13
     assert estimate_tokens("") == 0
+
+
+def test_cli_error_keeps_stderr_and_does_not_retry(fake):
+    with pytest.raises(AIError) as e:
+        fake("cli_error")
+    assert e.value.kind == "other" and "unknown option" in e.value.message
+    assert len(fake.calls()) == 1
