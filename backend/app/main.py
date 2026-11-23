@@ -3,8 +3,8 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
 from app import db
-from app.ai.provider import check_startup
-from app.api import routes_auth, routes_cases
+from app.ai.provider import check_startup, get_provider
+from app.api import routes_auth, routes_cases, routes_rounds
 from app.config import Settings
 
 # "testclient" 是 Starlette TestClient 的預設來源；真實連線的來源一定是 IP。
@@ -19,8 +19,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     db.configure(settings)
     app = FastAPI(title="legaltech")
     app.state.settings = settings
+    app.state.provider_factory = get_provider  # 測試可換成假的供應來源
     app.include_router(routes_auth.router)
     app.include_router(routes_cases.router)
+    app.include_router(routes_rounds.router)
 
     @app.middleware("http")
     async def loopback_only(request: Request, call_next):

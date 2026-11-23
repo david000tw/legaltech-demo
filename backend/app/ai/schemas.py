@@ -22,3 +22,11 @@ SELECT_SCHEMA = _obj({
         "note": _STR,
     })},
 })
+
+_CITATIONS = {"type": "array", "items": _obj({"code": _STR, "quote": _STR})}
+
+DRAFT_SCHEMA = _obj({
+    "paragraphs": {"type": "array", "items": _obj({"heading": _STR, "text": _STR, "citations": _CITATIONS})},
+})
+
+REWRITE_SCHEMA = _obj({"text": _STR, "citations": _CITATIONS})
