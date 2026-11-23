@@ -358,3 +358,78 @@ def test_more_reference_forms_flagged(text):
 ])
 def test_ordinary_text_not_flagged(text):
     assert scan_unbound_references(text) == []
+
+
+# ---- 計畫 1B Task 3：夾姓名的當事人主張、warn 狀態（設計 5.5） ----
+import json as _json
+from pathlib import Path as _Path
+
+from app.corpus.splitter import split_judgment
+from app.text_norm import normalize_text
+from tests.verify_helpers import add_synthetic_court_passage
+
+_SEED = _Path(__file__).resolve().parent.parent / "seed"
+
+
+@pytest.mark.parametrize("sentence", [
+    "被告甲○○雖另主張系爭土地為其所有云云。",          # 合成
+    "原告乙○○主張系爭房地係被繼承人生前贈與云云。",      # 合成
+    "兩造均主張應以變價方式分割等語。",                  # 合成
+    "相對人丙○○則以其已盡扶養義務置辯。",                # 合成
+])
+def test_party_claim_with_name_detected(sentence):
+    from app.verify.citations import _in_party_claim
+    passage = "經查，本件事證明確。" + sentence + "然查，被告未能舉證。"
+    assert _in_party_claim(passage, sentence.rstrip("。")[2:22])
+
+
+@pytest.mark.parametrize("seed,sentence", [  # 種子判決法院判斷段的真實句子，寫死，不用實作的寫法去掃
+    ("KSYV_112_jiajisu_159", "被告甲○○雖辯稱原告乙○○取得附表二編號1所示○○路4號及6號房地係因被繼承人戊○○○生前所為之特種贈與"),
+    ("KSYV_112_jiajisu_159", "被告甲○○雖主張此部分為被繼承人戊○○○借名登記於原告丁○○名下"),
+    ("KSYV_112_jiajisu_159", "被告甲○○雖抗辯如附表二所示財產乃屬特種贈與或借名登記"),
+    ("KSYV_112_jiajisu_159", "被告甲○○雖另主張被繼承人戊○○○生前保險所給付之保險金500萬元亦應列入遺產云云"),
+    ("KSYV_112_jiajisu_159", "被告甲○○則執此抗辯原告2人及被告丙○○各受有如附表二所示特種贈與"),
+    ("PCDV_113_chongsu_524", "被告陳宇暉雖辯稱：原告係為避免贈與稅乃直接以陳俊安名義登記"),
+])
+def test_seed_named_party_claims_detected(seed, sentence):
+    from app.verify.citations import _in_party_claim
+    full = _json.loads((_SEED / "judgments" / f"{seed}.json").read_text(encoding="utf-8"))["full_text"]
+    n = normalize_text(sentence)
+    holders = [t for k, t in split_judgment(full) if k == "court_reasoning" and n in normalize_text(t)]
+    assert holders, "句子不在法院判斷段"
+    assert _in_party_claim(holders[0], sentence[:20])
+
+
+@pytest.mark.parametrize("sentence", [  # 法院對主張下結論：名字欄位是指示詞，不算夾姓名
+    "原告前開主張屬實",                # tcev_113_3946
+    "上訴人此部分主張自堪信為真實",     # TCDV_113_jianshang_211
+    "原告上開主張為真實",              # TPEV_114_beijian_610
+    "原告之主張即非可採",              # TNDV_114_su_1347
+])
+def test_court_conclusion_with_demonstrative_not_flagged(sentence):
+    from app.verify.citations import _in_party_claim
+    assert not _in_party_claim("經查，" + sentence + "。", sentence[:12])
+
+
+@pytest.mark.parametrize("sentence", [
+    "是原告主張被告應負侵權行為損害賠償責任一節，即屬有據。",  # TYDV_113_su_2562 的句型
+    "是本件原告主張系爭房地為借名登記，自應由原告就借名契約存在負舉證責任，且應證明至使法院確信其存在之程度，始足當之。",
+])
+def test_court_conclusion_is_warn_not_failed(db, sentence):
+    ctx = setup_verify_round()
+    add_synthetic_court_passage(ctx, "經查，被告與原告配偶有逾越一般男女交往之行為。" + sentence + "爰判決如主文。", "J8")
+    quote = sentence.rstrip("。")
+    pid = make_paragraph(ctx, "按{{cite:J8}}認{{quote:J8}}。", [("J8", quote)])
+    _, cites = para(ctx, pid)
+    assert cites["J8"].verify_status == "warn"
+    assert cites["J8"].verify_reasons == ["possible_party_claim"]
+    with tenant_session(ctx["firm"]) as s:
+        assert f"「{quote}」" in render_text(s, s.get(Paragraph, pid))
+
+
+def test_party_claim_passage_stays_red(db):
+    ctx = setup_verify_round()
+    pid = make_paragraph(ctx, "{{cite:J2}}可參。", [("J2", "但原告對於本件事故之發生亦有與過失，因為原告超速")])
+    _, cites = para(ctx, pid)
+    assert cites["J2"].verify_status == "failed"
+    assert "not_court_reasoning" in cites["J2"].verify_reasons

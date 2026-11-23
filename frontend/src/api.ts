@@ -33,7 +33,8 @@ export type ClaimView = { seq: number; summary: string; quote: string; quote_ver
 export type RoundDetail = { id: string; seq: number; status: RoundStatus; error: string | null; stale: boolean;
   draft_id: string | null; claims: ClaimView[] }
 export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgment' | 'statute'; quote: string;
-  label: string | null; verify_status: 'ok' | 'failed'; verify_reasons: string[]; lawyer_confirmed: boolean }
+  label: string | null; verify_status: 'ok' | 'warn' | 'failed'; verify_reasons: string[]; lawyer_confirmed: boolean
+  court_confirmed: boolean }
 export type ParagraphView = { id: string; seq: number; heading: string; text: string; rendered_text: string;
   version: string; status: 'unreviewed' | 'reviewed'; verify_reasons: string[]; reviewed_bar_number: string | null;
   reviewed_at: string | null; citations: CitationView[] }
@@ -86,6 +87,8 @@ export const patchParagraph = (id: string, text: string, citations: CitationInpu
 export const rewriteParagraph = (id: string, instruction: string) =>
   req<{ id: string; status: string; text: string }>(`/paragraphs/${id}/rewrite`, json('POST', { instruction }))
 export const confirmCitation = (id: string) => req<CitationView>(`/citations/${id}/confirm`, json('POST'))
+// 「可能是法院轉述的當事人主張」的引用：律師讀原文後確認此句為法院判斷
+export const confirmCourt = (id: string) => req<CitationView>(`/citations/${id}/confirm-court`, json('POST'))
 // version：律師畫面上那一版的指紋；後端發現內容已變就回 409，不會把沒看過的版本記成已審
 export const reviewParagraph = (id: string, version: string) =>
   req<ParagraphView>(`/paragraphs/${id}/review`, json('POST', { version }))

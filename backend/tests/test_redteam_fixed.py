@@ -55,3 +55,40 @@ def test_redteam_draft_cannot_be_exported(db, name):
     assert r.status_code == 409, name
     reasons = [b["reason"] for b in r.json()["blockers"]]
     assert any(x == expected or x.startswith(expected + ":") for x in reasons), (name, reasons)
+
+
+# ---- 計畫 1B Task 3：新增案例（既有案例一筆都不改） ----
+PARTY_CLAIM_IN_REASONING = "上訴人雖主張系爭汽車修理費用不應計算折舊"
+
+
+def _draft_and_force(ctx, paragraph):
+    with tenant_session(ctx["firm"]) as s:
+        draft = draft_round(s, ctx["round_id"], FakeProvider({"draft": {"paragraphs": [paragraph]}}), None)
+        return draft.id
+
+
+def test_party_claim_inside_reasoning_blocks_after_force_review(db):
+    """法院轉述的當事人主張（warn）：一般的「全部審完、判決全部確認」不能帶過律師的逐筆確認。"""
+    from app.models import Citation
+    from tests.verify_helpers import add_court_candidate
+    ctx = setup_verify_round()
+    add_court_candidate(ctx, PARTY_CLAIM_IN_REASONING, "J7")
+    draft_id = _draft_and_force(ctx, para("㈠", "{{cite:J7}}認{{quote:J7}}。", [("J7", PARTY_CLAIM_IN_REASONING)]))
+    cs = clients(ctx, db)
+    force_reviewed(ctx["firm"], draft_id)
+    r = cs["lawyer"].post(f"/api/drafts/{draft_id}/export")
+    assert r.status_code == 409
+    assert "party_claim_unconfirmed:J7" in [b["reason"] for b in r.json()["blockers"]]
+    with tenant_session(ctx["firm"]) as s:
+        assert not any(c.court_confirmed for c in s.scalars(select(Citation).where(Citation.code == "J7")))
+
+
+def test_quote_from_party_claim_passage_blocks_after_force_review(db):
+    ctx = setup_verify_round()
+    draft_id = _draft_and_force(ctx, para("㈠", "{{cite:J2}}認{{quote:J2}}。",
+                                          [("J2", "但原告對於本件事故之發生亦有與過失，因為原告超速")]))
+    cs = clients(ctx, db)
+    force_reviewed(ctx["firm"], draft_id)
+    r = cs["lawyer"].post(f"/api/drafts/{draft_id}/export")
+    assert r.status_code == 409
+    assert "citation_failed:J2" in [b["reason"] for b in r.json()["blockers"]]

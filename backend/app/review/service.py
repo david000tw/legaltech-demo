@@ -51,10 +51,31 @@ def confirm_citation(s: Session, citation_id: UUID, member: CurrentMember) -> Ci
     if c is None:  # 等鎖的期間段落被改寫，舊引用已不存在
         raise ReviewRuleError("引用已變更，請重新載入後再確認")
     verify_citation(s, c)
-    if c.kind != "judgment" or c.verify_status != "ok":
+    if c.kind == "judgment" and c.verify_status == "warn" and not c.court_confirmed:
+        raise ReviewRuleError("此引文可能是法院轉述的當事人主張，請先在原文對照畫面確認此句為法院判斷")
+    if c.kind != "judgment" or c.verify_status not in ("ok", "warn"):
         raise ReviewRuleError("只有通過驗證的判決引用可以確認")
     c.lawyer_confirmed, c.confirmed_by = True, member.id
     _event(s, s.get(Paragraph, c.paragraph_id), member, "confirm_citation")
+    s.flush()
+    return c
+
+
+def confirm_court_reasoning(s: Session, citation_id: UUID, member: CurrentMember) -> Citation:
+    """律師讀原文後確認：這句雖然像當事人主張，其實是法院判斷。只處理 warn 的引用，並留下證號。"""
+    _require_lawyer(member)
+    pid = s.scalar(select(Citation.paragraph_id).where(Citation.id == citation_id))
+    if pid is None or lock_paragraph(s, pid) is None:
+        raise ReviewRuleError("引用已變更，請重新載入後再確認")
+    c = s.get(Citation, citation_id, populate_existing=True)
+    if c is None:
+        raise ReviewRuleError("引用已變更，請重新載入後再確認")
+    verify_citation(s, c)
+    if c.verify_status != "warn":
+        raise ReviewRuleError("只有標示為「可能是當事人主張」的判決引用需要這項確認")
+    c.court_confirmed, c.court_confirmed_by, c.court_confirmed_bar_number = True, member.id, member.bar_number
+    _event(s, s.get(Paragraph, c.paragraph_id), member, "confirm_court_reasoning",
+           after=f"{c.code}｜{c.quote}｜律師證號 {member.bar_number or ''}")
     s.flush()
     return c
 

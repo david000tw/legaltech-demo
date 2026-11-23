@@ -81,7 +81,8 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
         {p.citations.map((c) => (
           <span key={c.id} className="inline-flex items-center gap-1">
             <CitationTag citation={c} onClick={() => onShowSource(c)} />
-            {canReview && c.kind === 'judgment' && c.verify_status === 'ok' && !c.lawyer_confirmed && (
+            {canReview && c.kind === 'judgment' && !c.lawyer_confirmed
+              && (c.verify_status === 'ok' || (c.verify_status === 'warn' && c.court_confirmed)) && (
               <button type="button" disabled={busy} onClick={() => act(() => api.confirmCitation(c.id))}
                 className="rounded border border-amber-400 px-2 py-0.5 text-xs text-amber-800">已讀原文，確認</button>
             )}
@@ -118,6 +119,7 @@ export default function DraftEditor() {
   const { draftId = '' } = useParams()
   const [draft, setDraft] = useState<api.DraftView | null>(null)
   const [source, setSource] = useState<api.CitationSource | null>(null)
+  const [sourceCitationId, setSourceCitationId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -133,6 +135,7 @@ export default function DraftEditor() {
   async function showSource(c: api.CitationView) {
     try {
       setSource(await api.getCitationSource(c.id))
+      setSourceCitationId(c.id)
     } catch (e) {
       setError((e as Error).message)
     }
@@ -153,6 +156,19 @@ export default function DraftEditor() {
     }
   }
 
+  async function confirmCourt(c: api.CitationView) {
+    setError(null)
+    try {
+      await api.confirmCourt(c.id)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+    await load()
+  }
+
+  // 原文對照畫面顯示的那筆引用，以最新載入的草稿為準（確認後按鈕自然消失）
+  const sourceCitation = draft?.paragraphs.flatMap((p) => p.citations).find((c) => c.id === sourceCitationId) ?? null
+
   if (!draft) return <p className="p-6 text-slate-600">{error ?? '載入中…'}</p>
   return (
     <div className="mx-auto max-w-7xl space-y-4 p-6">
@@ -167,7 +183,7 @@ export default function DraftEditor() {
       {error && <p className="text-sm text-red-700">{error}</p>}
       <div className="grid gap-4 lg:grid-cols-2">
         <aside className="rounded-lg border border-slate-200 bg-white lg:sticky lg:top-4 lg:max-h-[85vh] lg:overflow-auto">
-          <SourcePane source={source} />
+          <SourcePane source={source} citation={sourceCitation} canReview={draft.can_review} onConfirmCourt={confirmCourt} />
         </aside>
         <div className="space-y-4">
           {draft.paragraphs.map((p) => (

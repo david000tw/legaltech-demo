@@ -72,3 +72,32 @@ def withdraw_judgment(passage_id: UUID) -> None:
     with admin_session() as s:
         p = s.get(JudgmentPassage, passage_id)
         s.get(Judgment, p.judgment_id).status = "withdrawn"
+
+
+def add_court_candidate(ctx: dict, needle: str, code: str) -> UUID:
+    """把種子裡含 needle 的法院判斷段加進本輪候選。"""
+    with admin_session() as s:
+        pid = _passage_with(s, needle, "court_reasoning").id
+    with tenant_session(ctx["firm"]) as s:
+        s.add(Candidate(firm_id=ctx["firm"], round_id=ctx["round_id"], code=code, kind="judgment",
+                        judgment_passage_id=pid))
+    return pid
+
+
+def add_synthetic_court_passage(ctx: dict, text: str, code: str) -> UUID:
+    """建一則只有一段法院判斷的合成判決，加進本輪候選（測試用，不在種子裡）。"""
+    from datetime import date
+    with admin_session() as s:
+        j = Judgment(citation=f"測試法院113年度測字第{code}號", court="測試法院", court_level="district",
+                     decided_on=date(2024, 1, 1), source_url="https://example.invalid/", full_text=text,
+                     status="active", curated=False)
+        s.add(j)
+        s.flush()
+        p = JudgmentPassage(judgment_id=j.id, seq=1, passage_type="court_reasoning", text=text, status="active")
+        s.add(p)
+        s.flush()
+        pid = p.id
+    with tenant_session(ctx["firm"]) as s:
+        s.add(Candidate(firm_id=ctx["firm"], round_id=ctx["round_id"], code=code, kind="judgment",
+                        judgment_passage_id=pid))
+    return pid

@@ -377,3 +377,63 @@ def test_draft_with_only_cleared_paragraphs_is_empty(env):
                         json={"heading": " ", "text": "", "citations": []}).status_code == 200
     r = lawyer.post(f"/api/drafts/{env['draft_id']}/export")
     assert r.status_code == 409 and r.json()["blockers"] == [{"paragraph_seq": 0, "reason": "empty_draft"}]
+
+
+# ---- 計畫 1B Task 3：律師確認「此句為法院判斷」（設計 5.5） ----
+from tests.verify_helpers import add_court_candidate  # noqa: E402
+
+PARTY_QUOTE = "上訴人雖主張系爭汽車修理費用不應計算折舊"
+
+
+def _warn_paragraph(env, seq=2):
+    add_court_candidate(env, PARTY_QUOTE, "J7")
+    return make_paragraph(env, "按{{cite:J7}}認{{quote:J7}}。", [("J7", PARTY_QUOTE)], seq=seq)
+
+
+def _blockers(client, env):
+    return [b["reason"] for b in client.get(f"/api/drafts/{env['draft_id']}").json()["blockers"]]
+
+
+def test_warn_blocks_until_court_confirmed(env, db):
+    pid = _warn_paragraph(env)
+    lawyer = env["client_for"]("lawyer@a.test")
+    j7 = cite_id(env, pid, "J7")
+    assert "party_claim_unconfirmed:J7" in _blockers(lawyer, env)
+    assert lawyer.post(f"/api/citations/{j7}/confirm").status_code == 409  # 還沒確認此句為法院判斷
+    r = lawyer.post(f"/api/citations/{j7}/confirm-court")
+    assert r.status_code == 200 and r.json()["court_confirmed"] is True
+    assert "party_claim_unconfirmed:J7" not in _blockers(lawyer, env)
+    assert lawyer.post(f"/api/citations/{j7}/confirm").status_code == 200
+    assert post_review(env, lawyer, pid).status_code == 200
+    assert lawyer.post(f"/api/citations/{cite_id(env, env['good'], 'J1')}/confirm").status_code == 200
+    assert post_review(env, lawyer, env["good"]).status_code == 200
+    assert lawyer.post(f"/api/drafts/{env['draft_id']}/export").status_code == 200
+    # 權限與狀態
+    assistant = env["client_for"]("assistant@a.test")
+    assert assistant.post(f"/api/citations/{j7}/confirm-court").status_code == 403
+    j1 = cite_id(env, env["good"], "J1")
+    assert lawyer.post(f"/api/citations/{j1}/confirm-court").status_code == 409  # ok 狀態不需要這項確認
+    other = create_firm("乙事務所")
+    create_member(other, "lawyer@b.test")
+    b = TestClient(create_app(db))
+    assert login(b, "lawyer@b.test").status_code == 200
+    assert b.post(f"/api/citations/{j7}/confirm-court").status_code == 404
+
+
+def test_confirm_court_event_and_reset_on_edit(env):
+    pid = _warn_paragraph(env)
+    lawyer = env["client_for"]("lawyer@a.test")
+    j7 = cite_id(env, pid, "J7")
+    assert lawyer.post(f"/api/citations/{j7}/confirm-court").status_code == 200
+    with tenant_session(env["firm"]) as s:
+        ev = s.scalars(select(ReviewEvent).where(ReviewEvent.paragraph_id == pid,
+                                                 ReviewEvent.action == "confirm_court_reasoning")).one()
+        assert "J7" in ev.after_text and PARTY_QUOTE in ev.after_text and BAR in ev.after_text
+        c = s.get(Citation, j7)
+        assert c.court_confirmed and c.court_confirmed_bar_number == BAR
+    r = lawyer.patch(f"/api/paragraphs/{pid}", json={"text": "按{{cite:J7}}認{{quote:J7}}。",
+                                                    "citations": [{"code": "J7", "quote": PARTY_QUOTE}]})
+    assert r.status_code == 200
+    with tenant_session(env["firm"]) as s:
+        c = s.scalars(select(Citation).where(Citation.paragraph_id == pid, Citation.code == "J7")).one()
+        assert not c.court_confirmed and c.court_confirmed_by is None

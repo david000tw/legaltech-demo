@@ -34,7 +34,7 @@ def render_text(s: Session, p: Paragraph) -> str:
         c = cites.get(code)
         if c is None:
             return f"【引用錯誤：{code}】"
-        if c.verify_status != "ok":  # 驗證失敗的引用不顯示出處與引文，避免被誤當成已驗證
+        if c.verify_status not in ("ok", "warn"):  # 驗證失敗的引用不顯示出處與引文，避免被誤當成已驗證
             return f"【未驗證：{code}】"
         if kind == "quote":
             return f"「{c.quote}」" if c.quote.strip() else f"【引用錯誤：{code}】"

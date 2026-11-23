@@ -8,7 +8,7 @@ import SourcePane from './SourcePane'
 
 const cite = (over: Partial<CitationView>): CitationView => ({
   id: 'c1', code: 'J1', kind: 'judgment', quote: 'q', label: '臺中地院113中簡3946', verify_status: 'ok',
-  verify_reasons: [], lawyer_confirmed: false, ...over,
+  verify_reasons: [], lawyer_confirmed: false, court_confirmed: false, ...over,
 })
 
 describe('CitationTag', () => {

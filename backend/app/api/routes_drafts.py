@@ -17,7 +17,7 @@ from app.models import (
 )
 from app.render import citation_label, content_version, render_text
 from app.review.service import (
-    CitationInput, ReviewRuleError, confirm_citation, edit_paragraph, mark_reviewed, renumber_exhibit,
+    CitationInput, ReviewRuleError, confirm_citation, confirm_court_reasoning, edit_paragraph, mark_reviewed, renumber_exhibit,
 )
 from app.text_norm import find_quote
 from app.verify.citations import export_blockers, is_removed, paragraph_citations
@@ -37,7 +37,7 @@ def _get_or_404(s, model, obj_id, what: str):
 def citation_json(s, c: Citation) -> dict:
     return {"id": str(c.id), "code": c.code, "kind": c.kind, "quote": c.quote, "label": citation_label(s, c),
             "verify_status": c.verify_status, "verify_reasons": c.verify_reasons,
-            "lawyer_confirmed": c.lawyer_confirmed}
+            "lawyer_confirmed": c.lawyer_confirmed, "court_confirmed": c.court_confirmed}
 
 
 def paragraph_json(s, p: Paragraph) -> dict:
@@ -111,6 +111,18 @@ def confirm(citation_id: UUID, m: CurrentMember = Depends(current_member)) -> di
         require_lawyer(m)
         try:
             c = confirm_citation(s, citation_id, m)
+        except ReviewRuleError as e:
+            raise HTTPException(409, str(e))
+        return citation_json(s, c)
+
+
+@router.post("/citations/{citation_id}/confirm-court")
+def confirm_court(citation_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    with tenant_session(m.firm_id) as s:
+        _get_or_404(s, Citation, citation_id, "引用")
+        require_lawyer(m)
+        try:
+            c = confirm_court_reasoning(s, citation_id, m)
         except ReviewRuleError as e:
             raise HTTPException(409, str(e))
         return citation_json(s, c)

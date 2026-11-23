@@ -50,8 +50,12 @@ _UNBOUND_PATTERNS = _CASE_NUMBER_PATTERNS + [
 _STATUTE_SUFFIX = re.compile(rf"\{{\{{(?:cite|quote):(S\d+)\}}\}}\s*之\s*({NUMF})")
 # 法院判斷段裡轉述的當事人主張：從「原告雖主張」之類開始，優先到「等語／云云／等情／置辯」（一定長度內），
 # 找不到才到第一個句號為止。
-_PARTY_START = re.compile(r"(?:原告|被告|上訴人|被上訴人)(?:雖|固|另|復|則|亦|並|又)?"
-                          r"(?:起訴主張|主張|辯稱|抗辯|辯以|陳稱|則以|雖以|固以|答辯)")
+# 角色與動詞之間可夾 1～8 字的姓名或代號（「被告甲○○雖辯稱」）；但不得以指示詞開頭，
+# 否則「原告前開主張屬實」「原告之主張即非可採」這類法院結論也會被當成轉述。
+_PARTY_START = re.compile(r"(?:原告|被告|上訴人|被上訴人|聲請人|相對人|兩造)"
+                          r"(?:(?![前上此其所之該本])[^,，。;；:：「」『』()（）、]{1,8}?)?"
+                          r"(?:雖|固|另|復|則|亦|並|又)?"
+                          r"(?:起訴主張|主張|辯稱|抗辯|辯以|陳稱|則以|雖以|固以|答辯|置辯)")
 _PARTY_TERMINATOR = re.compile(r"等語|云云|等情|置辯")
 _COURT_TURN = re.compile(r"然查|惟查|經查|次查|又查|本院|按")  # 轉入法院自己的論述
 PARTY_SPAN_LIMIT = 400
@@ -237,7 +241,12 @@ def verify_citation(s: Session, c: Citation) -> list[str]:
         else:
             reasons = []
     c.verify_reasons = reasons
-    c.verify_status = "ok" if not reasons else "failed"
+    if not reasons:
+        c.verify_status = "ok"
+    elif reasons == ["possible_party_claim"]:  # 只有這一項：可能是法院結論，交律師讀原文後逐筆確認
+        c.verify_status = "warn"
+    else:
+        c.verify_status = "failed"
     return reasons
 
 
@@ -292,8 +301,10 @@ def paragraph_blockers(s: Session, p: Paragraph) -> list[str]:
         out.append("unreviewed")
     out.extend(reasons)
     for c in paragraph_citations(s, p.id):
-        if c.verify_status != "ok":
+        if c.verify_status not in ("ok", "warn"):
             out.append(f"citation_failed:{c.code}")
+        elif c.verify_status == "warn" and not c.court_confirmed:
+            out.append(f"party_claim_unconfirmed:{c.code}")
         elif c.kind == "judgment" and not c.lawyer_confirmed:
             out.append(f"judgment_unconfirmed:{c.code}")
     return out

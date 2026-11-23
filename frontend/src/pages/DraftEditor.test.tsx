@@ -7,7 +7,7 @@ import DraftEditor from './DraftEditor'
 
 vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
-  return { ...real, getDraft: vi.fn(), getCitationSource: vi.fn(), confirmCitation: vi.fn(), reviewParagraph: vi.fn(),
+  return { ...real, getDraft: vi.fn(), getCitationSource: vi.fn(), confirmCitation: vi.fn(), confirmCourt: vi.fn(), reviewParagraph: vi.fn(),
     patchParagraph: vi.fn(), rewriteParagraph: vi.fn(), exportDraft: vi.fn() }
 })
 
@@ -20,7 +20,7 @@ const draft: api.DraftView = {
     version: 'v1', status: 'unreviewed', verify_reasons: [], reviewed_bar_number: null, reviewed_at: null,
     citations: [{ id: 'cj1', code: 'J1', kind: 'judgment', quote: '未在適當位置暫停禮讓幹線道之系爭車輛',
       label: '臺灣臺中地方法院113年度中簡字第3946號民事判決', verify_status: 'ok', verify_reasons: [],
-      lawyer_confirmed: false }],
+      lawyer_confirmed: false, court_confirmed: false }],
   }],
 }
 
@@ -154,5 +154,42 @@ describe('DraftEditor manual repair', () => {
     expect(api.patchParagraph).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: '確定刪除' }))
     expect(api.patchParagraph).toHaveBeenCalledWith('p1', '', [], '')
+  })
+})
+
+describe('DraftEditor party-claim confirmation', () => {
+  const warnCitation: api.CitationView = { id: 'cj7', code: 'J7', kind: 'judgment', quote: '上訴人雖主張系爭汽車修理費用不應計算折舊',
+    label: '臺灣臺中地方法院113年度簡上字第211號民事判決', verify_status: 'warn', verify_reasons: ['possible_party_claim'],
+    lawyer_confirmed: false, court_confirmed: false }
+  const warnDraft: api.DraftView = { ...draft, blockers: [{ paragraph_seq: 1, reason: 'party_claim_unconfirmed:J7' }],
+    paragraphs: [{ ...draft.paragraphs[0], citations: [warnCitation] }] }
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.getDraft).mockResolvedValue(warnDraft)
+    vi.mocked(api.getCitationSource).mockResolvedValue({ kind: 'judgment', title: '臺中地院（法院判斷段）',
+      text: '上訴人雖主張系爭汽車修理費用不應計算折舊云云。', span: [0, 20] })
+  })
+
+  it('shows a yellow party-claim citation with a court-confirm button in the source pane', async () => {
+    vi.mocked(api.confirmCourt).mockResolvedValue({ ...warnCitation, court_confirmed: true })
+    renderEditor()
+    const tag = await screen.findByRole('button', { name: /J7/ })
+    expect(tag).toHaveAttribute('data-state', 'warn')
+    expect(screen.queryByRole('button', { name: '已讀原文，確認' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '已讀原文，此句為法院判斷' })).not.toBeInTheDocument()
+    await userEvent.click(tag)
+    const pane = await screen.findByTestId('source-pane')
+    await userEvent.click(await within(pane).findByRole('button', { name: '已讀原文，此句為法院判斷' }))
+    expect(api.confirmCourt).toHaveBeenCalledWith('cj7')
+  })
+
+  it('hides the court-confirm button from assistants', async () => {
+    vi.mocked(api.getDraft).mockResolvedValue({ ...warnDraft, can_review: false })
+    renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: /J7/ }))
+    const pane = await screen.findByTestId('source-pane')
+    await within(pane).findByText('臺中地院（法院判斷段）')
+    expect(within(pane).queryByRole('button', { name: '已讀原文，此句為法院判斷' })).not.toBeInTheDocument()
   })
 })

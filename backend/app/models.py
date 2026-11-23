@@ -307,10 +307,11 @@ class Citation(Base):
     __tablename__ = "citations"
     __table_args__ = (
         _enum("kind", ("evidence", "judgment", "statute"), "ck_citation_kind"),
-        _enum("verify_status", ("ok", "failed"), "ck_citation_status"),
+        _enum("verify_status", ("ok", "warn", "failed"), "ck_citation_status"),
         _tfk("paragraph_id", "paragraphs", "CASCADE"),
         _tfk("page_text_id", "page_texts"),
         _tfk("confirmed_by", "members"),
+        _tfk("court_confirmed_by", "members"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
@@ -325,12 +326,17 @@ class Citation(Base):
     verify_reasons: Mapped[list] = mapped_column(JSONB, default=list)
     lawyer_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     confirmed_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    # warn（可能是法院轉述的當事人主張）的引用，律師讀原文後確認「此句為法院判斷」才放行（設計 5.5）
+    court_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    court_confirmed_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    court_confirmed_bar_number: Mapped[str | None] = mapped_column(String(50))
 
 
 class ReviewEvent(Base):
     __tablename__ = "review_events"
     __table_args__ = (
-        _enum("action", ("edit", "rewrite", "confirm_citation", "mark_reviewed", "revert"), "ck_review_action"),
+        _enum("action", ("edit", "rewrite", "confirm_citation", "confirm_court_reasoning", "mark_reviewed", "revert"),
+              "ck_review_action"),
         _tfk("paragraph_id", "paragraphs", "CASCADE"),
         _tfk("member_id", "members"),
     )
