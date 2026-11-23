@@ -59,3 +59,18 @@ def db(migrated_db, test_settings):
         c.execute(text(f"TRUNCATE {names} CASCADE"))
     eng.dispose()
     yield test_settings
+
+
+@pytest.fixture
+def lawyer_client(db):
+    """已登入的已驗證律師（事務所「甲事務所」，內部測試）。回傳 (client, firm_id, member_id)。"""
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    from tests.helpers import create_firm, create_member, login
+
+    firm_id = create_firm("甲事務所")
+    member_id = create_member(firm_id, "lawyer@example.test")
+    client = TestClient(create_app(db))
+    assert login(client, "lawyer@example.test").status_code == 200
+    return client, firm_id, member_id
