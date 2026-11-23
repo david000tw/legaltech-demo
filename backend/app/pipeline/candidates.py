@@ -1,9 +1,11 @@
 """候選清單（卷證頁、判決法院判斷段、法條）與 AI 對應篩選。
 
-AI 只能從候選清單挑代碼；系統丟掉清單外的代碼，並逐字驗證卷證摘錄。
+AI 只能從候選清單挑代碼；清單外的代碼與 AI 想引用的其他項目不丟掉，逐筆對回候選或原樣列給律師看
+（設計 5.7），並逐字驗證卷證摘錄。
 """
 from __future__ import annotations
 
+import re
 from uuid import UUID
 
 from sqlalchemy import select
@@ -11,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.prompts import load_prompt
 from app.ai.provider import AIError, AIProvider, record_usage
-from app.ai.schemas import SELECT_SCHEMA
+from app.ai.schemas import select_schema
 from app.ai.tokens import estimate_tokens
 from app.corpus.search import article_display, search_articles, search_pages, search_passages
 from app.exhibit_labels import evidence_label
@@ -21,7 +23,7 @@ from app.models import (
     StatuteArticle,
 )
 from app.pipeline.claims import SIDE_LABEL
-from app.text_norm import find_quote, quote_length
+from app.text_norm import find_quote, normalize_text, quote_length
 
 EVIDENCE_TOKEN_BUDGET = 150_000
 PAGES_PER_CLAIM = 20
@@ -119,7 +121,55 @@ def format_claims(claims: list[Claim]) -> str:
 
 
 def _empty_selection() -> dict:
-    return {"evidence": [], "judgments": [], "statutes": [], "note": "", "dropped": [], "unverified_quotes": []}
+    return {"evidence": [], "judgments": [], "statutes": [], "note": "", "references": [], "unverified_quotes": []}
+
+
+_ARTICLE = re.compile(r"^(?P<law>.+?)第(?P<no>\d+)條(?:之(?P<sub>\d+))?")  # 之後的第N項、款、前段、但書都不影響對回
+_CASE_CORE = re.compile(r"\d+年度?\D{1,10}?字第\d+號")
+_FIELD = {"judgment": "judgments", "statute": "statutes"}
+
+
+def resolve_reference(s: Session, text: str, cands: dict[str, Candidate]) -> dict:
+    """把 AI 想引用、但沒有用代碼填的項目對回候選：
+    mapped＝唯一對到一筆候選；ambiguous_passage＝對到判決，但該判決在候選中有多個段落；unmatched＝其他。"""
+    out = {"text": text, "status": "unmatched", "code": None}
+    norm = normalize_text(text or "")
+    if not norm:
+        return out
+    if norm in cands:  # 代碼填錯欄位（例如判決代碼寫進法條欄）
+        out.update(status="mapped", code=norm)
+        return out
+    m = _ARTICLE.match(norm)
+    if m:
+        want = normalize_text(article_display(m["law"], m["no"] + (f"-{m['sub']}" if m["sub"] else "")))
+        hits = [c.code for c in cands.values() if c.kind == "statute" and normalize_text(
+            article_display(s.get(StatuteArticle, c.statute_article_id).statute.name,
+                            s.get(StatuteArticle, c.statute_article_id).article_no)) == want]
+        if len(hits) == 1:
+            out.update(status="mapped", code=hits[0])
+        return out
+    core = _CASE_CORE.search(norm)
+    if core is None:
+        return out
+    by_judgment: dict = {}
+    for c in cands.values():
+        if c.kind != "judgment":
+            continue
+        j = s.get(Judgment, s.get(JudgmentPassage, c.judgment_passage_id).judgment_id)
+        cit = normalize_text(j.citation)
+        court = cit[:cit.find(core.group(0))] if core.group(0) in cit else None
+        if court is None:
+            continue
+        if "法院" in norm and court and court not in norm:  # 寫了法院名稱就要對得上
+            continue
+        by_judgment.setdefault(j.id, []).append(c.code)
+    if len(by_judgment) == 1:
+        codes = next(iter(by_judgment.values()))
+        if len(codes) == 1:
+            out.update(status="mapped", code=codes[0])
+        else:
+            out.update(status="ambiguous_passage")
+    return out
 
 
 def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_id: UUID | None) -> None:
@@ -131,7 +181,9 @@ def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_i
             f"【候選資料】\n{format_candidates(s, list(cands.values()))}")
     if estimate_tokens(user) > SELECT_TOKEN_LIMIT:
         raise AIError("other", f"對應步驟的輸入過長（約 {estimate_tokens(user):,} token），請減少卷證或拆成多輪")
-    result = provider.run(step="select", system=load_prompt("select"), user=user, schema=SELECT_SCHEMA,
+    codes = {field: sorted((c.code for c in cands.values() if c.kind == kind), key=lambda x: int(x[1:]))
+             for field, kind in (("evidence", "evidence"), ("judgments", "judgment"), ("statutes", "statute"))}
+    result = provider.run(step="select", system=load_prompt("select"), user=user, schema=select_schema(codes),
                           effort="medium")
     record_usage(s, rnd.firm_id, case.id, member_id, "select", result)
 
@@ -143,11 +195,20 @@ def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_i
             continue
         sel = _empty_selection()
         sel["note"] = str(item.get("note", ""))
+
+        def refer(text: str) -> None:
+            """清單外的項目一律列進 references；能唯一對回判決或法條候選的，補進該主張。"""
+            r = resolve_reference(s, text, cands)
+            sel["references"].append(r)
+            field = _FIELD.get(cands[r["code"]].kind) if r["status"] == "mapped" else None
+            if field and r["code"] not in sel[field]:
+                sel[field].append(r["code"])
+
         for ev in item.get("evidence", []):
             code, quote = str(ev.get("code", "")), str(ev.get("quote", ""))
             c = cands.get(code)
             if c is None or c.kind != "evidence":
-                sel["dropped"].append(code)
+                refer(code)
                 continue
             pt = s.get(PageText, c.page_text_id)
             if quote_length(quote) >= MIN_QUOTE and find_quote(pt.text, quote) is not None:
@@ -155,12 +216,15 @@ def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_i
             else:
                 sel["unverified_quotes"].append({"code": code, "quote": quote})
         for field, kind in (("judgments", "judgment"), ("statutes", "statute")):
-            for code in item.get(field, []):
+            for code in item.get(field, []):  # 沒有候選時 schema 不給這個欄位，缺欄位視為空陣列
                 c = cands.get(str(code))
                 if c is not None and c.kind == kind:
-                    sel[field].append(c.code)
+                    if c.code not in sel[field]:
+                        sel[field].append(c.code)
                 else:
-                    sel["dropped"].append(str(code))
+                    refer(str(code))
+        for text in item.get("other_references", []):
+            refer(str(text))
         chosen[claim.seq] = sel
     for claim in claims:
         claim.selection = chosen.get(claim.seq, _empty_selection())

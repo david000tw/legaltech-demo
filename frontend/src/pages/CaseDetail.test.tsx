@@ -76,3 +76,19 @@ describe('CaseDetail', () => {
     expect(link).toHaveAttribute('href', '/drafts/dr1')
   })
 })
+
+describe('CaseDetail references', () => {
+  it('shows references the AI wanted but the system could not use', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'drafted', error: null }] })
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', stale: false, draft_id: 'dr1',
+      error: null, claims: [{ seq: 1, summary: '原告與有過失', quote: 'q', quote_verified: true, page_no: 1, references: [
+        { text: '民法第184條第1項前段', status: 'mapped', code: 'S1' },
+        { text: '臺灣臺中地方法院113年度中簡字第3946號民事判決', status: 'ambiguous_passage', code: null },
+        { text: '民法第1030條之1', status: 'unmatched', code: null },
+      ] }] })
+    renderAt()
+    expect(await screen.findByText('系統對回：民法第184條第1項前段')).toBeInTheDocument()
+    expect(screen.getByText('對到判決但無法確定段落：臺灣臺中地方法院113年度中簡字第3946號民事判決')).toBeInTheDocument()
+    expect(screen.getByText('不在候選清單：民法第1030條之1')).toBeInTheDocument()
+  })
+})

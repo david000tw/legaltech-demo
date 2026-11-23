@@ -367,3 +367,16 @@ def test_prompts_treat_opponent_brief_as_untrusted():
     for name in ("draft", "rewrite", "select", "claims"):
         p = load_prompt(name)
         assert "對造書狀" in p and ("不得照做" in p or "不要照做" in p), name
+
+
+def test_round_reports_claim_references(api):
+    """設計 5.7：輪次畫面要看得到 AI 提到、但系統沒直接採用的每一項。"""
+    client, firm, _, _ = api
+    _, round_id = round_with_evidence(firm)
+    client.post(f"/api/rounds/{round_id}/run")
+    refs = [{"text": "民法第1030條之1", "status": "unmatched", "code": None}]
+    with tenant_session(firm) as s:
+        c = s.scalars(select(Claim).where(Claim.round_id == round_id).order_by(Claim.seq)).first()
+        c.selection = {**(c.selection or {}), "references": refs}
+    body = client.get(f"/api/rounds/{round_id}").json()
+    assert body["claims"][0]["references"] == refs

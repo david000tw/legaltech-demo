@@ -29,7 +29,10 @@ export type Exhibit = { id: string; label: string; prefix: string; number: numbe
 export type RoundSummary = { id: string; seq: number; status: RoundStatus; error: string | null }
 export type CaseDetail = CaseSummary & { documents: CaseDocument[]; exhibits: Exhibit[]; rounds: RoundSummary[] }
 export type RoundStatus = 'created' | 'running' | 'drafted' | 'failed'
-export type ClaimView = { seq: number; summary: string; quote: string; quote_verified: boolean; page_no: number | null }
+// AI 想引用、但沒用候選代碼填的項目（設計 5.7）：mapped＝系統對回；ambiguous_passage＝對到判決但段落不確定；unmatched＝不在候選清單
+export type ReferenceView = { text: string; status: 'mapped' | 'ambiguous_passage' | 'unmatched'; code: string | null }
+export type ClaimView = { seq: number; summary: string; quote: string; quote_verified: boolean; page_no: number | null
+  references?: ReferenceView[] }
 export type RoundDetail = { id: string; seq: number; status: RoundStatus; error: string | null; stale: boolean;
   draft_id: string | null; claims: ClaimView[] }
 export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgment' | 'statute'; quote: string;

@@ -44,7 +44,8 @@ def get_round(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
             "id": str(rnd.id), "seq": rnd.seq, "status": rnd.status, "error": rnd.error, "stale": stale,
             "draft_id": str(draft.id) if draft else None,
             "claims": [{"seq": c.seq, "summary": c.summary, "quote": c.quote, "quote_verified": c.quote_verified,
-                        "page_no": s.get(Page, c.page_id).page_no if c.page_id else None} for c in claims],
+                        "page_no": s.get(Page, c.page_id).page_no if c.page_id else None,
+                        "references": (c.selection or {}).get("references", [])} for c in claims],
         }
 
 

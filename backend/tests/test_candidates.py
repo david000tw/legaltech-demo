@@ -5,13 +5,13 @@ from pypdf import PdfWriter
 from sqlalchemy import select
 
 from app.ai.prompts import load_prompt
-from app.ai.schemas import SELECT_SCHEMA
+from app.ai.schemas import select_schema
 from app.corpus.seed_loader import load_seed
 from app.db import admin_session, tenant_session
 from app.ingest.service import ingest_document
-from app.models import Candidate, Claim, Round
+from app.models import Candidate, Claim, Judgment, JudgmentPassage, Round, Statute, StatuteArticle
 from app.pipeline import candidates as cand_mod
-from app.pipeline.candidates import build_candidates, select_for_claims
+from app.pipeline.candidates import build_candidates, resolve_reference, select_for_claims
 from tests.fakes.fake_provider import FakeProvider
 from tests.helpers import create_firm
 from tests.pipeline_helpers import make_round
@@ -90,23 +90,28 @@ def test_candidate_codes_unique_and_ordered(db):
     assert any(c.kind == "judgment" for c in cands) and any(c.kind == "statute" for c in cands)
 
 
-def test_select_drops_unknown_codes(db):
+def test_select_unknown_codes_become_references(db):
+    """設計 5.7：清單外的代碼不再悄悄丟掉，改列在 references 給律師看。"""
     firm, _, round_id = setup_round(db)
     with tenant_session(firm) as s:
         build_candidates(s, round_id)
+        round_codes = {k: sorted((c.code for c in s.scalars(select(Candidate).where(
+            Candidate.round_id == round_id, Candidate.kind == kind))), key=lambda x: int(x[1:]))
+            for k, kind in (("evidence", "evidence"), ("judgments", "judgment"), ("statutes", "statute"))}
     fake = FakeProvider({"select": {"selections": [
         {"claim_seq": 1, "evidence": [{"code": "E1", "quote": "未讓幹道車先行且未減速注意車前狀況"}],
-         "judgments": ["J1", "J99"], "statutes": ["S1", "X5"], "note": "依研判表"},
+         "judgments": ["J1", "J99"], "statutes": ["S1", "X5"], "other_references": [], "note": "依研判表"},
     ]}})
     with tenant_session(firm) as s:
         select_for_claims(s, round_id, fake, None)
         c1 = s.scalars(select(Claim).where(Claim.round_id == round_id, Claim.seq == 1)).one()
         assert c1.selection["judgments"] == ["J1"]
         assert c1.selection["statutes"] == ["S1"]
-        assert sorted(c1.selection["dropped"]) == ["J99", "X5"]
+        assert c1.selection.get("dropped", []) == []
+        assert {(r["text"], r["status"]) for r in c1.selection["references"]} == {("J99", "unmatched"), ("X5", "unmatched")}
         assert c1.selection["evidence"] == [{"code": "E1", "quote": "未讓幹道車先行且未減速注意車前狀況"}]
     call = fake.calls[0]
-    assert call["effort"] == "medium" and call["schema"] == SELECT_SCHEMA
+    assert call["effort"] == "medium" and call["schema"] == select_schema(round_codes)
     assert "[E1]" in call["user"] and "[J1]" in call["user"] and "[S1]" in call["user"]
     assert call["system"] == load_prompt("select")
 
@@ -136,11 +141,90 @@ def test_select_allows_empty_judgments(db):
     with tenant_session(firm) as s:
         select_for_claims(s, round_id, fake, None)
         rows = {c.seq: c.selection for c in s.scalars(select(Claim).where(Claim.round_id == round_id))}
-    assert rows[2]["judgments"] == [] and rows[2]["dropped"] == []
+    assert rows[2]["judgments"] == [] and rows[2]["references"] == []
     assert rows[1]["judgments"] == [] and rows[1]["evidence"] == []
 
 
 def test_select_prompt_has_required_rules():
     p = load_prompt("select")
-    for rule in ("只能使用候選代碼", "空陣列", "法院判斷", "逐字", "15"):
+    for rule in ("只能使用候選代碼", "空陣列", "法院判斷", "逐字", "15", "other_references"):
         assert rule in p
+
+
+# ---- 計畫 1B Task 4：只能填候選代碼，另列「想引用但不在清單」（設計 5.7） ----
+
+def test_select_schema_restricts_codes():
+    sch = select_schema({"evidence": ["E1"], "judgments": [], "statutes": ["S1", "S2"]})
+    sel = sch["properties"]["selections"]["items"]
+    assert sel["properties"]["statutes"]["items"]["enum"] == ["S1", "S2"]
+    assert sel["properties"]["evidence"]["items"]["properties"]["code"]["enum"] == ["E1"]
+    assert "judgments" not in sel["properties"] and "judgments" not in sel.get("required", [])
+    assert "other_references" in sel["properties"] and "other_references" in sel["required"]
+
+
+def _reference_round(db_):
+    """候選：S1＝民法第184條；J1、J2＝同一判決（3946）的兩段法院判斷；J3＝另一判決唯一的一段。"""
+    firm, _, round_id = setup_round(db_)
+    with admin_session() as s:
+        civil = s.scalars(select(Statute).where(Statute.name == "民法")).one()
+        a184 = s.scalars(select(StatuteArticle).where(StatuteArticle.statute_id == civil.id,
+                                                      StatuteArticle.article_no == "184")).one().id
+        multi, single = None, None
+        for j in s.scalars(select(Judgment).order_by(Judgment.citation)):
+            ps = s.scalars(select(JudgmentPassage.id).where(JudgmentPassage.judgment_id == j.id,
+                                                             JudgmentPassage.passage_type == "court_reasoning")).all()
+            if len(ps) >= 2 and multi is None:
+                multi = (j.citation, ps[0], ps[1])
+            elif len(ps) >= 1 and single is None and (multi is None or j.citation != multi[0]):
+                single = (j.citation, ps[0])
+    with tenant_session(firm) as s:
+        s.add_all([
+            Candidate(firm_id=firm, round_id=round_id, code="S1", kind="statute", statute_article_id=a184),
+            Candidate(firm_id=firm, round_id=round_id, code="J1", kind="judgment", judgment_passage_id=multi[1]),
+            Candidate(firm_id=firm, round_id=round_id, code="J2", kind="judgment", judgment_passage_id=multi[2]),
+            Candidate(firm_id=firm, round_id=round_id, code="J3", kind="judgment", judgment_passage_id=single[1]),
+        ])
+    return firm, round_id, multi[0], single[0]
+
+
+def _claim1(firm, round_id):
+    with tenant_session(firm) as s:
+        return s.scalars(select(Claim).where(Claim.round_id == round_id, Claim.seq == 1)).one().selection
+
+
+def test_other_references_resolved(db):
+    firm, round_id, multi_cit, single_cit = _reference_round(db)
+    refs = ["民法第184條第1項前段", multi_cit, single_cit, "民法第1030條之1"]
+    fake = FakeProvider({"select": {"selections": [
+        {"claim_seq": 1, "evidence": [], "judgments": [], "statutes": [], "other_references": refs, "note": ""},
+    ]}})
+    with tenant_session(firm) as s:
+        select_for_claims(s, round_id, fake, None)
+    sel = _claim1(firm, round_id)
+    assert [(r["text"], r["status"], r["code"]) for r in sel["references"]] == [
+        ("民法第184條第1項前段", "mapped", "S1"), (multi_cit, "ambiguous_passage", None),
+        (single_cit, "mapped", "J3"), ("民法第1030條之1", "unmatched", None)]
+    assert sel["statutes"] == ["S1"] and sel["judgments"] == ["J3"]
+
+
+def test_names_in_code_fields_are_not_dropped(db):
+    firm, round_id, _, _ = _reference_round(db)
+    fake = FakeProvider({"select": {"selections": [
+        {"claim_seq": 1, "evidence": [], "judgments": [], "statutes": ["民法第184條", "S9"], "other_references": [],
+         "note": ""},
+    ]}})
+    with tenant_session(firm) as s:
+        select_for_claims(s, round_id, fake, None)
+    sel = _claim1(firm, round_id)
+    assert {"text": "民法第184條", "status": "mapped", "code": "S1"} in sel["references"]
+    assert {"text": "S9", "status": "unmatched", "code": None} in sel["references"]
+    assert sel["statutes"] == ["S1"]
+
+
+def test_resolve_reference_handles_spacing_and_subarticles(db):
+    firm, round_id, _, _ = _reference_round(db)
+    with tenant_session(firm) as s:
+        cands = {c.code: c for c in s.scalars(select(Candidate).where(Candidate.round_id == round_id))}
+        assert resolve_reference(s, "民法 第 184 條 第 2 項", cands)["code"] == "S1"
+        assert resolve_reference(s, "民法第184條之1", cands)["status"] == "unmatched"
+        assert resolve_reference(s, "", cands)["status"] == "unmatched"

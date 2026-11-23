@@ -92,6 +92,15 @@ function RoundPanel({ caseId, round, onChanged }: { caseId: string; round: api.R
             <li key={c.seq}>
               主張{c.seq}：{c.summary}
               {!c.quote_verified && <span className="ml-1 text-red-600">（原文對不上）</span>}
+              {(c.references ?? []).length > 0 && (
+                <ul className="ml-4 list-disc text-xs">
+                  {(c.references ?? []).map((r, i) => (
+                    <li key={i} className={r.status === 'mapped' ? 'text-slate-600' : 'text-amber-800'}>
+                      {REFERENCE_LABEL[r.status]}：{r.text}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </li>
           ))}
         </ol>
@@ -99,6 +108,12 @@ function RoundPanel({ caseId, round, onChanged }: { caseId: string; round: api.R
       {message && <p className="mt-2 text-sm text-red-700">{message}</p>}
     </div>
   )
+}
+
+const REFERENCE_LABEL: Record<api.ReferenceView['status'], string> = {
+  mapped: '系統對回',
+  ambiguous_passage: '對到判決但無法確定段落',
+  unmatched: '不在候選清單',
 }
 
 function ExhibitRow({ exhibit, scanned, onSaved, onError }: {
