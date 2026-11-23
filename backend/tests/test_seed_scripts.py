@@ -30,3 +30,12 @@ def test_statute_download_identifies_itself_honestly(monkeypatch, tmp_path):
     monkeypatch.setattr(m.time, "sleep", lambda s: None)
     m.download()
     assert agents and "Mozilla" not in agents[0] and agents[0].startswith("legaltech-seed-builder")
+
+
+def test_judgment_builder_rejects_bad_split():
+    import pytest
+    m = load_script("build_seed_judgment")
+    bad = {"citation": "測試字第1號", "full_text": "事實及理由\n一、原告主張：被告應給付10萬元。\n"}
+    with pytest.raises(SystemExit) as e:
+        m.check_split(bad)
+    assert "no_court_reasoning" in str(e.value) and "測試字第1號" in str(e.value)

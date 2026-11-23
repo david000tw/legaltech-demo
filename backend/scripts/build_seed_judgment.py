@@ -7,15 +7,29 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from pypdf import PdfReader
 
-SEED = Path(__file__).resolve().parent.parent / "seed"
+BACKEND = Path(__file__).resolve().parent.parent
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+from app.corpus.splitter import split_judgment, split_problems  # noqa: E402
+
+SEED = BACKEND / "seed"
 
 
 def pdf_full_text(path: Path) -> str:
     return "\n".join(p.extract_text() or "" for p in PdfReader(path).pages)
+
+
+def check_split(data: dict) -> None:
+    """上架檢查（設計 5.4）：切段不合格就讓建檔失敗，強制人工檢查；例外列在 seed/split_whitelist.json。"""
+    whitelist = json.loads((SEED / "split_whitelist.json").read_text(encoding="utf-8"))
+    problems = split_problems(split_judgment(data["full_text"]), data["full_text"], data["citation"] in whitelist)
+    if problems:
+        raise SystemExit(f"切段檢查不通過：{data['citation']} {problems}（確認是例外才列入 split_whitelist.json 並寫明原因）")
 
 
 def main() -> None:
@@ -35,6 +49,7 @@ def main() -> None:
     data = {"citation": a.citation, "court": a.court, "court_level": a.court_level,
             "decided_on": a.decided_on, "source_url": a.url, "curated": a.curated,
             "raw_file": pdf.name, "full_text": pdf_full_text(pdf)}
+    check_split(data)
     out = SEED / "judgments" / f"{pdf.stem}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")

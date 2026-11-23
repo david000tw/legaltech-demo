@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 
 from app.corpus.search import article_display, bigrams, search_articles, search_pages, search_passages
 from app.corpus.seed_loader import load_seed
-from app.corpus.splitter import split_judgment
+from app.corpus.splitter import split_judgment, split_problems
 from app.corpus.statute_source import parse_law_single
 from app.db import admin_session, app_session, tenant_session
 from app.ingest.service import ingest_document
@@ -229,3 +229,86 @@ def test_load_seed_resplit_restores_passages(db):
     with admin_session() as s:
         load_seed(s, SEED, resplit=True)
         assert s.scalars(select(JudgmentPassage).where(JudgmentPassage.text == "被竄改")).all() == []
+
+
+# ---- 計畫 1B Task 2：新判決切段與上架檢查（設計 5.4） ----
+
+def _seed_full_text(stem: str) -> str:
+    return json.loads((SEED / "judgments" / f"{stem}.json").read_text(encoding="utf-8"))["full_text"]
+
+
+def _kinds_holding(passages, needle: str) -> set[str]:
+    n = normalize_text(needle)
+    return {k for k, t in passages if n in normalize_text(t)}
+
+
+@pytest.mark.parametrize("seed,party_head,court_head", [
+    ("TPDV_113_jiajisu_89", "壹、原告主張：被繼承人林淑美", "按各共有人，除法令另有規定外"),  # 壹貳標題、「按…」見解段
+    ("PCDV_113_chongsu_548", "一、原告起訴主張：兩造於民國", "四、本件爭點應為"),  # 「頁＋全形空白」行尾；本件爭點開啟判斷區
+    ("TYDV_113_su_2562", "原告主張略以：原告與", "三、按因故意或過失，不法侵害他人之權利者"),  # 「三、按…」見解段
+])
+def test_new_judgment_split(seed, party_head, court_head):
+    full = _seed_full_text(seed)
+    nf = normalize_text(full)
+    # 防呆：字串在全文中唯一，否則正確的切段也可能過不了
+    assert nf.count(normalize_text(party_head)) == 1 and nf.count(normalize_text(court_head)) == 1
+    passages = split_judgment(full)
+    assert _kinds_holding(passages, party_head) == {"party_claim"}, seed
+    assert _kinds_holding(passages, court_head) == {"court_reasoning"}, seed
+
+
+COUNTERCLAIM = """事實及理由
+壹、本訴部分
+一、原告主張：被告應返還借款新臺幣10萬元。
+二、被告則以：該款項係贈與等語置辯。
+三、得心證之理由：
+(一)原告主張其交付10萬元予被告，業據提出匯款單為證，堪信為真。
+(二)被告抗辯為贈與，未舉證以實其說，不足採。
+貳、反訴部分
+一、反訴原告主張：反訴被告應給付反訴原告代墊之醫療費用5萬元。
+二、反訴被告則以：從未委託代墊等語。
+三、得心證之理由：
+(一)反訴原告未能證明代墊事實，其請求無理由。
+"""
+
+
+def test_counterclaim_resets_section():
+    passages = split_judgment(COUNTERCLAIM)
+    assert _kinds_holding(passages, "反訴原告主張：反訴被告應給付") == {"party_claim"}
+    assert _kinds_holding(passages, "(一)原告主張其交付10萬元予被告") == {"court_reasoning"}
+    assert _kinds_holding(passages, "反訴原告未能證明代墊事實") == {"court_reasoning"}
+
+
+def test_every_seed_judgment_passes_split_check():
+    whitelist = json.loads((SEED / "split_whitelist.json").read_text(encoding="utf-8"))
+    assert all(entry.get("reason") for entry in whitelist.values())
+    for f in sorted((SEED / "judgments").glob("*.json")):
+        data = json.loads(f.read_text(encoding="utf-8"))
+        problems = split_problems(split_judgment(data["full_text"]), data["full_text"],
+                                  data["citation"] in whitelist)
+        assert problems == [], (f.stem, problems)
+
+
+def test_split_problems_flags_missing_sections():
+    only_claims = [("party_claim", "原告主張被告應賠償。")]
+    assert "no_court_reasoning" in split_problems(only_claims, "x" * 100, False)
+    assert split_problems(only_claims, "x" * 100, True) == []
+    thin = [("party_claim", "原告主張" + "甲" * 200), ("court_reasoning", "經查屬實。")]
+    assert "court_reasoning_too_short" in split_problems(thin, "甲" * 1000, False)
+
+
+COUNTERCLAIM_ONE_LEVEL = """事實及理由
+一、原告主張：被告應返還借款新臺幣10萬元。
+二、被告則以：該款項係贈與等語置辯。
+三、得心證之理由：原告主張交付10萬元，業據提出匯款單，堪信為真。
+四、反訴原告主張：反訴被告應給付代墊醫療費用5萬元。
+五、反訴被告則以：從未委託代墊等語。
+六、反訴部分得心證之理由：反訴原告未能證明代墊事實。
+"""
+
+
+def test_counterclaim_heading_resets_single_level():
+    passages = split_judgment(COUNTERCLAIM_ONE_LEVEL)
+    assert _kinds_holding(passages, "四、反訴原告主張") == {"party_claim"}
+    assert _kinds_holding(passages, "五、反訴被告則以") == {"party_claim"}
+    assert _kinds_holding(passages, "反訴原告未能證明代墊事實") == {"court_reasoning"}
