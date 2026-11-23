@@ -138,6 +138,7 @@
       {
         id: "j1",
         citation: "最高法院 112 年度台上字第 1842 號判決",
+        shortTag: "最高法院112台上1842",
         stance: "有利我方",
         pinned: true,
         summary: "汽車行駛至無號誌交岔路口，支線道車應暫停讓幹線道車先行；違反保護他人之法律致生損害於他人者，推定其有過失。",
@@ -146,6 +147,7 @@
       {
         id: "j2",
         citation: "最高法院 77 年度第 9 次民事庭會議決議",
+        shortTag: "最高法院77年第9次民庭決議",
         stance: "有利我方（折舊計算基準）",
         pinned: true,
         summary: "損害賠償請求權人請求修理費時，更新零件部分應扣除折舊，但工資費用因非屬零件汰換，不生折舊問題。",
@@ -154,6 +156,7 @@
       {
         id: "j3",
         citation: "臺灣高等法院 113 年度上易字第 619 號判決",
+        shortTag: "高院113上易619",
         stance: "需留意防禦（慰撫金酌定）",
         pinned: false,
         summary: "精神慰撫金之核定，應斟酌兩造身分、資力、加害程度、被害人痛苦程度及家庭經濟狀況，非謂請求金額愈高即當然准許。",
@@ -313,6 +316,10 @@
       const [selectedEvId, setSelectedEvId] = useState("原證1");
       const [leftDrawerMode, setLeftDrawerMode] = useState("evidence");
       const [judgments, setJudgments] = useState(INITIAL_JUDGMENTS);
+      const [selectedJudgmentId, setSelectedJudgmentId] = useState("j1");
+      const [targetParagraph, setTargetParagraph] = useState("p2");
+      const [insertedCitations, setInsertedCitations] = useState({ p1: [], p2: [], p3: [] });
+      const [draftActionNotice, setDraftActionNotice] = useState("");
       const [tone, setTone] = useState("標準嚴謹");
       const [showMemo, setShowMemo] = useState(false);
 
@@ -360,6 +367,11 @@
         [evidences, selectedEvId]
       );
 
+      const activeJudgment = useMemo(
+        () => judgments.find((j) => j.id === selectedJudgmentId) || judgments[0],
+        [judgments, selectedJudgmentId]
+      );
+
       const firstInstanceFee = useMemo(() => calcCivilFee(calcAmount), [calcAmount]);
       const secondInstanceFee = useMemo(() => Math.round(firstInstanceFee * 1.5), [firstInstanceFee]);
 
@@ -368,6 +380,7 @@
           setSelectedEvId(targetId);
           setLeftDrawerMode("evidence");
         } else if (targetId.startsWith("j")) {
+          setSelectedJudgmentId(targetId);
           setLeftDrawerMode("judgments");
         }
       }
@@ -376,6 +389,24 @@
         setJudgments((prev) =>
           prev.map((j) => (j.id === id ? { ...j, pinned: !j.pinned } : j))
         );
+      }
+
+      function handleInsertPinnedCitation(judgment, paraKey) {
+        if (!judgment.pinned) {
+          setJudgments((prev) =>
+            prev.map((j) => (j.id === judgment.id ? { ...j, pinned: true } : j))
+          );
+        }
+        setInsertedCitations((prev) => {
+          const exists = (prev[paraKey] || []).some((item) => item.id === judgment.id);
+          if (exists) return prev;
+          return {
+            ...prev,
+            [paraKey]: [...(prev[paraKey] || []), { id: judgment.id, shortTag: judgment.shortTag, citation: judgment.citation }]
+          };
+        });
+        const paraLabel = paraKey === "p1" ? "事實（一）" : paraKey === "p2" ? "事實（二）" : "事實（三）";
+        setDraftActionNotice(`已將「${judgment.shortTag}」釘選並套用至「${paraLabel}」草稿。`);
       }
 
       function handleAddEvidence(e) {
@@ -610,9 +641,9 @@
                     【開會對齊備忘錄 — 供 RD 與律師確認重點】
                   </div>
                   <p>
-                    1. <strong>攻防與體檢</strong>：位於第 4 分頁「對造攻防與書狀健檢」，可檢視折舊計算、請假證明與缺漏證據提醒。
-                    2. <strong>多訴訟類型切換</strong>：僅保留「需求與痛點確認問卷」中的意圖對齊，目前不實作實際切換引擎。
-                    3. <strong>問卷整合</strong>：第 6 分頁已整合律師需求與痛點確認問卷，可一鍵複製或下載摘要。
+                    1. <strong>書狀與實務見解連動</strong>：第 1 分頁左側參照區可直接檢視與釘選判決，並由律師指定段落套用引用。
+                    2. <strong>攻防與體檢</strong>：第 4 分頁「對造攻防與書狀健檢」檢視折舊、請假證明與缺漏提醒；第 5 分頁處理答辯狀反駁。
+                    3. <strong>多訴訟類型切換</strong>：僅保留第 6 分頁問卷中的意圖對齊，目前不實作實際切換引擎。
                   </p>
                 </div>
                 <button
@@ -659,7 +690,7 @@
                 <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2 flex-wrap">
                     <span className="font-semibold text-sm text-slate-800">
-                      左側參照區（點擊書狀藍色出處標籤可連動）
+                      左側參照區（卷證、大事記與實務見解）
                     </span>
                     <div className="flex rounded-lg bg-slate-200/80 p-0.5 text-xs">
                       <button
@@ -690,12 +721,12 @@
                             : "text-slate-600"
                         }`}
                       >
-                        已釘選判決（{pinnedJudgments.length}）
+                        實務見解／已釘選（{pinnedJudgments.length}/{judgments.length}）
                       </button>
                     </div>
                   </div>
 
-                  <div className="p-4 max-h-[720px] overflow-y-auto custom-scrollbar space-y-3">
+                  <div className="p-4 max-h-[740px] overflow-y-auto custom-scrollbar space-y-3">
                     {leftDrawerMode === "evidence" && (
                       <>
                         <div className="flex flex-wrap gap-1.5 pb-2 border-b border-slate-100">
@@ -763,28 +794,92 @@
                         </div>
                       ))}
 
-                    {leftDrawerMode === "judgments" &&
-                      pinnedJudgments.map((j) => (
-                        <div
-                          key={j.id}
-                          className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70 space-y-2"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-xs text-slate-900">
-                              {j.citation}
-                            </span>
-                            <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-medium">
-                              {j.stance}
-                            </span>
+                    {leftDrawerMode === "judgments" && (
+                      <div className="space-y-3">
+                        <div className="p-3 rounded-lg bg-emerald-50/70 border border-emerald-200 text-xs space-y-2">
+                          <div className="font-bold text-emerald-950">
+                            釘選後由律師指定套用段落：
                           </div>
-                          <p className="text-xs text-slate-700 leading-relaxed">
-                            {j.summary}
-                          </p>
-                          <p className="text-xs text-slate-600 bg-white p-2.5 rounded border border-slate-200 leading-relaxed">
-                            {j.excerpt}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-slate-700 font-medium">目標段落：</span>
+                            {[
+                              { key: "p1", label: "事實（一）過失與經過" },
+                              { key: "p2", label: "事實（二）請求權與見解" },
+                              { key: "p3", label: "事實（三）損害與折舊" }
+                            ].map((p) => (
+                              <button
+                                key={p.key}
+                                type="button"
+                                onClick={() => setTargetParagraph(p.key)}
+                                className={`px-2 py-1 rounded border font-semibold cursor-pointer ${
+                                  targetParagraph === p.key
+                                    ? "bg-slate-900 text-white border-slate-900"
+                                    : "bg-white text-slate-700 border-slate-300"
+                                }`}
+                              >
+                                {p.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      ))}
+
+                        {judgments.map((j) => {
+                          const isSelected = selectedJudgmentId === j.id;
+                          return (
+                            <div
+                              key={j.id}
+                              onClick={() => setSelectedJudgmentId(j.id)}
+                              className={`p-3.5 rounded-lg border space-y-2 transition cursor-pointer ${
+                                isSelected
+                                  ? "border-emerald-500 bg-emerald-50/40"
+                                  : "border-slate-200 bg-slate-50/70"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-bold text-xs text-slate-900">
+                                  {j.citation}
+                                </span>
+                                <span className="text-[11px] px-2 py-0.5 rounded bg-slate-200 text-slate-800 font-medium">
+                                  {j.stance}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-700 leading-relaxed">
+                                {j.summary}
+                              </p>
+                              <p className="text-xs text-slate-600 bg-white p-2.5 rounded border border-slate-200 leading-relaxed">
+                                {j.excerpt}
+                              </p>
+                              <div className="flex flex-wrap gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    togglePinJudgment(j.id);
+                                  }}
+                                  className={`px-2.5 py-1.5 rounded text-xs font-semibold border cursor-pointer ${
+                                    j.pinned
+                                      ? "bg-emerald-100 text-emerald-900 border-emerald-300"
+                                      : "bg-white text-slate-800 border-slate-300 hover:bg-slate-100"
+                                  }`}
+                                >
+                                  {j.pinned ? "✓ 已釘選" : "+ 釘選判決"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleInsertPinnedCitation(j, targetParagraph);
+                                  }}
+                                  className="px-2.5 py-1.5 rounded text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer"
+                                >
+                                  套用至選定段落
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -817,7 +912,20 @@
                     </div>
                   </div>
 
-                  <div className="p-6 md:p-8 max-h-[720px] overflow-y-auto custom-scrollbar court-font text-[17px] leading-[1.9] text-slate-900">
+                  {draftActionNotice && (
+                    <div className="px-6 py-2 bg-emerald-50 border-b border-emerald-200 flex items-center justify-between text-xs text-emerald-950">
+                      <span>{draftActionNotice}</span>
+                      <button
+                        type="button"
+                        onClick={() => setDraftActionNotice("")}
+                        className="text-emerald-800 font-semibold cursor-pointer"
+                      >
+                        知道了
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="p-6 md:p-8 max-h-[740px] overflow-y-auto custom-scrollbar court-font text-[17px] leading-[1.9] text-slate-900">
                     <div className="text-center font-bold text-2xl tracking-[0.35em] mb-6">
                       民事起訴狀
                     </div>
@@ -865,6 +973,15 @@
                           [原證2, P.4]
                         </button>
                         。
+                        {(insertedCitations.p1 || []).map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() => handleCitationClick(c.id)}
+                            className="mx-1 px-1.5 py-0.5 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-sans font-semibold align-baseline cursor-pointer"
+                          >
+                            [{c.shortTag}]
+                          </button>
+                        ))}
                       </p>
 
                       <p className="mb-3">
@@ -880,6 +997,15 @@
                         >
                           [最高法院112台上1842]
                         </button>
+                        {(insertedCitations.p2 || []).map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() => handleCitationClick(c.id)}
+                            className="mx-1 px-1.5 py-0.5 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-sans font-semibold align-baseline cursor-pointer"
+                          >
+                            [{c.shortTag}]
+                          </button>
+                        ))}
                         。
                       </p>
 
@@ -916,6 +1042,15 @@
                         </button>
                         ；
                         4. 精神慰撫金150,000元。
+                        {(insertedCitations.p3 || []).map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() => handleCitationClick(c.id)}
+                            className="mx-1 px-1.5 py-0.5 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-sans font-semibold align-baseline cursor-pointer"
+                          >
+                            [{c.shortTag}]
+                          </button>
+                        ))}
                       </p>
                     </div>
 
@@ -1077,7 +1212,7 @@
                     民法第 184 條第 1 項前段、第 2 項侵權行為損害賠償
                   </h3>
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    律師可將查到的真實判決「釘選」進本案引用庫；只有被釘選的判決，系統在生成書狀時才會優先引用，避免憑空捏造裁判字號。
+                    律師可將查到的真實判決「釘選」進本案引用庫；也可直接指定套用至書狀段落，並切換至第 1 分頁核對。
                   </p>
                 </div>
 
@@ -1104,16 +1239,30 @@
                         </p>
                       </div>
 
-                      <button
-                        onClick={() => togglePinJudgment(j.id)}
-                        className={`w-full py-2 rounded-lg text-xs font-semibold border transition cursor-pointer ${
-                          j.pinned
-                            ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
-                            : "bg-slate-900 text-white border-slate-900 hover:bg-slate-800"
-                        }`}
-                      >
-                        {j.pinned ? "✓ 已釘選至本案引用庫（點擊取消）" : "+ 釘選至本案引用庫"}
-                      </button>
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => togglePinJudgment(j.id)}
+                          className={`w-full py-2 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                            j.pinned
+                              ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
+                              : "bg-slate-900 text-white border-slate-900 hover:bg-slate-800"
+                          }`}
+                        >
+                          {j.pinned ? "✓ 已釘選至本案引用庫（點擊取消）" : "+ 釘選至本案引用庫"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleInsertPinnedCitation(j, targetParagraph);
+                            setSelectedJudgmentId(j.id);
+                            setLeftDrawerMode("judgments");
+                            setActiveTab("pleading");
+                          }}
+                          className="w-full py-1.5 rounded-lg text-xs font-semibold border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 cursor-pointer"
+                        >
+                          釘選並前往第 1 頁套用
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
