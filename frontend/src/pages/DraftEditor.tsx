@@ -14,7 +14,7 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
 }) {
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [heading, setHeading] = useState(p.heading)
+  const [heading, setHeading] = useState(p.heading_text)
   const [text, setText] = useState(p.text)
   const [instruction, setInstruction] = useState('')
   const [busy, setBusy] = useState(false)
@@ -47,7 +47,7 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
   return (
     <article className="space-y-2 rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-slate-900">{p.heading}</h3>
+        <h3 className="font-semibold text-slate-900">{p.display_heading}</h3>
         <span className={`text-xs ${p.status === 'reviewed' ? 'text-emerald-700' : 'text-slate-500'}`}>
           {p.status === 'reviewed' ? `已審（${p.reviewed_bar_number ?? ''}）` : '未審'}
         </span>
@@ -67,7 +67,7 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
           <p className="text-xs text-slate-500">引用請保留 {'{{cite:代碼}}'}／{'{{quote:代碼}}'} 標記，不要直接寫字號、條號或原證號。</p>
           <div className="flex gap-2">
             <button type="button" onClick={save} disabled={busy} className="rounded bg-indigo-600 px-3 py-1 text-sm text-white">儲存</button>
-            <button type="button" onClick={() => { setEditing(false); setText(p.text); setHeading(p.heading) }}
+            <button type="button" onClick={() => { setEditing(false); setText(p.text); setHeading(p.heading_text) }}
               className="rounded border px-3 py-1 text-sm">取消</button>
           </div>
         </div>

@@ -24,6 +24,7 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
   control_char: () => '內容含有無法放進 Word 的控制字元',
   empty_draft: () => '草稿沒有任何段落',
   source_superseded: () => '卷證文字已更新，請重新確認這筆引用',
+  numbered_cross_reference: (a) => `內文用段落編號參照其他段落「${a}」，刪段後編號會變，請改寫成該段的主題`,
 }
 
 export function reasonLabel(reason: string): string {

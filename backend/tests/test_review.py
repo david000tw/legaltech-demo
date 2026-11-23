@@ -285,14 +285,14 @@ def test_confirm_waits_for_concurrent_edit_and_conflicts(env):
 
 def _race_setup(env):
     """律師已確認判決；回傳 (審核用的 member, 律師畫面上的版本)。"""
-    from app.render import content_version, render_text
+    from app.render import paragraph_version
     lawyer = env["client_for"]("lawyer@a.test")
     assert lawyer.post(f"/api/citations/{cite_id(env, env['good'], 'J1')}/confirm").status_code == 200
     mid = create_member(env["firm"], "race@a.test", bar_number=BAR)
     m = CurrentMember(id=mid, firm_id=env["firm"], role="lawyer", bar_number=BAR, bar_verified=True)
     with tenant_session(env["firm"]) as s:
         p = s.get(Paragraph, env["good"])
-        return m, content_version(p.heading, render_text(s, p))
+        return m, paragraph_version(s, p)
 
 
 def _while_review_uncommitted(env, m, version, other):
@@ -346,7 +346,7 @@ def test_patch_can_change_heading(env):
                 json={"heading": "㈠關於路權", "text": "被告應負賠償責任。", "citations": []})
     assert r.status_code == 200, r.text
     p = paragraph(env, env["good"])
-    assert p.heading == "㈠關於路權" and p.text == "被告應負賠償責任。" and p.status == "unreviewed"
+    assert p.heading == "關於路權" and p.text == "被告應負賠償責任。" and p.status == "unreviewed"  # 編號不存
 
 
 def test_patch_without_heading_keeps_it(env):
@@ -437,3 +437,49 @@ def test_confirm_court_event_and_reset_on_edit(env):
     with tenant_session(env["firm"]) as s:
         c = s.scalars(select(Citation).where(Citation.paragraph_id == pid, Citation.code == "J7")).one()
         assert not c.court_confirmed and c.court_confirmed_by is None
+
+
+
+# ---- 計畫 1B Task 5：段落編號由系統產生（設計 5.8） ----
+import io  # noqa: E402
+
+import docx  # noqa: E402
+
+
+def _three_reviewed(env):
+    lawyer = env["client_for"]("lawyer@a.test")
+    second = make_paragraph(env, GOOD, [("J1", J_REASONING), ("E1", E_QUOTE)], heading="㈡關於過失", seq=2)
+    third = make_paragraph(env, GOOD, [("J1", J_REASONING), ("E1", E_QUOTE)], heading="㈢關於慰撫金", seq=3)
+    for pid in (env["good"], second, third):
+        confirm_and_review(env, lawyer, pid)
+    return lawyer, second, third
+
+
+def test_legacy_numbered_heading_can_be_reviewed(env):
+    """計畫 1 的草稿標題存成「㈠…」：GET 給的版本送去審核要能過（版本計算只有一個地方）。"""
+    with tenant_session(env["firm"]) as s:
+        s.get(Paragraph, env["good"]).heading = "㈠關於路權"
+    lawyer = env["client_for"]("lawyer@a.test")
+    assert lawyer.post(f"/api/citations/{cite_id(env, env['good'], 'J1')}/confirm").status_code == 200
+    assert post_review(env, lawyer, env["good"]).status_code == 200
+
+
+def test_old_version_still_valid_after_deleting_another_paragraph(env):
+    second = make_paragraph(env, GOOD, [("J1", J_REASONING), ("E1", E_QUOTE)], heading="關於過失", seq=2)
+    lawyer = env["client_for"]("lawyer@a.test")
+    old = version_of(env, lawyer, second)
+    assert lawyer.patch(f"/api/paragraphs/{env['good']}", json={"text": "", "citations": [], "heading": ""}).status_code == 200
+    assert lawyer.post(f"/api/citations/{cite_id(env, second, 'J1')}/confirm").status_code == 200
+    assert post_review(env, lawyer, second, version=old).status_code == 200  # 編號從㈡變㈠，但不在指紋裡
+
+
+def test_deleting_paragraph_renumbers_without_unreviewing(env):
+    lawyer, second, third = _three_reviewed(env)
+    assert lawyer.patch(f"/api/paragraphs/{env['good']}", json={"text": "", "citations": [], "heading": ""}).status_code == 200
+    body = lawyer.get(f"/api/drafts/{env['draft_id']}").json()
+    assert [(p["display_heading"], p["heading_text"], p["status"]) for p in body["paragraphs"]] == [
+        ("㈠關於過失", "關於過失", "reviewed"), ("㈡關於慰撫金", "關於慰撫金", "reviewed")]
+    r = lawyer.post(f"/api/drafts/{env['draft_id']}/export")
+    assert r.status_code == 200, r.text
+    lines = [x.text for x in docx.Document(io.BytesIO(r.content)).paragraphs]
+    assert "㈠關於過失" in lines and "㈡關於慰撫金" in lines and not any(x.startswith("㈢") for x in lines)

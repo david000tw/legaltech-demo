@@ -433,3 +433,23 @@ def test_party_claim_passage_stays_red(db):
     _, cites = para(ctx, pid)
     assert cites["J2"].verify_status == "failed"
     assert "not_court_reasoning" in cites["J2"].verify_reasons
+
+
+
+# ---- 計畫 1B Task 5：禁止用段落編號互相參照（設計 5.8） ----
+@pytest.mark.parametrize("text", [
+    "如前㈡所述，被告應負責。", "如前（十一）所述，被告應負責。", "如前開㈢所示，被告應負責。", "見前述（二），被告應負責。",
+])
+def test_numbered_cross_reference_flagged(db, text):
+    ctx = setup_verify_round()
+    pid = make_paragraph(ctx, text, [])
+    reasons, _ = para(ctx, pid)
+    assert any(r.startswith("numbered_cross_reference:") for r in reasons), reasons
+
+
+@pytest.mark.parametrize("text", ["依道路交通事故調查報告表㈠記載，被告闖紅燈。", "其理由如下：(一)被告闖紅燈；(二)未減速。"])
+def test_enumeration_is_not_cross_reference(db, text):
+    ctx = setup_verify_round()
+    pid = make_paragraph(ctx, text, [])
+    reasons, _ = para(ctx, pid)
+    assert not any(r.startswith("numbered_cross_reference:") for r in reasons), reasons

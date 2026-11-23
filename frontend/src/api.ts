@@ -38,7 +38,9 @@ export type RoundDetail = { id: string; seq: number; status: RoundStatus; error:
 export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgment' | 'statute'; quote: string;
   label: string | null; verify_status: 'ok' | 'warn' | 'failed'; verify_reasons: string[]; lawyer_confirmed: boolean
   court_confirmed: boolean }
-export type ParagraphView = { id: string; seq: number; heading: string; text: string; rendered_text: string;
+// display_heading＝系統編號＋標題（顯示與匯出一致）；heading_text＝去掉編號的標題（修改表單用）
+export type ParagraphView = { id: string; seq: number; heading: string; display_heading: string; heading_text: string;
+  text: string; rendered_text: string;
   version: string; status: 'unreviewed' | 'reviewed'; verify_reasons: string[]; reviewed_bar_number: string | null;
   reviewed_at: string | null; citations: CitationView[] }
 export type DraftView = { id: string; round_id: string; case_id: string; can_review: boolean;

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.corpus.search import article_display
 from app.exhibit_labels import evidence_label
 from app.models import Citation, Judgment, JudgmentPassage, Paragraph, StatuteArticle
+from app.numbering import display_heading, heading_number, strip_heading_number  # noqa: F401  對外提供
 from app.verify.citations import MARKER_RE, paragraph_citations, verify_paragraph
 
 
@@ -46,3 +47,9 @@ def render_text(s: Session, p: Paragraph) -> str:
 def content_version(heading: str, rendered: str) -> str:
     """律師畫面上看到（也就是會匯出）的內容指紋：標題＋展開後的內文。"""
     return hashlib.sha256(json.dumps([heading, rendered], ensure_ascii=False).encode()).hexdigest()[:32]
+
+
+def paragraph_version(s: Session, p: Paragraph, rendered: str | None = None) -> str:
+    """審核版本指紋的唯一算法：去號後的標題＋展開後的內文。GET 與審核都只能呼叫這裡，
+    否則兩邊算法不一致，每一段審核都會被當成「內容已變更」。"""
+    return content_version(strip_heading_number(p.heading), render_text(s, p) if rendered is None else rendered)

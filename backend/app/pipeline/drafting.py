@@ -10,6 +10,7 @@ from app.ai.prompts import load_prompt
 from app.ai.provider import AIProvider, record_usage
 from app.ai.schemas import DRAFT_SCHEMA, REWRITE_SCHEMA
 from app.models import Case, Citation, Claim, Draft, Paragraph, ReviewEvent, Round
+from app.numbering import strip_heading_number
 from app.pipeline.candidates import format_candidates, round_candidates
 from app.pipeline.claims import SIDE_LABEL
 from app.verify.citations import MARKER_RE, attach_citations, verify_paragraph
@@ -62,7 +63,8 @@ def draft_round(s: Session, round_id: UUID, provider: AIProvider, member_id: UUI
     s.add(draft)
     s.flush()
     for seq, item in enumerate(result.data.get("paragraphs", []), start=1):
-        p = Paragraph(firm_id=rnd.firm_id, draft_id=draft.id, seq=seq, heading=str(item.get("heading", "")),
+        p = Paragraph(firm_id=rnd.firm_id, draft_id=draft.id, seq=seq,
+                      heading=strip_heading_number(str(item.get("heading", ""))),
                       text=str(item.get("text", "")), status="unreviewed", verify_reasons=[])
         s.add(p)
         s.flush()

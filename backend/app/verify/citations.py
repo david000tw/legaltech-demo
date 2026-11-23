@@ -19,6 +19,7 @@ from app.models import (
     Candidate, Citation, Draft, Judgment, JudgmentPassage, PageText, Paragraph, StatuteArticle,
 )
 from app.ingest.service import current_page_text
+from app.numbering import strip_heading_number
 from app.pipeline.claims import opponent_pages
 from app.text_norm import find_quote, normalize_text, quote_length
 
@@ -121,6 +122,16 @@ def _outer_quotes(t: str) -> list[tuple[int, int, int]]:
             out.append((i + 1, j - 1, j))
             i = j
     return out
+
+
+# 用段落編號參照其他段落（「如前㈡所述」「見前述（二）」）：刪段後系統重新編號，參照就錯了。
+# 在 NFKC 之後比對：㈠ 會變成 (一)、（十一）會變成 (十一)。
+_NUM = r"\([一二三四五六七八九十]{1,3}\)"
+_NUMBERED_REF = re.compile(rf"(?:如|見|詳)?前(?:述|揭|開)?{_NUM}(?:所述|所示|部分|段)?|{_NUM}(?:所述|所示|部分|段)")
+
+
+def scan_numbered_cross_references(text: str) -> list[str]:
+    return [m.group(0) for m in _NUMBERED_REF.finditer(_scan_form(text))]
 
 
 def scan_inline_quotes(text: str, opponent_texts: list[str]) -> list[str]:
@@ -275,6 +286,10 @@ def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
         reasons.append("control_char")
     for hit in scan_unbound_references(p.heading) + scan_unbound_references(p.text):
         reason = f"unbound_reference:{hit}"
+        if reason not in reasons:
+            reasons.append(reason)
+    for hit in scan_numbered_cross_references(strip_heading_number(p.heading)) + scan_numbered_cross_references(p.text):
+        reason = f"numbered_cross_reference:{hit}"
         if reason not in reasons:
             reasons.append(reason)
     opp = [op.text.text for op in opponent_pages(s, _round_id_for(s, p)) if op.text is not None]

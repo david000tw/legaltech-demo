@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api'
 import DraftEditor from './DraftEditor'
+import { reasonLabel } from '../components/ExportButton'
 
 vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
@@ -15,7 +16,8 @@ const draft: api.DraftView = {
   id: 'dr1', round_id: 'r1', case_id: 'c1', can_review: true,
   blockers: [{ paragraph_seq: 1, reason: 'unreviewed' }, { paragraph_seq: 1, reason: 'judgment_unconfirmed:J1' }],
   paragraphs: [{
-    id: 'p1', seq: 1, heading: '㈠關於路權', text: '按{{cite:J1}}認被告{{quote:J1}}。',
+    id: 'p1', seq: 1, heading: '㈠關於路權', display_heading: '㈡關於路權', heading_text: '關於路權',
+    text: '按{{cite:J1}}認被告{{quote:J1}}。',
     rendered_text: '按臺灣臺中地方法院113年度中簡字第3946號民事判決認被告「未在適當位置暫停禮讓幹線道之系爭車輛」。',
     version: 'v1', status: 'unreviewed', verify_reasons: [], reviewed_bar_number: null, reviewed_at: null,
     citations: [{ id: 'cj1', code: 'J1', kind: 'judgment', quote: '未在適當位置暫停禮讓幹線道之系爭車輛',
@@ -70,7 +72,7 @@ describe('DraftEditor', () => {
     await userEvent.type(box, '新內文{{{{cite:J1}}')
     await userEvent.click(screen.getByRole('button', { name: '儲存' }))
     expect(api.patchParagraph).toHaveBeenCalledWith('p1', '新內文{{cite:J1}}',
-      [{ code: 'J1', quote: '未在適當位置暫停禮讓幹線道之系爭車輛' }], '㈠關於路權')
+      [{ code: 'J1', quote: '未在適當位置暫停禮讓幹線道之系爭車輛' }], '關於路權')  // 表單是去號後的標題
   })
 
   it('export button lists blockers', async () => {
@@ -191,5 +193,26 @@ describe('DraftEditor party-claim confirmation', () => {
     const pane = await screen.findByTestId('source-pane')
     await within(pane).findByText('臺中地院（法院判斷段）')
     expect(within(pane).queryByRole('button', { name: '已讀原文，此句為法院判斷' })).not.toBeInTheDocument()
+  })
+})
+
+describe('DraftEditor numbering', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.getDraft).mockResolvedValue(draft)
+    vi.mocked(api.patchParagraph).mockResolvedValue(draft.paragraphs[0])
+  })
+
+  it('shows the system numbering and edits the heading without it', async () => {
+    renderEditor()
+    expect(await screen.findByRole('heading', { name: '㈡關於路權' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '修改' }))
+    expect(screen.getByRole('textbox', { name: '段落標題' })).toHaveValue('關於路權')
+  })
+
+  it('explains a numbered cross reference', () => {
+    const label = reasonLabel('numbered_cross_reference:如前(二)所述')
+    expect(label).toContain('如前(二)所述')
+    expect(label).not.toContain('其他問題')
   })
 })

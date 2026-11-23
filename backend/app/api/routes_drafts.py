@@ -15,7 +15,8 @@ from app.models import (
     Citation, Document, Draft, Exhibit, Judgment, JudgmentPassage, Page, PageText, Paragraph, Round,
     StatuteArticle,
 )
-from app.render import citation_label, content_version, render_text
+from app.numbering import display_heading, strip_heading_number
+from app.render import citation_label, paragraph_version, render_text
 from app.review.service import (
     CitationInput, ReviewRuleError, confirm_citation, confirm_court_reasoning, edit_paragraph, mark_reviewed, renumber_exhibit,
 )
@@ -40,10 +41,20 @@ def citation_json(s, c: Citation) -> dict:
             "lawyer_confirmed": c.lawyer_confirmed, "court_confirmed": c.court_confirmed}
 
 
-def paragraph_json(s, p: Paragraph) -> dict:
+def _number_of(s, p: Paragraph) -> int:
+    """段落在草稿中的顯示編號：只算未刪除的段落，依 seq 排。"""
+    siblings = s.scalars(select(Paragraph).where(Paragraph.draft_id == p.draft_id).order_by(Paragraph.seq))
+    live = [x.id for x in siblings if not is_removed(x)]
+    return live.index(p.id) + 1 if p.id in live else 0
+
+
+def paragraph_json(s, p: Paragraph, n: int | None = None) -> dict:
     rendered = render_text(s, p)
+    n = _number_of(s, p) if n is None else n
     return {"id": str(p.id), "seq": p.seq, "heading": p.heading, "text": p.text,
-            "rendered_text": rendered, "version": content_version(p.heading, rendered),
+            "display_heading": display_heading(n, p.heading) if n else strip_heading_number(p.heading),
+            "heading_text": strip_heading_number(p.heading),
+            "rendered_text": rendered, "version": paragraph_version(s, p, rendered),
             "status": p.status, "verify_reasons": p.verify_reasons,
             "reviewed_bar_number": p.reviewed_bar_number,
             "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
@@ -59,7 +70,8 @@ def get_draft(draft_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
         rnd = s.get(Round, draft.round_id)
         return {"id": str(draft.id), "round_id": str(rnd.id), "case_id": str(rnd.case_id),
                 "can_review": m.role == "lawyer" and m.bar_verified,
-                "paragraphs": [paragraph_json(s, p) for p in paragraphs if not is_removed(p)],
+                "paragraphs": [paragraph_json(s, p, n) for n, p in
+                               enumerate((p for p in paragraphs if not is_removed(p)), start=1)],
                 "blockers": [{"paragraph_seq": b.paragraph_seq, "reason": b.reason} for b in blockers]}
 
 

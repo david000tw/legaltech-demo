@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentMember
 from app.models import Citation, Exhibit, Page, PageText, Paragraph, ReviewEvent
 from app.pipeline.drafting import replace_paragraph, reset_review
-from app.render import content_version, render_text
+from app.numbering import strip_heading_number
+from app.render import paragraph_version, render_text
 from app.verify.citations import paragraph_blockers, verify_citation
 
 
@@ -87,7 +88,7 @@ def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version
     if p is None:
         raise ReviewRuleError("段落已不存在")
     rendered = render_text(s, p)
-    if content_version(p.heading, rendered) != version:
+    if paragraph_version(s, p, rendered) != version:
         raise ReviewRuleError("段落內容已變更，請重新載入後再審核")
     blockers = [b for b in paragraph_blockers(s, p) if b != "unreviewed"]
     if blockers:
@@ -105,7 +106,7 @@ def edit_paragraph(s: Session, paragraph_id: UUID, text: str, citations: list[Ci
     p = lock_paragraph(s, paragraph_id)
     before = p.text
     if heading is not None:
-        p.heading = heading
+        p.heading = strip_heading_number(heading)  # 編號由系統產生，不存
     replace_paragraph(s, p, text, [(c.code, c.quote) for c in citations])
     _event(s, p, member, "edit", before, p.text)
     s.flush()

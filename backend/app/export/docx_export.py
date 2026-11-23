@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import CurrentMember
 from app.models import Citation, Document, Exhibit, ExportRecord, Page, PageText, Paragraph
+from app.numbering import display_heading
 from app.render import render_text
 from app.verify.citations import INVALID_XML_CHARS, Blocker, export_blockers, is_removed
 
@@ -66,9 +67,8 @@ def export_draft(s: Session, draft_id: UUID, member: CurrentMember) -> bytes:
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = title.add_run(TITLE)
     run.bold, run.font.size = True, Pt(18)
-    for p in paragraphs:
-        if p.heading.strip():
-            d.add_paragraph(p.heading)
+    for n, p in enumerate(paragraphs, start=1):
+        d.add_paragraph(display_heading(n, p.heading))  # 編號依未刪除段落的順序重排，與畫面一致
         for line in render_text(s, p).split("\n"):
             d.add_paragraph(line)
     exhibits = _cited_exhibits(s, [p.id for p in paragraphs])
