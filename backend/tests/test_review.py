@@ -376,7 +376,7 @@ def test_draft_with_only_cleared_paragraphs_is_empty(env):
     assert lawyer.patch(f"/api/paragraphs/{env['good']}",
                         json={"heading": " ", "text": "", "citations": []}).status_code == 200
     r = lawyer.post(f"/api/drafts/{env['draft_id']}/export")
-    assert r.status_code == 409 and r.json()["blockers"] == [{"paragraph_seq": 0, "reason": "empty_draft"}]
+    assert r.status_code == 409 and r.json()["blockers"] == [{"paragraph_seq": 0, "paragraph_no": 0, "reason": "empty_draft"}]
 
 
 # ---- 計畫 1B Task 3：律師確認「此句為法院判斷」（設計 5.5） ----
@@ -483,3 +483,16 @@ def test_deleting_paragraph_renumbers_without_unreviewing(env):
     assert r.status_code == 200, r.text
     lines = [x.text for x in docx.Document(io.BytesIO(r.content)).paragraphs]
     assert "㈠關於過失" in lines and "㈡關於慰撫金" in lines and not any(x.startswith("㈢") for x in lines)
+
+
+
+def test_blockers_use_the_on_screen_number(env):
+    """critic M5：刪掉第 1 段後，阻擋清單的段號要和畫面編號（㈠㈡）一致，不是存檔的 seq。"""
+    lawyer = env["client_for"]("lawyer@a.test")
+    make_paragraph(env, GOOD, [("J1", J_REASONING), ("E1", E_QUOTE)], heading="關於過失", seq=2)
+    make_paragraph(env, GOOD, [("J1", J_REASONING), ("E1", E_QUOTE)], heading="關於慰撫金", seq=3)
+    assert lawyer.patch(f"/api/paragraphs/{env['good']}", json={"text": "", "citations": [], "heading": ""}).status_code == 200
+    blockers = lawyer.get(f"/api/drafts/{env['draft_id']}").json()["blockers"]
+    assert {b["paragraph_no"] for b in blockers} == {1, 2}
+    r = lawyer.post(f"/api/drafts/{env['draft_id']}/export")
+    assert r.status_code == 409 and {b["paragraph_no"] for b in r.json()["blockers"]} == {1, 2}

@@ -163,7 +163,8 @@ def resolve_reference(s: Session, text: str, cands: dict[str, Candidate]) -> dic
         court = cit[:cit.find(core.group(0))] if core.group(0) in cit else None
         if court is None:
             continue
-        if "法院" in norm and court and court not in norm:  # 寫了法院名稱就要對得上
+        written = norm[:core.start()]
+        if "院" in written and court not in written:  # 寫了法院（含「臺中地院」這類簡稱）就必須是完整法院名稱
             continue
         by_judgment.setdefault(j.id, []).append(c.code)
     if len(by_judgment) == 1:
@@ -193,20 +194,23 @@ def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_i
 
     by_seq = {c.seq: c for c in claims}
     chosen: dict[int, dict] = {}
+    orphans: list[dict] = []
     for item in result.data.get("selections", []):
         claim = by_seq.get(item.get("claim_seq"))
-        if claim is None:
+        if claim is None:  # 主張編號對不到：整筆列給律師看，不悄悄丟掉
+            orphans.append(item)
             continue
-        sel = _empty_selection()
-        sel["note"] = str(item.get("note", ""))
+        sel = chosen.get(claim.seq) or _empty_selection()  # 同一主張被拆成兩筆：合併
+        note = str(item.get("note", ""))
+        sel["note"] = "；".join(x for x in (sel["note"], note) if x)
 
         def refer(text: str) -> None:
             """清單外的項目一律列進 references；能唯一對回判決或法條候選的，補進該主張。"""
-            r = resolve_reference(s, text, cands)
-            sel["references"].append(r)
-            field = _FIELD.get(cands[r["code"]].kind) if r["status"] == "mapped" else None
-            if field and r["code"] not in sel[field]:
-                sel[field].append(r["code"])
+            for r in resolve_references(s, text, cands):
+                sel["references"].append(r)
+                field = _FIELD.get(cands[r["code"]].kind) if r["status"] == "mapped" else None
+                if field and r["code"] not in sel[field]:
+                    sel[field].append(r["code"])
 
         for ev in item.get("evidence", []):
             code, quote = str(ev.get("code", "")), str(ev.get("quote", ""))
@@ -230,6 +234,33 @@ def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_i
         for text in item.get("other_references", []):
             refer(str(text))
         chosen[claim.seq] = sel
+    if orphans and claims:
+        target = chosen.setdefault(claims[0].seq, _empty_selection())
+        for item in orphans:
+            texts = ([str(ev.get("code", "")) for ev in item.get("evidence", [])]
+                     + [str(x) for f in ("judgments", "statutes", "other_references") for x in item.get(f, [])])
+            for t in texts:
+                target["references"].append({"text": f"【主張{item.get('claim_seq')}（不存在）】{t}",
+                                             "status": "unmatched", "code": None})
     for claim in claims:
         claim.selection = chosen.get(claim.seq, _empty_selection())
     s.flush()
+
+
+_ARTICLE_ANY = re.compile(r"(?P<law>[^\d、,，;；第]*?)第(?P<no>\d+)條(?:之(?P<sub>\d+))?")
+_CONNECTORS = "及與和暨或並"
+
+
+def resolve_references(s: Session, text: str, cands: dict[str, Candidate]) -> list[dict]:
+    """一段文字裡有好幾條法條（「民法第184條、第185條」）時逐條對回，沒寫法律名稱的沿用前一條；
+    否則整段當一個項目。"""
+    norm = normalize_text(text or "")
+    found = list(_ARTICLE_ANY.finditer(norm))
+    if len(found) <= 1:
+        return [resolve_reference(s, text, cands)]
+    out, law = [], ""
+    for m in found:
+        law = m["law"].strip(_CONNECTORS) or law
+        item = f"{law}第{m['no']}條" + (f"之{m['sub']}" if m["sub"] else "")
+        out.append(resolve_reference(s, item, cands))
+    return out

@@ -51,14 +51,22 @@ _UNBOUND_PATTERNS = _CASE_NUMBER_PATTERNS + [
 _STATUTE_SUFFIX = re.compile(rf"\{{\{{(?:cite|quote):(S\d+)\}}\}}\s*之\s*({NUMF})")
 # 法院判斷段裡轉述的當事人主張：從「原告雖主張」之類開始，優先到「等語／云云／等情／置辯」（一定長度內），
 # 找不到才到第一個句號為止。
-# 角色與動詞之間可夾 1～8 字的姓名或代號（「被告甲○○雖辯稱」）；但不得以指示詞開頭，
+# 角色與動詞之間可夾 1～12 字的姓名、代號或稱謂（「被告甲○○雖辯稱」「被告甲○○、乙○○雖抗辯」
+# 「反訴原告（即被告）雖主張」「原告即被繼承人之長子甲○○主張」）；但不得以指示詞開頭，
 # 否則「原告前開主張屬實」「原告之主張即非可採」這類法院結論也會被當成轉述。
-_PARTY_START = re.compile(r"(?:原告|被告|上訴人|被上訴人|聲請人|相對人|兩造)"
-                          r"(?:(?![前上此其所之該本])[^,，。;；:：「」『』()（）、]{1,8}?)?"
-                          r"(?:雖|固|另|復|則|亦|並|又)?"
-                          r"(?:起訴主張|主張|辯稱|抗辯|辯以|陳稱|則以|雖以|固以|答辯|置辯)")
+_ROLE = r"(?:原告|被告|上訴人|被上訴人|聲請人|相對人|兩造|參加人|債務人|債權人)"
+_PARTY_START = re.compile(_ROLE +
+                          r"(?:(?!前|上開|上述|上揭|此|其|所|之|該|本院|本件)"
+                          r"(?:[^,，。;；:：「」『』()（）]|[（(]即[^)）]{1,8}[)）]){1,12}?)?"
+                          r"(?:雖|固|另|復|則|亦|並|又|均|僅)?"
+                          r"(?:起訴主張|主張|辯稱|辯解|抗辯|辯以|陳稱|泛稱|指稱|則以|雖以|固以|答辯|置辯|否認|陳述|謂|稱)")
 _PARTY_TERMINATOR = re.compile(r"等語|云云|等情|置辯")
 _COURT_TURN = re.compile(r"然查|惟查|經查|次查|又查|本院|按")  # 轉入法院自己的論述
+# 反推規則用：同一句裡的角色詞、讓步語（雖以…）與轉折語（然／惟／但）
+_ROLE_RE = re.compile(_ROLE)
+_CONCESSIVE = re.compile(r"(?:雖|固)(?:以|主張|稱|辯|抗辯|執|指)")
+_ADVERSATIVE = re.compile(r"然|惟|但")
+_QUOTED_END = re.compile(r"等語|云云")  # 反推只認這兩種；「等情」常是法院整理證據認定的事實（「…等情，有…可稽」）
 PARTY_SPAN_LIMIT = 400
 _OPEN_Q = "「『“〝﹁‘\""
 _CLOSE_Q = "」』”〞﹂’\""
@@ -126,12 +134,21 @@ def _outer_quotes(t: str) -> list[tuple[int, int, int]]:
 
 # 用段落編號參照其他段落（「如前㈡所述」「見前述（二）」）：刪段後系統重新編號，參照就錯了。
 # 在 NFKC 之後比對：㈠ 會變成 (一)、（十一）會變成 (十一)。
-_NUM = r"\([一二三四五六七八九十]{1,3}\)"
-_NUMBERED_REF = re.compile(rf"(?:如|見|詳)?前(?:述|揭|開)?{_NUM}(?:所述|所示|部分|段)?|{_NUM}(?:所述|所示|部分|段)")
+# 內文出現系統編號格式一律標記，只排除：附表、原證等編號（「附表(一)」），以及列舉（「：(一)…；(二)…」）。
+_NUM = re.compile(r"\([一二三四五六七八九十]{1,3}\)")
+_NUM_OWNER = re.compile(r"(?:表|附件|原證|被證|證物|附圖)$")
+_LIST_BEFORE = tuple(":：;；。,，")
 
 
 def scan_numbered_cross_references(text: str) -> list[str]:
-    return [m.group(0) for m in _NUMBERED_REF.finditer(_scan_form(text))]
+    t = _scan_form(text)
+    out = []
+    for m in _NUM.finditer(t):
+        before = t[:m.start()].rstrip()
+        if not before or before.endswith(_LIST_BEFORE) or _NUM_OWNER.search(before):
+            continue
+        out.append(t[max(0, m.start() - 3):m.end() + 2])
+    return out
 
 
 def scan_inline_quotes(text: str, opponent_texts: list[str]) -> list[str]:
@@ -198,7 +215,23 @@ def _in_party_claim(passage_text: str, quote: str) -> bool:
             end = period + 1 if period >= 0 else len(norm)
         if m.start() < pos + len(q) and pos < end:
             return True
-    return False
+    return _restated_in_sentence(norm, pos, pos + len(q))
+
+
+def _restated_in_sentence(norm: str, qs: int, qe: int) -> bool:
+    """角色詞與動詞被逗號隔開時的反推規則（只看引文所在的那一句）：
+    1. 句中引文之前（含引文）有角色詞，引文之後以「等語／云云」作結 → 轉述；
+    2. 句中角色詞之後有「雖以／雖主張…」，引文落在它之後、下一個「然／惟／但」之前 → 轉述。"""
+    s0 = norm.rfind("。", 0, qs) + 1
+    s1 = norm.find("。", qe)
+    s1 = len(norm) if s1 < 0 else s1
+    role = _ROLE_RE.search(norm, s0, qe)
+    if role is None:
+        return False
+    if _QUOTED_END.search(norm, qs, s1):
+        return True
+    concession = _CONCESSIVE.search(norm, role.end(), qs + 1)
+    return concession is not None and _ADVERSATIVE.search(norm, qe, s1) is not None
 
 
 def _contains_case_number(quote: str) -> bool:
@@ -306,6 +339,7 @@ def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
 class Blocker:
     paragraph_seq: int
     reason: str
+    paragraph_no: int = 0  # 畫面與匯出上的編號（只算未刪除的段落）；0＝整份草稿的問題
 
 
 def paragraph_blockers(s: Session, p: Paragraph) -> list[str]:
@@ -337,6 +371,6 @@ def export_blockers(s: Session, draft_id: UUID) -> list[Blocker]:
                                        .order_by(Paragraph.seq)) if not is_removed(p)]
     if not paragraphs:
         return [Blocker(0, "empty_draft")]
-    for p in paragraphs:
-        out.extend(Blocker(p.seq, r) for r in paragraph_blockers(s, p))
+    for n, p in enumerate(paragraphs, start=1):
+        out.extend(Blocker(p.seq, r, n) for r in paragraph_blockers(s, p))
     return out

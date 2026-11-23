@@ -453,3 +453,70 @@ def test_enumeration_is_not_cross_reference(db, text):
     pid = make_paragraph(ctx, text, [])
     reasons, _ = para(ctx, pid)
     assert not any(r.startswith("numbered_cross_reference:") for r in reasons), reasons
+
+
+# ---- critic（Task 1～5）M1：多人、反訴、較長稱謂、逗號隔開的轉述 ----
+@pytest.mark.parametrize("sentence", [
+    "被告甲○○、乙○○雖抗辯系爭房地為被繼承人生前贈與云云。",
+    "被告甲○○、乙○○、丙○○均主張應以變價方式分割遺產等語。",
+    "反訴原告（即被告）雖主張系爭房地為其所有云云。",
+    "被告（即反訴原告）則以其已支付全部價金置辯。",
+    "原告即被繼承人之長子甲○○主張系爭房地應歸其所有。",
+    "被告於言詞辯論期日到庭陳稱其不知原告已婚。",
+    "被告雖辯解稱其不知對方已婚云云。",
+    "原告固指稱被告明知其已婚仍與之交往云云。",
+    "被告雖否認其有侵害原告配偶權之行為。",
+    "被上訴人另謂系爭款項係贈與云云。",
+    "被告本人雖辯稱其不知對方已婚云云。",
+    "被告上官○○雖辯稱其不知對方已婚云云。",
+    "債務人雖主張系爭債權已清償云云。",
+    "參加人主張系爭房地為其所有云云。",
+])
+def test_more_party_claim_forms_detected(sentence):
+    from app.verify.citations import _in_party_claim
+    passage = "經查，本件事證明確。" + sentence + "然查，被告未能舉證。"
+    assert _in_party_claim(passage, sentence.rstrip("。")[2:22]), sentence
+
+
+@pytest.mark.parametrize("seed,quote", [  # 種子判決法院判斷段裡，角色詞與「等語／雖以…然」被逗號隔開的轉述
+    ("TCDV_113_jianshang_211", "上訴人因受腦震盪困擾而需定期回診逾1年"),
+    ("TPDV_113_su_1663", "究係早上、中午還是晚上進入系爭房屋所在公寓"),
+    ("CHDV_113_jiajisu_15", "上開調解條件不包含褚俊虎尚未分配之遺產"),
+])
+def test_seed_comma_separated_party_claims_detected(seed, quote):
+    from app.verify.citations import _in_party_claim
+    full = _json.loads((_SEED / "judgments" / f"{seed}.json").read_text(encoding="utf-8"))["full_text"]
+    n = normalize_text(quote)
+    holders = [t for k, t in split_judgment(full) if k == "court_reasoning" and n in normalize_text(t)]
+    assert holders, "引文不在法院判斷段"
+    assert _in_party_claim(holders[0], quote)
+
+
+@pytest.mark.parametrize("passage,quote", [  # 法院自己的讓步句與結論，不能因為放寬而被當成轉述
+    ("經查，原告固受有損害，惟其請求金額過高，不應准許。", "原告固受有損害，惟其請求金額過高"),
+    ("被告駕車未注意車前狀況撞傷原告，有刑事判決可稽。", "被告駕車未注意車前狀況撞傷原告"),
+    ("是原告依民法第184條請求被告賠償，為有理由，應予准許。", "請求被告賠償，為有理由，應予准許"),
+])
+def test_court_sentences_not_flagged(passage, quote):
+    from app.verify.citations import _in_party_claim
+    assert not _in_party_claim(passage, quote)
+
+
+
+# ---- critic（Task 1～5）M4：交互參照的其他寫法；附表、證物、列舉不算 ----
+@pytest.mark.parametrize("text", ["參見㈡，被告應負責。", "依上開㈡之說明，被告應負責。", "如上述㈢，被告應負責。",
+                                  "如前述第㈡點所述，被告應負責。", "詳如㈣，被告應負責。", "理由同㈡。", "如本狀㈡所載，被告應負責。"])
+def test_more_numbered_cross_references_flagged(db, text):
+    ctx = setup_verify_round()
+    pid = make_paragraph(ctx, text, [])
+    reasons, _ = para(ctx, pid)
+    assert any(r.startswith("numbered_cross_reference:") for r in reasons), (text, reasons)
+
+
+@pytest.mark.parametrize("text", ["損害金額如附表(一)所示。", "附表㈡部分之費用已支付。", "見原證(一)之收據。",
+                                  "被告之過失有二，(一)未減速，(二)未注意車前狀況。"])
+def test_exhibit_numbers_and_lists_are_not_cross_references(db, text):
+    ctx = setup_verify_round()
+    pid = make_paragraph(ctx, text, [])
+    reasons, _ = para(ctx, pid)
+    assert not any(r.startswith("numbered_cross_reference:") for r in reasons), (text, reasons)

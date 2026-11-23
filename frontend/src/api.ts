@@ -8,7 +8,8 @@ export class ApiError extends Error {
   }
 }
 
-export type Blocker = { paragraph_seq: number; reason: string }
+// paragraph_no：畫面與匯出上的段落編號（刪段後會重排）；paragraph_seq 是存檔順序
+export type Blocker = { paragraph_seq: number; paragraph_no?: number; reason: string }
 
 export class ExportBlockedError extends Error {
   blockers: Blocker[]

@@ -45,7 +45,7 @@ export default function ExportButton({ blockers, onExport }: { blockers: Blocker
       </button>
       {blocked && (
         <ul className="space-y-0.5 text-sm text-red-700">
-          {blockers.map((b, i) => <li key={i}>第 {b.paragraph_seq} 段：{reasonLabel(b.reason)}</li>)}
+          {blockers.map((b, i) => <li key={i}>第 {b.paragraph_no ?? b.paragraph_seq} 段：{reasonLabel(b.reason)}</li>)}
         </ul>
       )}
     </div>

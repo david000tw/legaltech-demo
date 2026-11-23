@@ -245,7 +245,7 @@ def _kinds_holding(passages, needle: str) -> set[str]:
 @pytest.mark.parametrize("seed,party_head,court_head", [
     ("TPDV_113_jiajisu_89", "壹、原告主張：被繼承人林淑美", "按各共有人，除法令另有規定外"),  # 壹貳標題、「按…」見解段
     ("PCDV_113_chongsu_548", "一、原告起訴主張：兩造於民國", "四、本件爭點應為"),  # 「頁＋全形空白」行尾；本件爭點開啟判斷區
-    ("TYDV_113_su_2562", "原告主張略以：原告與", "三、按因故意或過失，不法侵害他人之權利者"),  # 「三、按…」見解段
+    ("TYDV_113_su_2562", "原告主張略以：原告與", "㈠ 查原告主張之前揭其婚姻情形"),  # 判斷區內以「原告主張」開頭的整理段
 ])
 def test_new_judgment_split(seed, party_head, court_head):
     full = _seed_full_text(seed)
@@ -255,6 +255,12 @@ def test_new_judgment_split(seed, party_head, court_head):
     passages = split_judgment(full)
     assert _kinds_holding(passages, party_head) == {"party_claim"}, seed
     assert _kinds_holding(passages, court_head) == {"court_reasoning"}, seed
+
+
+def test_an_paragraph_outside_court_section_is_not_court():
+    """2562 的「三、按…」在「四、本院之判斷」之前：判斷區外的「按」不開啟判斷區（安全方向，不能被引用）。"""
+    passages = split_judgment(_seed_full_text("TYDV_113_su_2562"))
+    assert _kinds_holding(passages, "三、按因故意或過失，不法侵害他人之權利者") == {"other"}
 
 
 COUNTERCLAIM = """事實及理由

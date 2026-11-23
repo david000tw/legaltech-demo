@@ -88,3 +88,11 @@ describe('minority opinion', () => {
     expect(screen.queryByText('少數見解')).not.toBeInTheDocument()
   })
 })
+
+describe('ExportButton numbering', () => {
+  it('names the paragraph by its on-screen number', () => {
+    render(<ExportButton blockers={[{ paragraph_seq: 3, paragraph_no: 2, reason: 'unreviewed' }]} onExport={vi.fn()} />)
+    expect(screen.getByText(/第 2 段/)).toBeInTheDocument()
+    expect(screen.queryByText(/第 3 段/)).not.toBeInTheDocument()
+  })
+})

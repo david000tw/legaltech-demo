@@ -45,7 +45,7 @@ def test_export_blocked_when_unreviewed_409(db):
     ctx, cs = ready(db)
     r = cs["lawyer"].post(f"/api/drafts/{ctx['draft_id']}/export")
     assert r.status_code == 409
-    assert {"paragraph_seq": 1, "reason": "unreviewed"} in r.json()["blockers"]
+    assert {"paragraph_seq": 1, "paragraph_no": 1, "reason": "unreviewed"} in r.json()["blockers"]
 
 
 def test_assistant_export_403(db):
@@ -124,7 +124,7 @@ def test_empty_draft_cannot_be_exported(db):
     cs = clients(ctx, db)
     r = cs["lawyer"].post(f"/api/drafts/{ctx['draft_id']}/export")
     assert r.status_code == 409
-    assert r.json()["blockers"] == [{"paragraph_seq": 0, "reason": "empty_draft"}]
+    assert r.json()["blockers"] == [{"paragraph_seq": 0, "paragraph_no": 0, "reason": "empty_draft"}]
     with tenant_session(ctx["firm"]) as s:
         assert s.scalars(select(ExportRecord)).first() is None
 
@@ -136,7 +136,7 @@ def test_control_chars_block_export_instead_of_500(db):
     force_reviewed(ctx["firm"], ctx["draft_id"])
     r = cs["lawyer"].post(f"/api/drafts/{ctx['draft_id']}/export")
     assert r.status_code == 409
-    assert {"paragraph_seq": 1, "reason": "control_char"} in r.json()["blockers"]
+    assert {"paragraph_seq": 1, "paragraph_no": 1, "reason": "control_char"} in r.json()["blockers"]
 
 
 def test_control_chars_in_filename_are_dropped_on_export(db):

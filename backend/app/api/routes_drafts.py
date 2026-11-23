@@ -79,7 +79,8 @@ def get_draft(draft_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
                 "can_review": m.role == "lawyer" and m.bar_verified,
                 "paragraphs": [paragraph_json(s, p, n) for n, p in
                                enumerate((p for p in paragraphs if not is_removed(p)), start=1)],
-                "blockers": [{"paragraph_seq": b.paragraph_seq, "reason": b.reason} for b in blockers]}
+                "blockers": [{"paragraph_seq": b.paragraph_seq, "paragraph_no": b.paragraph_no, "reason": b.reason}
+                             for b in blockers]}
 
 
 @router.get("/citations/{citation_id}/source")
@@ -193,7 +194,8 @@ def export(draft_id: UUID, m: CurrentMember = Depends(current_member)):
             data = export_draft(s, draft_id, m)
         except ExportBlocked as e:
             return JSONResponse(status_code=409, content={
-                "blockers": [{"paragraph_seq": b.paragraph_seq, "reason": b.reason} for b in e.blockers]})
+                "blockers": [{"paragraph_seq": b.paragraph_seq, "paragraph_no": b.paragraph_no, "reason": b.reason}
+                             for b in e.blockers]})
     name = urlquote("民事準備書狀.docx")
     return Response(content=data, media_type=DOCX_TYPE,
                     headers={"Content-Disposition": f"attachment; filename=draft.docx; filename*=UTF-8''{name}"})

@@ -29,6 +29,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # 舊結構表達不了 warn 與 confirm_court_reasoning：warn 退回 failed（較嚴），確認紀錄一併移除
+    op.execute("UPDATE citations SET verify_status = 'failed' WHERE verify_status = 'warn'")
+    op.execute("DELETE FROM review_events WHERE action = 'confirm_court_reasoning'")
     op.drop_constraint("ck_review_action", "review_events", type_="check")
     op.create_check_constraint("ck_review_action", "review_events",
                                "action in ('edit', 'rewrite', 'confirm_citation', 'mark_reviewed', 'revert')")

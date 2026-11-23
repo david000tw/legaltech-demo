@@ -169,6 +169,8 @@ def _reference_round(db_):
         civil = s.scalars(select(Statute).where(Statute.name == "民法")).one()
         a184 = s.scalars(select(StatuteArticle).where(StatuteArticle.statute_id == civil.id,
                                                       StatuteArticle.article_no == "184")).one().id
+        a191_2 = s.scalars(select(StatuteArticle).where(StatuteArticle.statute_id == civil.id,
+                                                        StatuteArticle.article_no == "191-2")).one().id
         multi, single = None, None
         for j in s.scalars(select(Judgment).order_by(Judgment.citation)):
             ps = s.scalars(select(JudgmentPassage.id).where(JudgmentPassage.judgment_id == j.id,
@@ -180,6 +182,7 @@ def _reference_round(db_):
     with tenant_session(firm) as s:
         s.add_all([
             Candidate(firm_id=firm, round_id=round_id, code="S1", kind="statute", statute_article_id=a184),
+            Candidate(firm_id=firm, round_id=round_id, code="S2", kind="statute", statute_article_id=a191_2),
             Candidate(firm_id=firm, round_id=round_id, code="J1", kind="judgment", judgment_passage_id=multi[1]),
             Candidate(firm_id=firm, round_id=round_id, code="J2", kind="judgment", judgment_passage_id=multi[2]),
             Candidate(firm_id=firm, round_id=round_id, code="J3", kind="judgment", judgment_passage_id=single[1]),
@@ -228,3 +231,47 @@ def test_resolve_reference_handles_spacing_and_subarticles(db):
         assert resolve_reference(s, "民法 第 184 條 第 2 項", cands)["code"] == "S1"
         assert resolve_reference(s, "民法第184條之1", cands)["status"] == "unmatched"
         assert resolve_reference(s, "", cands)["status"] == "unmatched"
+
+
+
+# ---- critic（Task 1～5）M2、M3：對錯法院、一串法條、同一主張分兩筆 ----
+from app.pipeline.candidates import resolve_references  # noqa: E402
+
+
+def test_court_abbreviation_is_not_trusted(db):
+    firm, round_id, multi_cit, single_cit = _reference_round(db)
+    import re
+    number = re.search(r"\d+年度.+?字第\d+號", single_cit).group(0)
+    with tenant_session(firm) as s:
+        cands = {c.code: c for c in s.scalars(select(Candidate).where(Candidate.round_id == round_id))}
+        # 寫了簡稱或別的法院：對不上完整法院名稱就不採用，交給律師看
+        assert resolve_reference(s, "某地院" + number, cands)["status"] == "unmatched"
+        assert resolve_reference(s, number, cands)["status"] == "mapped"  # 只寫字號、候選中唯一 → 對回
+
+
+def test_several_articles_in_one_reference_each_resolved(db):
+    firm, round_id, _, _ = _reference_round(db)
+    with tenant_session(firm) as s:
+        cands = {c.code: c for c in s.scalars(select(Candidate).where(Candidate.round_id == round_id))}
+        got = [(r["text"], r["status"], r["code"]) for r in resolve_references(s, "民法第184條、第185條", cands)]
+        assert got == [("民法第184條", "mapped", "S1"), ("民法第185條", "unmatched", None)]
+        got = [(r["status"], r["code"]) for r in resolve_references(s, "民法第184條第1項前段、第191條之2", cands)]
+        assert got == [("mapped", "S1"), ("mapped", "S2")]
+
+
+def test_select_merges_split_items_and_keeps_unknown_claims(db):
+    firm, round_id, _, single_cit = _reference_round(db)
+    fake = FakeProvider({"select": {"selections": [
+        {"claim_seq": 1, "evidence": [], "judgments": [], "statutes": ["S1"], "other_references": ["民法第1030條之1"],
+         "note": "甲"},
+        {"claim_seq": 1, "evidence": [], "judgments": ["J3"], "statutes": [], "other_references": [], "note": "乙"},
+        {"claim_seq": 9, "evidence": [], "judgments": [], "statutes": ["S2"], "other_references": ["民法第195條"],
+         "note": ""},
+    ]}})
+    with tenant_session(firm) as s:
+        select_for_claims(s, round_id, fake, None)
+    sel = _claim1(firm, round_id)
+    assert sel["statutes"] == ["S1"] and sel["judgments"] == ["J3"]  # 兩筆合併，前一筆沒有消失
+    texts = [r["text"] for r in sel["references"]]
+    assert "民法第1030條之1" in texts
+    assert any("主張9" in t and "S2" in t for t in texts) and any("主張9" in t and "民法第195條" in t for t in texts)
