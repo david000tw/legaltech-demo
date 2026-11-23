@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -6,8 +7,11 @@ from sqlalchemy import create_engine, text
 from app.config import Settings
 
 BACKEND = Path(__file__).resolve().parent.parent
-TEST_DB = "postgresql+psycopg://app_user:apppass@127.0.0.1:55432/legaltech_test"
-TEST_ADMIN_DB = "postgresql+psycopg://postgres:devpass@127.0.0.1:55432/legaltech_test"
+# 平行執行（例如審查者同時跑測試）時，以 LEGALTECH_TEST_DB 指定不同的測試資料庫；不存在會自動建立。
+TEST_DB_NAME = os.environ.get("LEGALTECH_TEST_DB", "legaltech_test")
+TEST_DB = f"postgresql+psycopg://app_user:apppass@127.0.0.1:55432/{TEST_DB_NAME}"
+TEST_ADMIN_DB = f"postgresql+psycopg://postgres:devpass@127.0.0.1:55432/{TEST_DB_NAME}"
+SERVER_ADMIN_DB = "postgresql+psycopg://postgres:devpass@127.0.0.1:55432/postgres"
 
 
 def make_settings(tmp_path: Path, **overrides) -> Settings:
@@ -34,6 +38,11 @@ def migrated_db():
     from alembic import command
     from alembic.config import Config
 
+    server = create_engine(SERVER_ADMIN_DB, isolation_level="AUTOCOMMIT")
+    with server.connect() as c:
+        if not c.execute(text("select 1 from pg_database where datname = :n"), {"n": TEST_DB_NAME}).first():
+            c.execute(text(f'CREATE DATABASE "{TEST_DB_NAME}"'))
+    server.dispose()
     eng = create_engine(TEST_ADMIN_DB, isolation_level="AUTOCOMMIT")
     with eng.connect() as c:
         c.execute(text("DROP SCHEMA public CASCADE"))
