@@ -1,0 +1,36 @@
+"""把段落內的引用標記轉成顯示文字。出處與引文都由系統產生，原證號即時計算。"""
+from __future__ import annotations
+
+from sqlalchemy.orm import Session
+
+from app.corpus.search import article_display
+from app.exhibit_labels import evidence_label
+from app.models import Citation, Judgment, JudgmentPassage, Paragraph, StatuteArticle
+from app.verify.citations import MARKER_RE, paragraph_citations
+
+
+def citation_label(s: Session, c: Citation) -> str | None:
+    if c.kind == "evidence" and c.page_text_id:
+        return evidence_label(s, c.page_text_id)
+    if c.kind == "judgment" and c.judgment_passage_id:
+        passage = s.get(JudgmentPassage, c.judgment_passage_id)
+        return s.get(Judgment, passage.judgment_id).citation
+    if c.kind == "statute" and c.statute_article_id:
+        a = s.get(StatuteArticle, c.statute_article_id)
+        return article_display(a.statute.name, a.article_no)
+    return None
+
+
+def render_text(s: Session, p: Paragraph) -> str:
+    cites = {c.code: c for c in paragraph_citations(s, p.id)}
+
+    def sub(m) -> str:
+        kind, code = m.group(1), m.group(2)
+        c = cites.get(code)
+        if c is None:
+            return f"【引用錯誤：{code}】"
+        if kind == "quote":
+            return f"「{c.quote}」" if c.quote.strip() else f"【引用錯誤：{code}】"
+        return citation_label(s, c) or f"【引用錯誤：{code}】"
+
+    return MARKER_RE.sub(sub, p.text or "")
