@@ -21,6 +21,8 @@ from app.corpus.statute_source import parse_law_single  # noqa: E402
 SEED = HERE.parent / "seed"
 RAW = SEED / "raw" / "statutes"
 URL = "https://law.moj.gov.tw/LawClass/LawSingle.aspx?"
+# 誠實表明是工具程式，不偽裝成瀏覽器；網站若拒絕，改用全國法規資料庫的官方開放資料，不要繞過防護。
+USER_AGENT = "legaltech-seed-builder/0.1"
 
 # (法規名稱, pcode, 條號)；pcode 已於 2026-11-23 以全國法規資料庫查證。
 STATUTES = [
@@ -35,7 +37,7 @@ def download() -> None:
     for _, pcode, articles in STATUTES:
         for no in articles:
             url = URL + urllib.parse.urlencode({"pcode": pcode, "flno": no})
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             data = urllib.request.urlopen(req, timeout=30).read()
             (RAW / f"{pcode}_{no}.html").write_bytes(data)
             print("downloaded", pcode, no, len(data))
