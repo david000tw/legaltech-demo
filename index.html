@@ -1,0 +1,1215 @@
+html_content = r"""<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>台灣 AI 訴訟輔助與書狀生成系統 — 律師實務互動 Demo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap');
+    body {
+      font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #f8fafc;
+      color: #0f172a;
+    }
+    .court-font {
+      font-family: "DFKai-SB", "BiauKai", "標楷體", "Noto Serif TC", serif;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo } = React;
+
+    const CASE_INFO = {
+      caseNo: "115年度訴字第 482 號",
+      court: "臺灣桃園地方法院 民事庭",
+      division: "民事第三股",
+      title: "林大明 請求損害賠償等事件",
+      plaintiff: "林大明（原告）",
+      defendant: "陳志豪（被告）",
+      claimAmount: 485000,
+      serviceDate: "2026-10-20",
+      copyCount: 2
+    };
+
+    const EVIDENCES = [
+      {
+        id: "原證1",
+        name: "交通事故初步分析研判表（桃警交字第1150918號）",
+        page: "第 1 頁",
+        category: "警方卷證",
+        summaryNote: "系統說明：警方研判被告駕駛自小客車於路口未依規定讓車且未注意車前狀況，為本件肇事主因；原告無違規紀錄。可直接作為被告過失之核心證據。",
+        quote: "二、研判結果：陳志豪駕駛自小客車行經無號誌路口，未讓幹道車先行且未減速注意車前狀況，涉嫌違反道路交通安全規則第45條第1項第9款；林大明尚無發現肇事因素。"
+      },
+      {
+        id: "原證2",
+        name: "LINE 對話紀錄截圖（2026/09/18～2026/09/25）",
+        page: "第 4 頁",
+        category: "通訊紀錄",
+        summaryNote: "系統說明：被告於 09/18 承認『那天是我沒注意路口車況撞上來的，車損跟醫藥費我負責』，可補強過失並證明曾受催告；但尚未寫明具體賠償金額，仍須以單據與估價單證明數額。",
+        quote: "陳志豪（09/18 19:42）：不好意思林大哥，那天是我沒注意路口車況撞上來的，你的車損跟醫藥費我負責，這兩天我先跟保險業務確認看看。"
+      },
+      {
+        id: "原證3",
+        name: "林口長庚醫院診斷證明書與醫療收據明細",
+        page: "第 2 頁",
+        category: "醫療單據",
+        summaryNote: "系統說明：載明左側鎖骨骨折、右下肢擦挫傷，醫囑宜休養 6 週（2026/09/18～2026/10/30），自費與部分負擔醫療費共計 45,000 元。可支持醫療費與部分休養期間之慰撫金／薪資損失。",
+        quote: "診斷病名：1. 左側鎖骨閉鎖性骨折 2. 右下肢多處擦挫傷。醫囑：宜休養六週，期間避免提重物及劇烈活動。醫療費用合計：新臺幣 45,000 元。"
+      },
+      {
+        id: "原證4",
+        name: "原廠汽車維修估價單與完工付款發票",
+        page: "第 1 頁",
+        category: "車損單據",
+        summaryNote: "系統說明：維修總額 160,000 元，其中零件費 110,000 元、工資 50,000 元。提醒：依實務見解，零件費須扣除折舊，工資則不計折舊；建議律師核對車齡出廠年份以精算折舊後金額。",
+        quote: "前保桿總成、左前葉子板、左頭燈組更換（零件計 110,000 元）；鈑金烤漆及拆裝校正（工資計 50,000 元）。合計：新臺幣 160,000 元（已付清）。"
+      },
+      {
+        id: "原證5",
+        name: "薪資證明、勞保投保明細與請假紀錄",
+        page: "第 3 頁",
+        category: "薪資證明",
+        summaryNote: "系統說明：原告月薪 60,000 元，因骨折請假 40 天（其中 30 天為病假半薪、10 天為事假無薪），實際減少薪資收入 130,000 元。建議補充公司出具之『因本次車禍致無法出勤』證明，以強化因果關係。",
+        quote: "林大明先生月薪新臺幣 60,000 元（日薪以 2,000 元計）。2026/09/19 至 2026/10/28 休假共 40 日，病假減薪 30,000 元、事假扣薪 100,000 元，合計短少薪資 130,000 元。"
+      }
+    ];
+
+    const TIMELINE_ITEMS = [
+      {
+        id: "t1",
+        date: "2026-09-18",
+        title: "發生路口碰撞事故，原告受傷且車輛受損",
+        amount: "醫療 45,000 / 車損估 160,000",
+        status: "不爭執（肇事主因待審認）",
+        evId: "原證1",
+        note: "系統說明：警方初步研判表（原證1 第1頁）記載被告未讓幹道車先行，原告同日就醫並取得診斷證明（原證3 第2頁）。"
+      },
+      {
+        id: "t2",
+        date: "2026-09-18",
+        title: "被告於 LINE 坦承未注意車況並允諾負責",
+        amount: "—",
+        status: "我方主張已自認過失",
+        evId: "原證2",
+        note: "系統說明：對話紀錄（原證2 第4頁）顯示被告承認『沒注意路口車況』，有利於成立民法第184條第1項前段過失侵權。"
+      },
+      {
+        id: "t3",
+        date: "2026-09-19",
+        title: "原告依醫囑開始休養並請假，產生薪資損失",
+        amount: "短少薪資 130,000 元",
+        status: "對造爭執因果關係與期間",
+        evId: "原證5",
+        note: "系統說明：薪資與請假紀錄（原證5 第3頁）列出 40 天休假明細，但對造可能抗辯休養天數過長或部分屬可歸責原告之事假。"
+      },
+      {
+        id: "t4",
+        date: "2026-10-12",
+        title: "完成車輛修復並支付維修費，另請求慰撫金 15 萬元",
+        amount: "車損 160,000 / 慰撫金 150,000",
+        status: "對造爭執零件折舊與慰撫金額度",
+        evId: "原證4",
+        note: "系統說明：維修單據（原證4 第1頁）載明總額 16 萬元；慰撫金 15 萬元屬法官裁量範圍，需補強疼痛與生活不便事實。"
+      }
+    ];
+
+    const INITIAL_JUDGMENTS = [
+      {
+        id: "j1",
+        citation: "最高法院 112 年度台上字第 1842 號判決",
+        stance: "有利我方",
+        pinned: true,
+        summary: "汽車行駛至無號誌交岔路口，支線道車應暫停讓幹線道車先行；違反保護他人之法律致生損害於他人者，推定其有過失。",
+        excerpt: "按汽車行駛至無號誌之交岔路口，支線道車應暫停讓幹線道車先行，道路交通安全規則第45條第1項第9款定有明文。上開規定係為保護他人生命、身體或財產安全而設之法律，違反該規定致生損害者，依民法第184條第2項規定，推定其有過失。"
+      },
+      {
+        id: "j2",
+        citation: "最高法院 77 年度第 9 次民事庭會議決議",
+        stance: "有利我方（折舊計算基準）",
+        pinned: true,
+        summary: "損害賠償請求權人請求修理費時，更新零件部分應扣除折舊，但工資費用因非屬零件汰換，不生折舊問題。",
+        excerpt: "損害賠償之目的在於填補所受之損害，非使被害人因而獲得額外利益。物被毀損時，被害人請求賠償物被毀損所減少之價額，固得以修復費用為估定之標準，但以必要者為限，如係以新品代替舊品，應予扣除折舊；惟其中屬於『工資』部分，因不涉及零件新舊替換，自無折舊可言。"
+      },
+      {
+        id: "j3",
+        citation: "臺灣高等法院 113 年度上易字第 619 號判決",
+        stance: "需留意防禦（慰撫金酌定）",
+        pinned: false,
+        summary: "精神慰撫金之核定，應斟酌兩造身分、資力、加害程度、被害人痛苦程度及家庭經濟狀況，非謂請求金額愈高即當然准許。",
+        excerpt: "慰撫金之多寡，應斟酌雙方之身分、地位、資力與加害之程度及其他各種情形核定之，其數額是否相當，自應依實際加害情形與被害人所受痛苦之程度，並斟酌雙方之身份、地位及經濟狀況定之。"
+      }
+    ];
+
+    const CHECKLIST_ITEMS = [
+      {
+        id: "c1",
+        level: "高風險漏洞",
+        title: "車損 160,000 元未先扣除「零件折舊」，恐遭法院核減",
+        detail: "原證4 維修費 16 萬元中包含零件費 11 萬元。依最高法院 77 年度第 9 次民庭決議，零件需依行政院固定資產耐用年數表計算折舊，建議在起訴狀中補充「折舊試算欄」或預先說明出廠年份，避免被對造抓把柄。",
+        actionText: "查看相關證據：原證4"
+      },
+      {
+        id: "c2",
+        level: "舉證補強建議",
+        title: "休養 6 週（40 天）之請假紀錄，建議補充「醫師診斷必要性」與「假單明細」",
+        detail: "原證3 醫囑記載「宜休養六週」，原證5 列出 40 天請假與減薪 13 萬元。被告抗辯狀極可能主張「僅需休養 2 週」或「事假非因車禍所致」，建議同步整理逐日出勤與假別紀錄。",
+        actionText: "查看相關證據：原證5"
+      },
+      {
+        id: "c3",
+        level: "證據缺口提醒",
+        title: "目前卷證尚缺「原告與被告雙方所得及財產資料說明」",
+        detail: "請求非財產上損害賠償（慰撫金 15 萬元）時，法院通常會於言詞辯論時詢問兩造學經歷、職業與經濟狀況；若當事人同意，可於準備程序庭提出相關佐證或聲請調查。",
+        actionText: "系統缺漏提醒"
+      }
+    ];
+
+    const OPPONENT_POINTS = [
+      {
+        id: "o1",
+        tag: "否認肇事全責",
+        opponentClaim: "被告主張原告行經路口亦未減速，雙方均有過失，應依與有過失比例減輕被告賠償責任。",
+        systemAnalysis: "系統比對說明：原證1 警方初步分析研判表已記載原告無肇事因素，且原證2 被告 LINE 曾自行表示『那天是我沒注意路口車況』。建議主張被告應負 100% 過失責任，並請法院依職權或聲請囑託車輛行車事故鑑定委員會鑑定。",
+        rebuttalDraft: "查被告於事故發生後，曾於民國115年9月18日透過通訊軟體向原告表示：「那天是我沒注意路口車況撞上來的」（原證2），足見被告對其未注意車前狀況及未禮讓幹道車之過失至為明灼；況依原證1交通事故初步分析研判表，原告並無違規情事，被告空言指摘原告與有過失，並無足採。"
+      },
+      {
+        id: "o2",
+        tag: "爭執薪資損失與慰撫金",
+        opponentClaim: "被告抗辯原告骨折休養毋庸長達6週，且慰撫金15萬元過高，請求駁回逾越必要範圍之請求。",
+        systemAnalysis: "系統比對說明：原證3 診斷證明書已明確載明醫囑『宜休養六週』，原證5 亦附有薪資與請假減損明細。建議援引醫囑證明休養必要性，並就慰撫金數額具體陳述原告受傷部位、復健辛苦及兩造生活狀況，請求法院酌定相當金額。",
+        rebuttalDraft: "原告因本件車禍受有左側鎖骨閉鎖性骨折及右下肢擦挫傷，經林口長庚醫院醫師開立診斷證明書明確醫囑「宜休養六週」（原證3），原告依醫囑休養並致薪資短少130,000元（原證5），核屬必要且相當之損害；至慰撫金部分，原告承受身體傷痛與日常起居不便，請求150,000元尚屬合理，懇請鈞院依法審酌准許。"
+      }
+    ];
+
+    function calcCivilFee(amount) {
+      const val = Math.max(0, Number(amount) || 0);
+      if (val === 0) return 0;
+      let fee = 0;
+      const brackets = [
+        [100000, 1000],
+        [1000000, 1000],
+        [10000000, 900],
+        [100000000, 800],
+        [1000000000, 700],
+        [Infinity, 600]
+      ];
+      let prevCap = 0;
+      for (const [cap, per10k] of brackets) {
+        if (val <= prevCap) break;
+        const span = Math.min(val, cap) - prevCap;
+        const units = Math.ceil(span / 10000);
+        fee += units * per10k;
+        prevCap = cap;
+      }
+      return fee;
+    }
+
+    function addDays(dateStr, days) {
+      const d = new Date(dateStr + "T00:00:00");
+      if (isNaN(d.getTime())) return "請輸入正確日期";
+      d.setDate(d.getDate() + days);
+      return d.toISOString().slice(0, 10);
+    }
+
+    function App() {
+      const [activeTab, setActiveTab] = useState("pleading");
+      const [evidences, setEvidences] = useState(EVIDENCES);
+      const [selectedEvId, setSelectedEvId] = useState("原證1");
+      const [leftDrawerMode, setLeftDrawerMode] = useState("evidence");
+      const [judgments, setJudgments] = useState(INITIAL_JUDGMENTS);
+      const [tone, setTone] = useState("標準嚴謹");
+      const [showMemo, setShowMemo] = useState(false);
+
+      const [showCalcModal, setShowCalcModal] = useState(false);
+      const [showExportModal, setShowExportModal] = useState(false);
+      const [exportMode, setExportMode] = useState("docx");
+      const [calcAmount, setCalcAmount] = useState(CASE_INFO.claimAmount);
+      const [serviceDate, setServiceDate] = useState(CASE_INFO.serviceDate);
+      const [copyCount, setCopyCount] = useState(CASE_INFO.copyCount);
+
+      const [selectedOppIds, setSelectedOppIds] = useState(["o1", "o2"]);
+      const [generatedRebuttal, setGeneratedRebuttal] = useState("");
+
+      const [newEvName, setNewEvName] = useState("");
+      const [newEvQuote, setNewEvQuote] = useState("");
+
+      const selectedEvidence = useMemo(
+        () => evidences.find((e) => e.id === selectedEvId) || evidences[0],
+        [evidences, selectedEvId]
+      );
+
+      const firstInstanceFee = useMemo(() => calcCivilFee(calcAmount), [calcAmount]);
+      const secondInstanceFee = useMemo(() => Math.round(firstInstanceFee * 1.5), [firstInstanceFee]);
+
+      function handleCitationClick(targetId) {
+        if (targetId.startsWith("原證")) {
+          setSelectedEvId(targetId);
+          setLeftDrawerMode("evidence");
+        } else if (targetId.startsWith("j")) {
+          setLeftDrawerMode("judgments");
+        }
+      }
+
+      function togglePinJudgment(id) {
+        setJudgments((prev) =>
+          prev.map((j) => (j.id === id ? { ...j, pinned: !j.pinned } : j))
+        );
+      }
+
+      function handleAddEvidence(e) {
+        e.preventDefault();
+        if (!newEvName.trim()) return;
+        const nextNum = evidences.length + 1;
+        const nextId = `原證${nextNum}`;
+        const quoteText =
+          newEvQuote.trim() ||
+          `（系統已建立 ${nextId} 卷證索引，待律師核對原始掃描檔第 1 頁文字內容）`;
+        const created = {
+          id: nextId,
+          name: newEvName.trim(),
+          page: "第 1 頁",
+          category: "新增卷證",
+          summaryNote: `系統說明：已將「${newEvName.trim()}」編為 ${nextId} 並建立索引；建議律師確認該份資料欲證明的具體事實與金額。`,
+          quote: quoteText
+        };
+        setEvidences((prev) => [...prev, created]);
+        setSelectedEvId(nextId);
+        setNewEvName("");
+        setNewEvQuote("");
+      }
+
+      function handleGenerateRebuttal() {
+        const chosen = OPPONENT_POINTS.filter((p) => selectedOppIds.includes(p.id));
+        if (chosen.length === 0) {
+          setGeneratedRebuttal("請先勾選至少一項被告抗辯重點，系統將為您整理反駁草稿。");
+          return;
+        }
+        const divider = "\n\n----------------------------------------\n\n";
+        const body = chosen
+          .map(
+            (item, idx) =>
+              `【反駁要點 ${idx + 1}：${item.tag}】\n` +
+              `1. 對造主張摘要：${item.opponentClaim}\n` +
+              `2. 卷證與實務說明：${item.systemAnalysis}\n` +
+              `3. 準備書狀反駁擬稿：\n   ${item.rebuttalDraft}`
+          )
+          .join(divider);
+
+        setGeneratedRebuttal(
+          `民事準備（一）狀反駁草稿（案件：${CASE_INFO.caseNo} ${CASE_INFO.title}）\n\n` +
+            body
+        );
+      }
+
+      const pinnedJudgments = judgments.filter((j) => j.pinned);
+
+      return (
+        <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
+          <header className="bg-slate-900 text-white px-5 py-3 shadow-sm border-b border-slate-800">
+            <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 font-bold text-base">
+                  訴
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-base tracking-wide">
+                      台灣 AI 訴訟輔助與書狀生成系統
+                    </span>
+                    <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700">
+                      {CASE_INFO.court}｜{CASE_INFO.caseNo}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    {CASE_INFO.title}（{CASE_INFO.plaintiff} vs. {CASE_INFO.defendant}）
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setShowCalcModal(true)}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-600 transition cursor-pointer"
+                >
+                  裁判費與期限試算
+                </button>
+                <button
+                  onClick={() => {
+                    setExportMode("docx");
+                    setShowExportModal(true);
+                  }}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold transition cursor-pointer"
+                >
+                  匯出書狀 / 電子遞狀
+                </button>
+                <button
+                  onClick={() => setShowMemo((v) => !v)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md border transition cursor-pointer ${
+                    showMemo
+                      ? "bg-sky-500/20 border-sky-400 text-sky-200"
+                      : "bg-transparent border-slate-700 text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  {showMemo ? "隱藏開會備忘錄" : "開會對齊備忘錄"}
+                </button>
+              </div>
+            </div>
+          </header>
+
+          {showMemo && (
+            <div className="bg-sky-50 border-b border-sky-200 px-5 py-3">
+              <div className="max-w-[1440px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs text-sky-950">
+                <div className="space-y-1">
+                  <div className="font-bold text-sky-900">
+                    【開會對齊備忘錄 — 供 RD 與律師確認重點】
+                  </div>
+                  <p>
+                    1. <strong>攻防與體檢</strong>：位於第 4 分頁「對造攻防與書狀健檢」，可檢視折舊計算、請假證明與缺漏證據提醒。
+                    2. <strong>卷證說明</strong>：卷證原則由律師／助理上傳建檔，系統會在每份卷證旁提供白話與法律說明，並指出尚缺哪些資料。
+                    3. <strong>尚未放入畫面的項目</strong>：利益衝突檢查、多人追蹤修訂審批、律所專屬歷史書狀庫、強制執行狀、工時與當事人白話進度報告，目前採文字說明對齊。
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowMemo(false)}
+                  className="self-start md:self-center px-2.5 py-1 rounded bg-sky-100 hover:bg-sky-200 text-sky-900 font-medium cursor-pointer shrink-0"
+                >
+                  收合
+                </button>
+              </div>
+            </div>
+          )}
+
+          <nav className="bg-white border-b border-slate-200 px-5">
+            <div className="max-w-[1440px] mx-auto flex items-center gap-1 overflow-x-auto">
+              {[
+                { id: "pleading", label: "1. 雙屏書狀編輯器" },
+                { id: "evidence", label: "2. 卷證與時間軸" },
+                { id: "research", label: "3. 實務見解檢索" },
+                { id: "check", label: "4. 對造攻防與書狀健檢" },
+                { id: "opponent", label: "5. 對造書狀比對與反駁" }
+              ].map((tab) => {
+                const active = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition cursor-pointer ${
+                      active
+                        ? "border-amber-600 text-amber-700 bg-amber-50/50"
+                        : "border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+
+          <main className="flex-1 max-w-[1440px] w-full mx-auto p-4 md:p-6">
+            {activeTab === "pleading" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2 flex-wrap">
+                    <span className="font-semibold text-sm text-slate-800">
+                      左側參照區（點擊書狀藍色出處標籤可連動）
+                    </span>
+                    <div className="flex rounded-lg bg-slate-200/80 p-0.5 text-xs">
+                      <button
+                        onClick={() => setLeftDrawerMode("evidence")}
+                        className={`px-2.5 py-1 rounded-md font-medium cursor-pointer ${
+                          leftDrawerMode === "evidence"
+                            ? "bg-white text-slate-900 shadow-xs"
+                            : "text-slate-600"
+                        }`}
+                      >
+                        卷證與說明
+                      </button>
+                      <button
+                        onClick={() => setLeftDrawerMode("timeline")}
+                        className={`px-2.5 py-1 rounded-md font-medium cursor-pointer ${
+                          leftDrawerMode === "timeline"
+                            ? "bg-white text-slate-900 shadow-xs"
+                            : "text-slate-600"
+                        }`}
+                      >
+                        本案大事記
+                      </button>
+                      <button
+                        onClick={() => setLeftDrawerMode("judgments")}
+                        className={`px-2.5 py-1 rounded-md font-medium cursor-pointer ${
+                          leftDrawerMode === "judgments"
+                            ? "bg-white text-slate-900 shadow-xs"
+                            : "text-slate-600"
+                        }`}
+                      >
+                        已釘選判決（{pinnedJudgments.length}）
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-4 max-h-[720px] overflow-y-auto custom-scrollbar space-y-3">
+                    {leftDrawerMode === "evidence" && (
+                      <>
+                        <div className="flex flex-wrap gap-1.5 pb-2 border-b border-slate-100">
+                          {evidences.map((ev) => (
+                            <button
+                              key={ev.id}
+                              onClick={() => setSelectedEvId(ev.id)}
+                              className={`px-2.5 py-1 rounded-md text-xs font-medium border cursor-pointer ${
+                                selectedEvidence.id === ev.id
+                                  ? "bg-amber-100 border-amber-400 text-amber-900"
+                                  : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+                              }`}
+                            >
+                              {ev.id}（{ev.page}）
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="p-3.5 rounded-lg bg-amber-50/70 border border-amber-200 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold px-2 py-0.5 rounded bg-amber-600 text-white">
+                              {selectedEvidence.id}｜{selectedEvidence.page}
+                            </span>
+                            <span className="text-xs text-slate-600">
+                              {selectedEvidence.category}
+                            </span>
+                          </div>
+                          <h4 className="font-bold text-sm text-slate-900">
+                            {selectedEvidence.name}
+                          </h4>
+                          <p className="text-xs leading-relaxed text-slate-800 bg-white p-2.5 rounded border border-amber-100">
+                            {selectedEvidence.summaryNote}
+                          </p>
+                          <div className="text-xs text-slate-700 pt-1">
+                            <div className="font-semibold text-slate-600 mb-1">
+                              卷證重點摘錄：
+                            </div>
+                            <p className="leading-relaxed bg-yellow-100/80 p-2.5 rounded border-l-4 border-yellow-500">
+                              {selectedEvidence.quote}
+                            </p>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {leftDrawerMode === "timeline" &&
+                      TIMELINE_ITEMS.map((item) => (
+                        <div
+                          key={item.id}
+                          className="p-3 rounded-lg border border-slate-200 bg-slate-50/60 space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-amber-800">{item.date}</span>
+                            <button
+                              onClick={() => handleCitationClick(item.evId)}
+                              className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-medium hover:bg-blue-200 cursor-pointer"
+                            >
+                              {item.evId}
+                            </button>
+                          </div>
+                          <div className="font-semibold text-sm text-slate-900">
+                            {item.title}
+                          </div>
+                          <div className="text-xs text-slate-600">{item.note}</div>
+                        </div>
+                      ))}
+
+                    {leftDrawerMode === "judgments" &&
+                      pinnedJudgments.map((j) => (
+                        <div
+                          key={j.id}
+                          className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70 space-y-2"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-xs text-slate-900">
+                              {j.citation}
+                            </span>
+                            <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-medium">
+                              {j.stance}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-700 leading-relaxed">
+                            {j.summary}
+                          </p>
+                          <p className="text-xs text-slate-600 bg-white p-2.5 rounded border border-slate-200 leading-relaxed">
+                            {j.excerpt}
+                          </p>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm text-slate-800">
+                        民事起訴狀草稿
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded bg-slate-200 text-slate-700">
+                        標楷體 14pt 預覽
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-slate-600">論述語氣：</span>
+                      {["標準嚴謹", "加強攻勢", "平和穩健"].map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => setTone(t)}
+                          className={`px-2.5 py-1 rounded-md border font-medium cursor-pointer ${
+                            tone === t
+                              ? "bg-slate-900 text-white border-slate-900"
+                              : "bg-white text-slate-700 border-slate-300 hover:bg-slate-100"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-6 md:p-8 max-h-[720px] overflow-y-auto custom-scrollbar court-font text-[17px] leading-[1.9] text-slate-900">
+                    <div className="text-center font-bold text-2xl tracking-[0.35em] mb-6">
+                      民事起訴狀
+                    </div>
+
+                    <div className="space-y-1 mb-5 text-[16px]">
+                      <div>案號：{CASE_INFO.caseNo}（依本案卷證與爭點擬定）</div>
+                      <div>股別：{CASE_INFO.division}</div>
+                      <div>原告：林大明 住桃園市中壢區某路100號</div>
+                      <div>被告：陳志豪 住桃園市平鎮區某街55號</div>
+                    </div>
+
+                    <div className="mb-5">
+                      <div className="font-bold mb-1">為請求損害賠償事件，依法起訴事：</div>
+                      <div className="font-bold mt-3 mb-1">一、訴之聲明</div>
+                      <p className="pl-4">
+                        （一）被告應給付原告新臺幣（下同）485,000元，及自起訴狀繕本送達翌日起至清償日止，按週年利率百分之5計算之利息。
+                      </p>
+                      <p className="pl-4">
+                        （二）訴訟費用由被告負擔，並請准予宣告假執行。
+                      </p>
+                    </div>
+
+                    <div className="mb-5">
+                      <div className="font-bold mb-1">二、事實及理由</div>
+                      <p className="mb-3">
+                        （一）緣被告陳志豪於民國115年9月18日駕駛自小客車行經無號誌路口時，未依規定暫停讓幹道車先行且未減速注意車前狀況，撞及原告駕駛之車輛，致原告受有左側鎖骨閉鎖性骨折及右下肢擦挫傷，車輛亦受有損壞。此有警方初步分析研判表
+                        <button
+                          onClick={() => handleCitationClick("原證1")}
+                          className="mx-1 px-1.5 py-0.5 rounded bg-blue-100 hover:bg-blue-200 text-blue-800 text-xs font-sans font-semibold align-baseline cursor-pointer"
+                        >
+                          [原證1, P.1]
+                        </button>
+                        及醫院診斷證明書
+                        <button
+                          onClick={() => handleCitationClick("原證3")}
+                          className="mx-1 px-1.5 py-0.5 rounded bg-blue-100 hover:bg-blue-200 text-blue-800 text-xs font-sans font-semibold align-baseline cursor-pointer"
+                        >
+                          [原證3, P.2]
+                        </button>
+                        可稽。事後被告亦於通訊軟體中向原告表示未注意車況並允諾負責
+                        <button
+                          onClick={() => handleCitationClick("原證2")}
+                          className="mx-1 px-1.5 py-0.5 rounded bg-blue-100 hover:bg-blue-200 text-blue-800 text-xs font-sans font-semibold align-baseline cursor-pointer"
+                        >
+                          [原證2, P.4]
+                        </button>
+                        。
+                      </p>
+
+                      <p className="mb-3">
+                        （二）按因故意或過失，不法侵害他人之權利者，負損害賠償責任；違反保護他人之法律，致生損害於他人者，推定其有過失，民法第184條第1項前段及第2項定有明文。
+                        {tone === "加強攻勢"
+                          ? "被告既違反道路交通安全規則且已自承未注意車況，過失事證明確，竟遲未履行賠償義務，顯已侵害原告權益。"
+                          : tone === "平和穩健"
+                          ? "被告就本件事故具有過失，爰依侵權行為法律關係請求填補原告因此所受之損害。"
+                          : "本件被告違反保護他人之法律致生損害，依法推定有過失，且有最高法院實務見解可資參照"}
+                        <button
+                          onClick={() => handleCitationClick("j1")}
+                          className="mx-1 px-1.5 py-0.5 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-sans font-semibold align-baseline cursor-pointer"
+                        >
+                          [最高法院112台上1842]
+                        </button>
+                        。
+                      </p>
+
+                      <p className="mb-3">
+                        （三）原告因本件事故受有下列損害，合計485,000元：
+                        1. 醫療費用45,000元
+                        <button
+                          onClick={() => handleCitationClick("原證3")}
+                          className="mx-1 px-1.5 py-0.5 rounded bg-blue-100 hover:bg-blue-200 text-blue-800 text-xs font-sans font-semibold align-baseline cursor-pointer"
+                        >
+                          [原證3, P.2]
+                        </button>
+                        ；
+                        2. 車輛修復費用160,000元（零件費110,000元、工資50,000元，零件折舊計算方式詳如準備書狀或另行陳報，工資部分依實務見解不生折舊
+                        <button
+                          onClick={() => handleCitationClick("原證4")}
+                          className="mx-1 px-1.5 py-0.5 rounded bg-blue-100 hover:bg-blue-200 text-blue-800 text-xs font-sans font-semibold align-baseline cursor-pointer"
+                        >
+                          [原證4, P.1]
+                        </button>
+                        <button
+                          onClick={() => handleCitationClick("j2")}
+                          className="mx-1 px-1.5 py-0.5 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-sans font-semibold align-baseline cursor-pointer"
+                        >
+                          [最高法院77年第9次民庭決議]
+                        </button>
+                        ）；
+                        3. 無法工作期間薪資損失130,000元
+                        <button
+                          onClick={() => handleCitationClick("原證5")}
+                          className="mx-1 px-1.5 py-0.5 rounded bg-blue-100 hover:bg-blue-200 text-blue-800 text-xs font-sans font-semibold align-baseline cursor-pointer"
+                        >
+                          [原證5, P.3]
+                        </button>
+                        ；
+                        4. 精神慰撫金150,000元。
+                      </p>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-200 text-[16px]">
+                      <div>謹 狀</div>
+                      <div>{CASE_INFO.court} 公鑒</div>
+                      <div className="mt-2">中 華 民 國 115 年 11 月 23 日</div>
+                      <div className="mt-1">具狀人：林大明</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "evidence" && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                  <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-bold text-sm text-slate-900">
+                        已建檔卷證（{evidences.length} 件）
+                      </h3>
+                      <span className="text-xs text-slate-500">點擊查看說明</span>
+                    </div>
+
+                    <div className="space-y-2 max-h-[360px] overflow-y-auto custom-scrollbar pr-1">
+                      {evidences.map((ev) => (
+                        <button
+                          key={ev.id}
+                          onClick={() => setSelectedEvId(ev.id)}
+                          className={`w-full text-left p-3 rounded-lg border transition cursor-pointer ${
+                            selectedEvidence.id === ev.id
+                              ? "bg-amber-50 border-amber-400"
+                              : "bg-slate-50 border-slate-200 hover:bg-slate-100"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-xs mb-1">
+                            <span className="font-bold text-amber-800">{ev.id}</span>
+                            <span className="text-slate-500">{ev.page}</span>
+                          </div>
+                          <div className="text-xs font-semibold text-slate-900 line-clamp-2">
+                            {ev.name}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+
+                    <form
+                      onSubmit={handleAddEvidence}
+                      className="pt-3 border-t border-slate-200 space-y-2.5"
+                    >
+                      <div className="text-xs font-bold text-slate-800">
+                        新增上傳卷證（模擬建檔）
+                      </div>
+                      <input
+                        type="text"
+                        value={newEvName}
+                        onChange={(e) => setNewEvName(e.target.value)}
+                        placeholder="輸入文件名稱，例如：物理治療收據或警局筆錄"
+                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
+                      />
+                      <input
+                        type="text"
+                        value={newEvQuote}
+                        onChange={(e) => setNewEvQuote(e.target.value)}
+                        placeholder="選填：輸入文件關鍵內容摘要"
+                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
+                      />
+                      <button
+                        type="submit"
+                        className="w-full py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer"
+                      >
+                        + 建立證物編號並產生說明
+                      </button>
+                    </form>
+                  </div>
+
+                  <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                      <div>
+                        <span className="text-xs font-bold px-2.5 py-1 rounded bg-amber-100 text-amber-900 mr-2">
+                          {selectedEvidence.id}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {selectedEvidence.category}｜{selectedEvidence.page}
+                        </span>
+                        <h3 className="text-base font-bold text-slate-900 mt-1.5">
+                          {selectedEvidence.name}
+                        </h3>
+                      </div>
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-sky-50 border border-sky-200 space-y-1.5">
+                      <div className="text-xs font-bold text-sky-900">
+                        系統卷證說明（證明方向與注意事項）
+                      </div>
+                      <p className="text-sm text-sky-950 leading-relaxed">
+                        {selectedEvidence.summaryNote}
+                      </p>
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                      <div className="text-xs font-bold text-slate-700">
+                        卷證辨識內容摘錄（模擬定位高亮）
+                      </div>
+                      <p className="text-sm text-slate-800 leading-relaxed bg-yellow-100/90 p-3.5 rounded-lg border-l-4 border-amber-500">
+                        {selectedEvidence.quote}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+                  <h3 className="font-bold text-sm text-slate-900 mb-4">
+                    案件大事記時間軸（由卷證自動整理）
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {TIMELINE_ITEMS.map((t) => (
+                      <div
+                        key={t.id}
+                        className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col justify-between space-y-2.5"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-amber-800">{t.date}</span>
+                            <button
+                              onClick={() => {
+                                setSelectedEvId(t.evId);
+                                window.scrollTo({ top: 0, behavior: "smooth" });
+                              }}
+                              className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-semibold cursor-pointer"
+                            >
+                              {t.evId}
+                            </button>
+                          </div>
+                          <div className="font-bold text-sm text-slate-900">{t.title}</div>
+                          <div className="text-xs font-medium text-slate-700">
+                            金額／重點：{t.amount}
+                          </div>
+                          <p className="text-xs text-slate-600 leading-relaxed">{t.note}</p>
+                        </div>
+                        <div className="pt-2 border-t border-slate-200 text-[11px] font-medium text-slate-600">
+                          狀態：{t.status}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "research" && (
+              <div className="space-y-5">
+                <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+                  <div className="text-xs font-bold text-amber-700 mb-1">
+                    本案請求權基礎與爭點拆解
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900 mb-2">
+                    民法第 184 條第 1 項前段、第 2 項侵權行為損害賠償
+                  </h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    律師可將查到的真實判決「釘選」進本案引用庫；只有被釘選的判決，系統在生成書狀時才會優先引用，避免憑空捏造裁判字號。
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {judgments.map((j) => (
+                    <div
+                      key={j.id}
+                      className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between space-y-4"
+                    >
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-slate-900">
+                            {j.citation}
+                          </span>
+                          <span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium">
+                            {j.stance}
+                          </span>
+                        </div>
+                        <p className="text-xs font-semibold text-slate-800 leading-relaxed">
+                          {j.summary}
+                        </p>
+                        <p className="text-xs text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-200 leading-relaxed">
+                          {j.excerpt}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => togglePinJudgment(j.id)}
+                        className={`w-full py-2 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                          j.pinned
+                            ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
+                            : "bg-slate-900 text-white border-slate-900 hover:bg-slate-800"
+                        }`}
+                      >
+                        {j.pinned ? "✓ 已釘選至本案引用庫（點擊取消）" : "+ 釘選至本案引用庫"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeTab === "check" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">
+                      書狀弱點健檢與缺漏證據提醒
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      模擬對造律師與承審法官視角，提前找出可能被攻擊或要求補充的項目
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {CHECKLIST_ITEMS.map((c) => (
+                      <div
+                        key={c.id}
+                        className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold px-2.5 py-0.5 rounded bg-amber-100 text-amber-900">
+                            {c.level}
+                          </span>
+                          <span className="text-xs text-slate-500">{c.actionText}</span>
+                        </div>
+                        <div className="font-bold text-sm text-slate-900">{c.title}</div>
+                        <p className="text-xs text-slate-700 leading-relaxed">{c.detail}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+                  <h3 className="font-bold text-base text-slate-900">
+                    爭點整理表（準備程序參考）
+                  </h3>
+
+                  <div className="space-y-3 text-xs">
+                    <div className="p-3.5 rounded-lg bg-emerald-50/70 border border-emerald-200">
+                      <div className="font-bold text-emerald-900 mb-1">
+                        一、兩造不爭執事項
+                      </div>
+                      <p className="text-slate-700 leading-relaxed">
+                        1. 民國115年9月18日發生本件車禍，原告受有左側鎖骨閉鎖性骨折及右下肢擦挫傷，車輛受損。<br />
+                        2. 原告已支付部分醫療與修車費用。
+                      </p>
+                    </div>
+
+                    <div className="p-3.5 rounded-lg bg-rose-50/70 border border-rose-200">
+                      <div className="font-bold text-rose-900 mb-1">
+                        二、本件核心爭點
+                      </div>
+                      <p className="text-slate-700 leading-relaxed">
+                        1. 被告就本件事故是否應負全部過失責任？原告有無與有過失？<br />
+                        2. 車輛修復零件費應如何計算折舊？<br />
+                        3. 原告請求休養6週薪資損失130,000元及精神慰撫金150,000元，是否為必要且相當？
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "opponent" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                <div className="lg:col-span-6 bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">
+                      被告答辯狀重點拆解（勾選欲反駁項目）
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      系統比對我方起訴狀與卷證後，整理對造抗辯與因應說明
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {OPPONENT_POINTS.map((item) => {
+                      const checked = selectedOppIds.includes(item.id);
+                      return (
+                        <label
+                          key={item.id}
+                          className={`block p-4 rounded-xl border cursor-pointer transition ${
+                            checked
+                              ? "bg-amber-50/60 border-amber-400"
+                              : "bg-slate-50 border-slate-200"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                setSelectedOppIds((prev) =>
+                                  prev.includes(item.id)
+                                    ? prev.filter((x) => x !== item.id)
+                                    : [...prev, item.id]
+                                )
+                              }
+                              className="mt-1"
+                            />
+                            <div className="space-y-1.5 text-xs">
+                              <div className="font-bold text-sm text-slate-900">
+                                {item.tag}
+                              </div>
+                              <p className="text-slate-800 leading-relaxed">
+                                <strong>對造主張：</strong>
+                                {item.opponentClaim}
+                              </p>
+                              <p className="text-slate-600 leading-relaxed">
+                                {item.systemAnalysis}
+                              </p>
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    onClick={handleGenerateRebuttal}
+                    className="w-full py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer"
+                  >
+                    產生「民事準備（一）狀」反駁草稿
+                  </button>
+                </div>
+
+                <div className="lg:col-span-6 bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
+                  <h3 className="font-bold text-base text-slate-900">
+                    準備書狀反駁草稿預覽
+                  </h3>
+                  <textarea
+                    rows={20}
+                    value={
+                      generatedRebuttal ||
+                      "請在左側勾選被告抗辯重點，並點擊「產生『民事準備（一）狀』反駁草稿」，系統將自動帶入卷證與實務說明產生初稿，供律師進一步修改。"
+                    }
+                    onChange={(e) => setGeneratedRebuttal(e.target.value)}
+                    className="w-full p-3.5 text-xs leading-relaxed rounded-lg border border-slate-300 bg-slate-50 focus:bg-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+            )}
+          </main>
+
+          {showCalcModal && (
+            <div className="fixed inset-0 bg-slate-950/50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h3 className="font-bold text-base text-slate-900">
+                    民事裁判費與法定期間試算
+                  </h3>
+                  <button
+                    onClick={() => setShowCalcModal(false)}
+                    className="text-xs px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                  >
+                    關閉
+                  </button>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      訴訟標的金額（新臺幣 元）
+                    </label>
+                    <input
+                      type="number"
+                      value={calcAmount}
+                      onChange={(e) => setCalcAmount(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">
+                        裁判／文書送達日
+                      </label>
+                      <input
+                        type="date"
+                        value={serviceDate}
+                        onChange={(e) => setServiceDate(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">
+                        對造人數（推算繕本份數）
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={copyCount}
+                        onChange={(e) => setCopyCount(Math.max(1, Number(e.target.value) || 1))}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 space-y-1.5">
+                    <div className="font-bold text-amber-950">試算結果參考：</div>
+                    <div>
+                      • 第一審裁判費預估：
+                      <strong className="text-sm text-slate-900">
+                        {firstInstanceFee.toLocaleString()} 元
+                      </strong>
+                    </div>
+                    <div>
+                      • 第二審裁判費預估（加徵十分之五）：
+                      <strong className="text-sm text-slate-900">
+                        {secondInstanceFee.toLocaleString()} 元
+                      </strong>
+                    </div>
+                    <div>
+                      • 若為判決送達，上訴 20 日期間屆滿日參考：
+                      <strong className="text-slate-900">{addDays(serviceDate, 20)}</strong>
+                      （實際須依假日順延及在途期間調整）
+                    </div>
+                    <div>
+                      • 紙本遞狀建議準備：法院正本 1 份 ＋ 對造繕本 {copyCount} 份 ＋ 卷宗留存 1 份
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showExportModal && (
+            <div className="fixed inset-0 bg-slate-950/50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h3 className="font-bold text-base text-slate-900">
+                    匯出書狀與司法院線上起訴卷證打包預覽
+                  </h3>
+                  <button
+                    onClick={() => setShowExportModal(false)}
+                    className="text-xs px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                  >
+                    關閉
+                  </button>
+                </div>
+
+                <div className="flex gap-2 text-xs">
+                  <button
+                    onClick={() => setExportMode("docx")}
+                    className={`px-3 py-1.5 rounded-lg font-semibold border cursor-pointer ${
+                      exportMode === "docx"
+                        ? "bg-slate-900 text-white border-slate-900"
+                        : "bg-slate-50 text-slate-700 border-slate-200"
+                    }`}
+                  >
+                    標準 Word（.docx）排版規格
+                  </button>
+                  <button
+                    onClick={() => setExportMode("efiling")}
+                    className={`px-3 py-1.5 rounded-lg font-semibold border cursor-pointer ${
+                      exportMode === "efiling"
+                        ? "bg-slate-900 text-white border-slate-900"
+                        : "bg-slate-50 text-slate-700 border-slate-200"
+                    }`}
+                  >
+                    司法院線上起訴電子卷證打包清單
+                  </button>
+                </div>
+
+                {exportMode === "docx" ? (
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-2 leading-relaxed">
+                    <div className="font-bold text-slate-900">
+                      Word 匯出預設格式（可依事務所範本調整）：
+                    </div>
+                    <div>• 檔案名稱：115年度訴字第482號_民事起訴狀_林大明.docx</div>
+                    <div>• 字體與級數：標楷體 14 級字（標題 18 級字粗體）</div>
+                    <div>• 行距與邊界：固定行高 24pt，上下左右邊界各 2.5cm</div>
+                    <div>• 附帶內容：文末自動附帶證物清單（原證 1 ～ 原證 {evidences.length}）</div>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-2 leading-relaxed">
+                    <div className="font-bold text-slate-900">
+                      司法院電子訴訟文書服務平台打包結構預覽：
+                    </div>
+                    <div className="font-mono bg-white p-3 rounded border border-slate-200 space-y-1 text-[11px]">
+                      <div>01_民事起訴狀_主文.pdf</div>
+                      <div>02_證物清單總表.pdf</div>
+                      {evidences.map((ev, idx) => (
+                        <div key={ev.id}>
+                          {String(idx + 3).padStart(2, "0")}_{ev.id}_{ev.name.slice(0, 14)}.pdf
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-slate-600">
+                      提醒：實際透過司法院線上起訴系統送出前，仍需由律師以自然人憑證或律師憑證完成簽章與確認。
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    onClick={() => setShowExportModal(false)}
+                    className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer"
+                  >
+                    完成預覽
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
+"""
+
+with open("index.html", "w", encoding="utf-8") as f:
+    f.write(html_content)
+
+print("Prepared index.html successfully.")
