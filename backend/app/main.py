@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app import db
+from app.api import routes_auth
 from app.config import Settings
 
 # "testclient" 是 Starlette TestClient 的預設來源；真實連線的來源一定是 IP。
@@ -9,8 +11,10 @@ LOOPBACK_HOSTS = {"127.0.0.1", "::1", "testclient"}
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    db.configure(settings)
     app = FastAPI(title="legaltech")
     app.state.settings = settings
+    app.include_router(routes_auth.router)
 
     @app.middleware("http")
     async def loopback_only(request: Request, call_next):
