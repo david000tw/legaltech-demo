@@ -1,6 +1,7 @@
 """案型登錄表、判決與法條的案型標籤、同類優先搜尋（設計 5.1、5.3）。"""
 import json
 from datetime import date
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -212,3 +213,44 @@ def test_minority_view_ranks_below_majority_but_still_appears(db):
         majority.annotation = "另有見解可參"  # 不是少數見解的註記不降權
         s.flush()
         assert len(search_passages(s, text, 5, case_type="spousal_rights")) == 2
+
+
+# ---- 計畫 1B 驗收：用 9 件真 AI 驗收時拆出的主張重播候選建立（不呼叫 AI） ----
+ACCEPTANCE = Path(__file__).resolve().parents[2] / "docs" / "acceptance"
+RECORDED = [ACCEPTANCE / "e2e_report_1b_run1.json", ACCEPTANCE / "e2e_report_1b_run2.json",
+            ACCEPTANCE / "e2e_report_1b_run3.json",
+            ACCEPTANCE / "e2e_report_1b.json"]  # 每次真 AI 拆出的主張不同，全部重播
+NEW_TYPE_CASES = ["spike-affair-1663", "spike-estate-159", "spike-nominee-524", "affair-2", "estate-2", "nominee-2"]
+
+
+def test_other_type_share_on_recorded_claims(db):
+    """設計第 6 節：新案型的候選中，其他類型判決的比例低於 30%；同時不能把他類完全排除（設計 5.3）。"""
+    from app.pipeline.candidates import PASSAGES_PER_CLAIM
+    with admin_session() as s:
+        load_seed(s, Path(__file__).resolve().parents[1] / "seed")
+        tags = {j.id: j.case_types or [] for j in s.scalars(select(Judgment))}
+        shares = {}
+        for path in RECORDED:
+            report = json.loads(path.read_text(encoding="utf-8"))
+            for name in NEW_TYPE_CASES:
+                r = report[name]
+                seen = {p.id: p for c in r["claims"]
+                        for p in search_passages(s, f"{c['summary']} {c['quote']}", PASSAGES_PER_CLAIM,
+                                                 case_type=r["case_type"])}
+                shares[f"{path.stem}:{name}"] = (sum(r["case_type"] not in tags[p.judgment_id] for p in seen.values())
+                                                 / len(seen))
+    assert all(v < 0.30 for v in shares.values()), shares
+    assert any(v > 0 for v in shares.values()), shares  # 只加權、不排除
+
+
+def test_same_type_minority_still_outranks_other_types(db):
+    """同類的少數見解（降權後）仍要排在其他類型的精選判決前面：同類多數 > 同類少數 > 他類。"""
+    text = "非財產上損害之賠償，應審酌雙方身分資力與加害程度定相當之金額。"
+    with admin_session() as s:
+        other = _long_judgment(s, "他類精選", [text], ["traffic_tort"])  # 先建：同分時會排前面
+        other.curated = True
+        minority = _long_judgment(s, "同類少數", [text], ["spousal_rights"])
+        minority.annotation = "少數見解：否定「配偶權」為法律上權利"
+        s.flush()
+        got = [p.judgment_id for p in search_passages(s, text, 5, case_type="spousal_rights")]
+        assert got.index(minority.id) < got.index(other.id)

@@ -107,3 +107,34 @@ def test_import_testcase_reads_case_type(db):
     case_id, _ = import_testcase(CASES / "spike-estate-159", "內部測試所")
     with admin_session() as s:
         assert s.get(Case, case_id).case_type == "estate_partition"
+
+
+
+# ---- 原 tests/e2e/test_spike_case_types.py 的離線檢查（試跑的真 AI 部分已併入 9 件驗收） ----
+from app.pipeline.claims import opponent_pages  # noqa: E402
+
+SPIKE_CASES = ["spike-affair-1663", "spike-estate-159", "spike-nominee-524"]
+# 原判決的真實姓名（合成案件不得出現）
+SPIKE_REAL_NAMES = {
+    "spike-affair-1663": ["林柏齡", "陳貴城", "楊嘉琪", "連靜宜", "盧怡璇", "趙佾慧"],
+    "spike-estate-159": ["林石猛", "梁郁茌", "陳永祥", "楊士弘", "黃吉榮"],
+    "spike-nominee-524": ["呂玉蓮", "陳宇暉", "陳銘紳", "陳俊安", "陳淑玲", "陳俊傑", "呂傳茂", "呂芳野"],
+}
+
+
+@pytest.mark.parametrize("name", SPIKE_CASES)
+def test_spike_case_imports_and_is_synthetic(db, name):
+    folder = CASES / name
+    meta = json.loads((folder / "case.json").read_text(encoding="utf-8"))
+    gold = json.loads((folder / "gold.json").read_text(encoding="utf-8"))
+    assert meta["our_side"] == "plaintiff"
+    assert 4 <= len(gold["claims"]) <= 7 and all({"summary", "page"} <= set(c) for c in gold["claims"])
+    texts = "".join(p.read_text(encoding="utf-8") for p in folder.rglob("*.txt"))
+    assert not [n for n in SPIKE_REAL_NAMES[name] if n in texts]
+    create_firm("內部測試所")
+    case_id, round_id = import_testcase(folder, "內部測試所")
+    with admin_session() as s:
+        ex = s.scalars(select(Exhibit).where(Exhibit.case_id == case_id)).all()
+        assert 3 <= len(ex) <= 5 and {e.prefix for e in ex} == {"原證"}
+        assert len(opponent_pages(s, round_id)) == 3
+        assert {g["page"] for g in gold["claims"]} == {1, 2, 3}
