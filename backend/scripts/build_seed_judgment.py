@@ -2,6 +2,7 @@
 
 uv run python -X utf8 scripts/build_seed_judgment.py seed/raw/xxx.pdf --citation ... --court ...
     --court-level summary|district|high|supreme --decided-on YYYY-MM-DD --url https://...
+    --case-types spousal_rights[,traffic_tort] [--annotation "少數見解：…"]
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from pypdf import PdfReader
 BACKEND = Path(__file__).resolve().parent.parent
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
+from app.case_types import CASE_TYPES  # noqa: E402
 from app.corpus.splitter import split_judgment, split_problems  # noqa: E402
 
 SEED = BACKEND / "seed"
@@ -42,13 +44,21 @@ def main() -> None:
     ap.add_argument("--url", required=True)
     # 未精選的判決不加權（搜尋時 curated 有 1.5 倍加權）；預設維持精選，與既有種子相同
     ap.add_argument("--no-curated", dest="curated", action="store_false")
+    # 案型標籤（可多個，逗號分隔）與註記（例如少數見解），設計 5.3
+    ap.add_argument("--case-types", required=True)
+    ap.add_argument("--annotation")
     a = ap.parse_args()
+    case_types = [x.strip() for x in a.case_types.split(",") if x.strip()]
+    if not case_types or any(x not in CASE_TYPES for x in case_types):
+        raise SystemExit(f"案型代碼不正確：{a.case_types}（可用：{', '.join(CASE_TYPES)}）")
     pdf = a.pdf.resolve()
     if pdf.parent != (SEED / "raw").resolve():
         raise SystemExit("原始 PDF 必須放在 seed/raw/")
     data = {"citation": a.citation, "court": a.court, "court_level": a.court_level,
             "decided_on": a.decided_on, "source_url": a.url, "curated": a.curated,
-            "raw_file": pdf.name, "full_text": pdf_full_text(pdf)}
+            "raw_file": pdf.name, "full_text": pdf_full_text(pdf), "case_types": case_types}
+    if a.annotation:
+        data["annotation"] = a.annotation
     check_split(data)
     out = SEED / "judgments" / f"{pdf.stem}.json"
     out.parent.mkdir(parents=True, exist_ok=True)

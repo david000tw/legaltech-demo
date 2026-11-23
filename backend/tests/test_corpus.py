@@ -1,5 +1,6 @@
 import json
 import re
+import urllib.parse
 
 import pytest
 from datetime import date
@@ -47,12 +48,12 @@ def test_seed_statutes_match_raw_snapshot():
             parsed = parse_law_single(raw.read_text(encoding="utf-8"))
             assert parsed == {"name": data["name"], "article_no": art["article_no"], "text": art["text"]}
             total += 1
-    assert total == 42  # spike：12 + 30
+    assert total == 150  # 計畫 1B：12 + 138（設計 5.9 的整段範圍）
 
 
 def test_seed_judgments_match_raw_pdf():
     files = sorted((SEED / "judgments").glob("*.json"))
-    assert len(files) == 15  # spike：加外遇、分割遺產、借名登記各 3～4 件
+    assert len(files) == 18  # 計畫 1B：外遇 5、分割遺產 4、借名 4、車禍 5
     for f in files:
         data = json.loads(f.read_text(encoding="utf-8"))
         assert data["full_text"] == pdf_text(SEED / "raw" / data["raw_file"])
@@ -106,9 +107,9 @@ def test_load_seed_idempotent(db):
         first = load_seed(s, SEED)
     with admin_session() as s:
         second = load_seed(s, SEED)
-        assert s.scalar(select(func.count()).select_from(Judgment)) == 15  # spike：5 → 15
-        assert s.scalar(select(func.count()).select_from(StatuteArticle)) == 42  # spike：12 → 42
-    assert first == (15, 42)
+        assert s.scalar(select(func.count()).select_from(Judgment)) == 18  # 計畫 1B：15 → 18
+        assert s.scalar(select(func.count()).select_from(StatuteArticle)) == 150  # 計畫 1B：42 → 150
+    assert first == (18, 150)
     assert second == (0, 0)
 
 
@@ -216,9 +217,12 @@ def test_seed_metadata_matches_pdf_text():
         head = normalize_text(d["full_text"][:300])
         number = re.search(r"\d+年度.+?字第\d+號", d["citation"]).group(0)
         assert number in head, f.name
-        dates = re.findall(r"中華民國(\d+)年(\d+)月(\d+)日", normalize_text(d["full_text"]))
-        y, m, dd = (int(x) for x in dates[-1])
-        assert date(y + 1911, m, dd).isoformat() == d["decided_on"], f.name
+        dates = {date(int(y) + 1911, int(m), int(dd)).isoformat()
+                 for y, m, dd in re.findall(r"中華民國(\d+)年(\d+)月(\d+)日", normalize_text(d["full_text"]))}
+        # 裁判日期＝司法院檔名上的日期，且必須出現在全文的日期行（最後一行可能是書記官製作正本的日期）
+        ymd = re.search(r",(\d{8}),\d+\.pdf$", urllib.parse.unquote(d["source_url"])).group(1)
+        assert d["decided_on"] == f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:]}", f.name
+        assert d["decided_on"] in dates, f.name
 
 
 def test_load_seed_resplit_restores_passages(db):
@@ -318,3 +322,64 @@ def test_counterclaim_heading_resets_single_level():
     assert _kinds_holding(passages, "四、反訴原告主張") == {"party_claim"}
     assert _kinds_holding(passages, "五、反訴被告則以") == {"party_claim"}
     assert _kinds_holding(passages, "反訴原告未能證明代墊事實") == {"court_reasoning"}
+
+
+# ---- 計畫 1B Task 7：三個新案型的種子資料（設計 5.9） ----
+from app.case_types import CASE_TYPES  # noqa: E402
+
+PLAN1_TRAFFIC = {"tcev_113_3946", "TPEV_114_beijian_610", "SDEV_114_shajian_456", "TCDV_113_jianshang_211",
+                 "SCDV_114_jianshang_17"}
+
+
+def _seed_judgments():
+    return {f.stem: json.loads(f.read_text(encoding="utf-8")) for f in sorted((SEED / "judgments").glob("*.json"))}
+
+
+def test_seed_coverage_per_case_type():
+    seeds = _seed_judgments()
+    for stem, d in seeds.items():
+        assert d.get("case_types") and set(d["case_types"]) <= set(CASE_TYPES), stem
+    count = {ct: sum(ct in d["case_types"] for d in seeds.values()) for ct in CASE_TYPES}
+    assert count["spousal_rights"] >= 5 and count["estate_partition"] >= 4 and count["nominee_registration"] >= 4
+    minority = [s for s, d in seeds.items() if "spousal_rights" in d["case_types"] and d.get("annotation")]
+    assert minority and all(seeds[s]["annotation"].startswith("少數見解") for s in minority)
+    assert all(seeds[s]["case_types"] == ["traffic_tort"] for s in PLAN1_TRAFFIC)
+
+
+def _seed_articles(name):
+    for f in (SEED / "statutes").glob("*.json"):
+        d = json.loads(f.read_text(encoding="utf-8"))
+        if d["name"] == name:
+            return {a["article_no"]: a for a in d["articles"]}
+    raise AssertionError(name)
+
+
+@pytest.mark.parametrize("name,articles", [
+    ("民法", ["184", "185", "195", "197", "280", "824", "830", "71", "87", "125", "128", "179", "758", "767"]),
+    ("家事事件法", ["3", "23", "41", "51"]), ("保險法", ["112"]), ("民事訴訟法", ["277"]),
+])
+def test_statutes_present(name, articles):
+    have = _seed_articles(name)
+    assert [a for a in articles if a not in have] == []
+
+
+@pytest.mark.parametrize("lo,hi", [(273, 276), (528, 552), (1138, 1225)])
+def test_civil_code_ranges_complete(lo, hi):
+    """預期條號取自官方開放資料快照的全部條號（含「之N」），扣掉已刪除的條文。"""
+    raw = json.loads((SEED / "raw" / "statutes" / "moj_api" / "B0000001.json").read_text(encoding="utf-8"))
+    deleted = set(raw["DeletedArticleNos"])
+    expected = [n for n in raw["AllArticleNos"] if lo <= int(n.split("-")[0]) <= hi and n not in deleted]
+    assert expected  # 防止空集合讓測試自動通過
+    have = _seed_articles("民法")
+    assert [n for n in expected if n not in have] == []
+    assert not deleted & set(have)
+
+
+def test_statutes_tagged():
+    civil = _seed_articles("民法")
+    assert set(civil["184"]["case_types"]) >= {"traffic_tort", "spousal_rights"}
+    assert civil["1148"]["case_types"] == ["estate_partition", "nominee_registration"]
+    assert set(_seed_articles("民事訴訟法")["277"]["case_types"]) == set(CASE_TYPES)
+    for f in (SEED / "statutes").glob("*.json"):
+        for a in json.loads(f.read_text(encoding="utf-8"))["articles"]:
+            assert a.get("case_types") and set(a["case_types"]) <= set(CASE_TYPES), (f.name, a["article_no"])

@@ -1,0 +1,33 @@
+{
+ "title": "賴正雄 請求所有權移轉登記事件（借名登記，一般民事，合成案件，事實改寫自公開判決，我方為被告）",
+ "our_side": "defendant",
+ "case_type": "nominee_registration",
+ "source": {
+  "citation": "臺灣臺南地方法院113年度重訴字第285號民事判決",
+  "url": "https://judgment.judicial.gov.tw/FILES/TNDV/113,%E9%87%8D%E8%A8%B4,285,20241227,1.pdf"
+ },
+ "court": "臺灣彰化地方法院",
+ "case_number": "114年度重訴字第143號",
+ "division": "仁",
+ "cause": "請求所有權移轉登記",
+ "attorneys": [
+  "莊雅筑律師"
+ ],
+ "parties": [
+  {
+   "name": "賴正雄",
+   "role": "原告",
+   "alignment": "opposing",
+   "legal_rep": null,
+   "position_note": null
+  },
+  {
+   "name": "邱國棟",
+   "role": "被告",
+   "alignment": "ours",
+   "legal_rep": null,
+   "position_note": null
+  }
+ ],
+ "opponent_filed_by": 1
+}

@@ -55,7 +55,8 @@ def import_testcase(folder: Path, firm_name: str) -> tuple[UUID, UUID]:
     meta = json.loads((folder / "case.json").read_text(encoding="utf-8"))
     with admin_session() as s:
         firm = _firm_by_name(s, firm_name)
-        case = Case(firm_id=firm.id, title=meta["title"], our_side=meta["our_side"])
+        case = Case(firm_id=firm.id, title=meta["title"], our_side=meta["our_side"],
+                    case_type=meta.get("case_type", "traffic_tort"))  # 計畫 1B：試跑時這欄被忽略
         s.add(case)
         s.flush()
         rnd = Round(firm_id=firm.id, case_id=case.id, seq=1, status="created")

@@ -1,0 +1,40 @@
+{
+ "title": "湯志偉 請求確認特留分繼承權存在等事件（特留分扣減＋塗銷遺囑繼承登記，家事訴訟，合成案件，事實改寫自公開判決，我方為被告）",
+ "our_side": "defendant",
+ "case_type": "estate_partition",
+ "source": {
+  "citation": "臺灣基隆地方法院113年度重家繼訴字第1號民事判決",
+  "url": "https://judgment.judicial.gov.tw/FILES/KLDV/113%2c%e9%87%8d%e5%ae%b6%e7%b9%bc%e8%a8%b4%2c1%2c20250321%2c1.pdf"
+ },
+ "court": "臺灣臺中地方法院",
+ "case_number": "114年度家繼訴字第76號",
+ "division": "和",
+ "cause": "請求確認特留分繼承權存在等",
+ "attorneys": [
+  "鍾孟哲律師"
+ ],
+ "parties": [
+  {
+   "name": "湯志偉",
+   "role": "原告",
+   "alignment": "opposing",
+   "legal_rep": null,
+   "position_note": null
+  },
+  {
+   "name": "湯志誠",
+   "role": "被告",
+   "alignment": "ours",
+   "legal_rep": null,
+   "position_note": null
+  },
+  {
+   "name": "湯淑媛",
+   "role": "被告",
+   "alignment": "aligned",
+   "legal_rep": null,
+   "position_note": "同為被告，與我方立場大致相同。同意：公證遺囑真正且有效；系爭房地依遺囑由湯志誠取得，並同意由湯志誠以金錢補償原告不足額；特留分比例應計入代位繼承人（原告為8分之1）。不同意：原告主張將其113年6月匯入被繼承人郵局帳戶的150萬元視為遺產（其主張該款為自有款項、暫存性質，非遺產）；另主張遺贈扣減應先由受遺贈價額較高之湯志誠負擔，不同意與湯志誠按比例分擔。"
+  }
+ ],
+ "opponent_filed_by": 1
+}
