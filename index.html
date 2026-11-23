@@ -48,8 +48,8 @@
       title: "林大明 請求損害賠償等事件",
       plaintiff: "林大明（原告）",
       defendant: "陳志豪（被告）",
-      claimAmount: 485000,
-      serviceDate: "2026-10-20",
+      claimAmount: 405000, // 醫療 45,000 + 車損 160,000 + 薪資 50,000 + 慰撫金 150,000
+      serviceDate: "2027-04-12", // 試算預設：假設判決送達日（晚於 115/11/23 起訴）
       copyCount: 2
     };
 
@@ -59,7 +59,7 @@
         name: "交通事故初步分析研判表（桃警交字第1150918號）",
         page: "第 1 頁",
         category: "警方卷證",
-        summaryNote: "系統說明：警方研判被告駕駛自小客車於路口未依規定讓車且未注意車前狀況，為本件肇事主因；原告無違規紀錄。可直接作為被告過失之核心證據。",
+        summaryNote: "系統說明：警方初步研判被告未依規定暫停讓幹線道車先行且未注意車前狀況；原告「尚無發現肇事因素」。可作為被告過失之重要證據，但初步分析研判表不是正式鑑定，法院僅供參考。",
         quote: "二、研判結果：陳志豪駕駛自小客車行經無號誌路口，未讓幹道車先行且未減速注意車前狀況，涉嫌違反道路交通安全規則第102條第1項第2款；林大明尚無發現肇事因素。"
       },
       {
@@ -67,7 +67,7 @@
         name: "LINE 對話紀錄截圖（2026/09/18～2026/09/25）",
         page: "第 4 頁",
         category: "通訊紀錄",
-        summaryNote: "系統說明：被告於 09/18 承認『那天是我沒注意路口車況撞上來的，車損跟醫藥費我負責』，可補強過失並證明曾受催告；但尚未寫明具體賠償金額，仍須以單據與估價單證明數額。",
+        summaryNote: "系統說明：被告於 09/18 承認『那天是我沒注意路口車況撞上來的，車損跟醫藥費我負責』，可補強被告過失（屬訴訟外承認，只能作為證據，不是訴訟上自認）；但未寫明具體賠償金額，仍須以單據與估價單證明數額。",
         quote: "陳志豪（09/18 19:42）：不好意思林大哥，那天是我沒注意路口車況撞上來的，你的車損跟醫藥費我負責，這兩天我先跟保險業務確認看看。"
       },
       {
@@ -91,8 +91,8 @@
         name: "薪資證明、勞保投保明細與請假紀錄",
         page: "第 3 頁",
         category: "薪資證明",
-        summaryNote: "系統說明：原告月薪 60,000 元，因骨折請假 40 天（其中 30 天為病假半薪、10 天為事假無薪），實際減少薪資收入 130,000 元。建議補充公司出具之『因本次車禍致無法出勤』證明，以強化因果關係。",
-        quote: "林大明先生月薪新臺幣 60,000 元（日薪以 2,000 元計）。2026/09/19 至 2026/10/28 休假共 40 日，病假減薪 30,000 元、事假扣薪 100,000 元，合計短少薪資 130,000 元。"
+        summaryNote: "系統說明：原告月薪 60,000 元，因骨折請假 40 天（其中 30 天為病假半薪、10 天為事假無薪），實際減少薪資收入 50,000 元（病假 30 天 × 日薪 2,000 元 × 1/2 ＋ 事假 10 天 × 2,000 元）。建議補充公司出具之『因本次車禍致無法出勤』證明，以強化因果關係。",
+        quote: "林大明先生月薪新臺幣 60,000 元（日薪以 2,000 元計）。2026/09/19 至 2026/10/28 休假共 40 日，病假減薪 30,000 元、事假扣薪 20,000 元，合計短少薪資 50,000 元。"
       }
     ];
 
@@ -102,7 +102,7 @@
         date: "2026-09-18",
         title: "發生路口碰撞事故，原告受傷且車輛受損",
         amount: "醫療 45,000 / 車損估 160,000",
-        status: "不爭執（肇事主因待審認）",
+        status: "事故發生不爭執；過失比例爭執中",
         evId: "原證1",
         note: "系統說明：警方初步研判表（原證1 第1頁）記載被告未讓幹道車先行，原告同日就醫並取得診斷證明（原證3 第2頁）。"
       },
@@ -111,7 +111,7 @@
         date: "2026-09-18",
         title: "被告於 LINE 坦承未注意車況並允諾負責",
         amount: "—",
-        status: "我方主張已自認過失",
+        status: "被告訴訟外承認未注意車況（可作為過失證據）",
         evId: "原證2",
         note: "系統說明：對話紀錄（原證2 第4頁）顯示被告承認『沒注意路口車況』，有利於成立民法第184條第1項前段過失侵權。"
       },
@@ -119,7 +119,7 @@
         id: "t3",
         date: "2026-09-19",
         title: "原告依醫囑開始休養並請假，產生薪資損失",
-        amount: "短少薪資 130,000 元",
+        amount: "短少薪資 50,000 元",
         status: "對造爭執因果關係與期間",
         evId: "原證5",
         note: "系統說明：薪資與請假紀錄（原證5 第3頁）列出 40 天休假明細，但對造可能抗辯休養天數過長或部分屬可歸責原告之事假。"
@@ -141,7 +141,7 @@
         id: "j1",
         citation: "臺灣臺中地方法院 113 年度中簡字第 3946 號民事判決（路權與過失部分）",
         shortTag: "臺中地院113中簡3946",
-        stance: "有利我方（但須防禦與有過失）",
+        stance: "雙面：路權有利我方，但幹線道車亦被認定與有過失",
         pinned: true,
         summary: "支線道車行經無號誌路口未暫停讓幹線道車先行，認定有過失，依民法第184條第2項前段、第191條之2前段負賠償責任。惟幹線道車未減速慢行，仍被認定與有過失，過失比例原告30％、被告70％。",
         excerpt: "被告駕駛肇事車輛上路，本應遵守上開交通規則，然被告行至無號誌交岔路口，未在適當位置暫停禮讓幹線道之系爭車輛，而依當時情狀並無不能注意之情形，二車因而碰撞，並致原告駕駛之系爭車輛撞擊路旁住家，顯見被告就本件事故之發生確有過失……違反保護他人之法律，致生損害於他人者，負賠償責任；汽車、機車或其他非依軌道行駛之動力車輛，在使用中加損害於他人者，駕駛人應賠償因此所生之損害，民法第184條第2項前段、第191條之2前段分別定有明文。……又上開交通規則均旨在保障公眾行車之安全，屬保護他人之法律"
@@ -172,14 +172,14 @@
         id: "c1",
         level: "高風險漏洞",
         title: "車損 160,000 元未先扣除「零件折舊」，恐遭法院核減",
-        detail: "原證4 維修費 16 萬元中包含零件費 11 萬元。依最高法院 77 年度第 9 次民庭決議，零件需依行政院固定資產耐用年數表計算折舊，建議在起訴狀中補充「折舊試算欄」或預先說明出廠年份，避免被對造抓把柄。",
+        detail: "原證4 維修費 16 萬元中包含零件費 11 萬元。依最高法院 77 年度第 9 次民庭決議，以新品換舊品之零件應予折舊（實務多依行政院固定資產耐用年數表及折舊率表計算），建議在起訴狀中補充「折舊試算欄」或預先說明出廠年份，避免被對造抓把柄。",
         actionText: "查看相關證據：原證4"
       },
       {
         id: "c2",
         level: "舉證補強建議",
-        title: "休養 6 週（40 天）之請假紀錄，建議補充「醫師診斷必要性」與「假單明細」",
-        detail: "原證3 醫囑記載「宜休養六週」，原證5 列出 40 天請假與減薪 13 萬元。被告抗辯狀極可能主張「僅需休養 2 週」或「事假非因車禍所致」，建議同步整理逐日出勤與假別紀錄。",
+        title: "薪資損失 5 萬元：醫囑未寫「不能工作」，建議補醫師證明與公司扣薪證明",
+        detail: "原證3 醫囑只記載「宜休養六週，期間避免提重物及劇烈活動」，未明載不能工作；原證5 列出 40 天請假與減薪 5 萬元。實務曾因醫囑未記載不能工作、又無請假扣薪證明而駁回薪資損失（臺中地院113中簡3946）。建議請醫師補開「休養期間不宜工作」之證明，並由公司出具逐日假別與扣薪明細。",
         actionText: "查看相關證據：原證5"
       },
       {
@@ -196,92 +196,94 @@
         id: "o1",
         tag: "否認肇事全責",
         opponentClaim: "被告主張原告行經路口亦未減速，雙方均有過失，應依與有過失比例減輕被告賠償責任。",
-        systemAnalysis: "系統比對說明：原證1 警方初步分析研判表已記載原告無肇事因素，且原證2 被告 LINE 曾自行表示『那天是我沒注意路口車況』。建議主張被告應負 100% 過失責任，並請法院依職權或聲請囑託車輛行車事故鑑定委員會鑑定。",
-        rebuttalDraft: "查被告於事故發生後，曾於民國115年9月18日透過通訊軟體向原告表示：「那天是我沒注意路口車況撞上來的」（原證2），足見被告對其未注意車前狀況及未禮讓幹道車之過失至為明灼；況依原證1交通事故初步分析研判表，原告並無違規情事，被告空言指摘原告與有過失，並無足採。"
+        systemAnalysis: "系統比對說明：原證1 警方初步分析研判表記載原告尚無肇事因素，原證2 被告亦自承『那天是我沒注意路口車況』，可主張被告負主要過失責任。但須防禦：初步分析研判表不是正式鑑定，法院僅作參考；幹線道車行經無號誌路口仍應減速慢行、作隨時停車之準備（道路交通安全規則第93條第1項第2款），且法院得依職權適用民法第217條減輕賠償，不以被告舉證為限。實務即曾依鑑定意見認定幹線道車與有過失 30%（臺中地院113中簡3946）。鑑定是雙面刃：建議先調閱行車紀錄器、路口監視器確認我方車速，再決定是否聲請鑑定（需預納鑑定費）；若無把握，宜由被告自行聲請。",
+        rebuttalDraft: "查被告於事故發生當日（民國115年9月18日）即透過通訊軟體向原告表示：「那天是我沒注意路口車況撞上來的」（原證2），足見被告對其未暫停禮讓幹線道車之過失至為明確；且依原證1交通事故初步分析研判表，原告尚無發現肇事因素。被告僅空言主張原告行經路口未減速，就原告當時車速、距離等具體情狀均未提出任何證據以實其說，所辯原告與有過失，自無足採。"
       },
       {
         id: "o2",
         tag: "爭執薪資損失與慰撫金",
         opponentClaim: "被告抗辯原告骨折休養毋庸長達6週，且慰撫金15萬元過高，請求駁回逾越必要範圍之請求。",
-        systemAnalysis: "系統比對說明：原證3 診斷證明書已明確載明醫囑『宜休養六週』，原證5 亦附有薪資與請假減損明細。建議援引醫囑證明休養必要性，並就慰撫金數額具體陳述原告受傷部位、復健辛苦及兩造生活狀況，請求法院酌定相當金額。",
-        rebuttalDraft: "原告因本件車禍受有左側鎖骨閉鎖性骨折及右下肢擦挫傷，經林口長庚醫院醫師開立診斷證明書明確醫囑「宜休養六週」（原證3），原告依醫囑休養並致薪資短少130,000元（原證5），核屬必要且相當之損害；至慰撫金部分，原告承受身體傷痛與日常起居不便，請求150,000元尚屬合理，懇請鈞院依法審酌准許。"
+        systemAnalysis: "系統比對說明：原證3 診斷證明書已明確載明醫囑『宜休養六週』，原證5 亦附有薪資與請假減損明細。建議援引醫囑證明休養必要性；惟醫囑未明載「不能工作」，實務曾因此駁回薪資損失（臺中地院113中簡3946），應補提醫師證明與公司扣薪證明。並就慰撫金數額具體陳述原告受傷部位、復健辛苦及兩造生活狀況，請求法院酌定相當金額。",
+        rebuttalDraft: "原告因本件車禍受有左側鎖骨閉鎖性骨折及右下肢擦挫傷，經林口長庚醫院醫師開立診斷證明書明確醫囑「宜休養六週」（原證3），原告依醫囑休養並致薪資短少50,000元（原證5），核屬必要且相當之損害；至慰撫金部分，原告承受身體傷痛與日常起居不便，請求150,000元尚屬合理，懇請鈞院依法審酌准許。"
       }
     ];
 
-    const PRIORITY_OPTIONS = [
-      { value: "must", label: "必做（第一期先上）", badge: "bg-rose-100 text-rose-900 border-rose-300" },
-      { value: "nice", label: "加分（第二期再做）", badge: "bg-amber-100 text-amber-900 border-amber-300" },
-      { value: "later", label: "暫緩（先不做）", badge: "bg-slate-200 text-slate-700 border-slate-300" }
-    ];
-
-    const MODULES_CONFIG = [
+    // 第 6 頁需求問卷：每題點選即可，目的是決定第一版「攻、防、寫狀」先解決哪一步
+    // 級距一律用「未滿／以上」避免邊界重疊；allowOther 的補充文字依題目 id 分開存
+    const SURVEY_QUESTIONS = [
       {
-        id: "litigation_type_switcher",
-        title: "0. 多訴訟類型切換意圖（未來擴充方向，目前僅對齊意圖）",
-        defaultPriority: "nice",
-        painChoices: [
-          "目前 Demo 以侵權損害賠償為主，但實務上還會碰到契約／債務、勞資、家事或行政等不同訴訟類型",
-          "不同訴訟類型的請求權基礎、舉證重點、爭點與書狀架構差異大，希望未來能切換對應模式",
-          "希望先確認核心工作流（卷證整理＋雙屏寫狀＋攻防反駁）穩固後，再逐步擴充各類訴訟模板"
-        ],
-        expectationPlaceholder: "例如：未來希望依訴訟類型切換常見爭點與書狀模板，但第一期先以常見民事案件為主即可。"
+        id: "slowestStep",
+        title: "最近一次寫書狀（起訴狀、答辯狀或準備書狀），從整理資料到遞狀，哪一步最花時間？",
+        type: "single",
+        options: ["跟當事人確認事實、補資料", "整理卷證、標原證頁碼", "讀對造書狀、拆出爭點", "查判決與實務見解", "撰寫論述段落", "排版、證物清單與遞狀"],
+        allowOther: true
       },
       {
-        id: "evidence_hub",
-        title: "1. 卷證建檔、索引與時間軸整理",
-        defaultPriority: "must",
-        painChoices: [
-          "LINE 截圖、診斷書、估價單混在一起，整理原證編號與頁碼很花時間",
-          "日期與金額散落各份卷證，人工排大事記與爭執狀態容易漏看",
-          "卷證缺漏（例如少休養證明、折舊資料）常到寫狀或開庭前才發現"
-        ],
-        expectationPlaceholder: "例如：希望上傳後自動建議原證編號、標出缺漏資料，並由我或助理一鍵確認。"
+        id: "hoursPerBrief",
+        title: "寫一份書狀，大約花多少時間？",
+        type: "single",
+        options: ["未滿 2 小時", "2～未滿 5 小時", "5～未滿 10 小時", "10 小時以上"]
       },
       {
-        id: "dual_pane_pleading",
-        title: "2. 雙屏書狀編輯與「可溯源引用」",
-        defaultPriority: "must",
-        painChoices: [
-          "寫起訴狀或準備書狀時，左看卷證/判決、右打字切換視窗很卡",
-          "擔心 AI 寫出不存在的判決字號，或把卷證頁碼寫錯",
-          "不同案件或不同律師習慣的論述語氣（嚴謹／攻勢／穩健）不同"
-        ],
-        expectationPlaceholder: "例如：點書狀裡的 [原證1, P.1] 或判決引用，左邊要直接跳出對應內容讓我核對。"
+        id: "side",
+        title: "您代理原告還是被告比較多？",
+        type: "single",
+        options: ["原告為主", "被告為主", "差不多"]
       },
       {
-        id: "rebuttal_and_check",
-        title: "3. 書狀弱點健檢與對造答辯狀反駁",
-        defaultPriority: "must",
-        painChoices: [
-          "對造答辯狀常抓折舊、休養天數、與有過失或慰撫金數額來打",
-          "遞狀前想先用對造或法官視角檢查哪裡舉證不夠",
-          "逐點把對造主張對應回我方卷證並寫成準備書狀反駁草稿很耗工"
-        ],
-        expectationPlaceholder: "例如：勾選對造抗辯重點後，自動帶出我方卷證與實務見解，產出準備書狀初稿。"
+        id: "mostWantedPage",
+        title: "看完第 1～5 頁，哪一頁最想先用？",
+        type: "single",
+        options: ["1. 雙屏書狀編輯器", "2. 卷證與時間軸", "3. 實務見解檢索", "4. 對造攻防與書狀健檢", "5. 對造書狀比對與反駁", "都用不到"]
       },
       {
-        id: "calc_and_efiling",
-        title: "4. 裁判費／期間試算與司法院電子遞狀打包",
-        defaultPriority: "nice",
-        painChoices: [
-          "每次算裁判費、上訴 20 日期間或繕本份數都要重查一次",
-          "司法院線上起訴前整理 PDF 檔名與證物清單很瑣碎",
-          "希望匯出符合標楷體 14pt 排版習慣的 Word（.docx）檔案"
-        ],
-        expectationPlaceholder: "例如：輸入標的金額與送達日就自動算好費用與日期，並幫我排好遞狀檔案名稱。"
+        id: "currentTools",
+        title: "目前寫書狀會用哪些工具？",
+        type: "multi",
+        options: ["法源", "Lawsnote（七法）", "ChatGPT 等 AI", "事務所自有範本", "都沒有"],
+        allowOther: true
       },
       {
-        id: "firm_extra",
-        title: "5. 律所進階流程（利益衝突、多人審批、執行狀、當事人報告）",
-        defaultPriority: "later",
-        painChoices: [
-          "接案前需要比對當事人與對造是否有利益衝突",
-          "資深律師與受僱律師／法務助理之間需要修訂歷程與審批",
-          "勝訴後延伸的強制執行狀，或給當事人的白話進度說明"
-        ],
-        expectationPlaceholder: "例如：這塊先對齊需求即可，等核心寫狀與卷證流程順了再排入。"
+        id: "inputFormats",
+        title: "卷證和對造書狀，通常是什麼形式？",
+        type: "multi",
+        options: ["紙本", "掃描 PDF", "電子繕本／線上閱卷", "Word 檔", "LINE 截圖、照片"],
+        allowOther: true
+      },
+      {
+        id: "caseTypes",
+        title: "最常處理的案件類型？",
+        type: "multi",
+        options: ["車禍／侵權", "契約／債務", "工程／營建", "不動產／租賃", "勞資", "家事", "刑事"],
+        allowOther: true
+      },
+      {
+        id: "aiRole",
+        title: "您能接受 AI 做到哪裡？",
+        type: "single",
+        options: ["暫不接受 AI 參與書狀", "只整理卷證、時間軸與缺漏，書狀由律師自己寫", "AI 擬段落，律師逐段審閱定稿", "AI 產出完整初稿，律師重點修改定稿"]
+      },
+      {
+        id: "dataConditions",
+        title: "要把真實案件卷證放上系統，需要哪些條件？",
+        type: "multi",
+        options: ["加密，且不拿去訓練 AI", "主機在台灣", "只能放在事務所內部", "要有資安認證或保密合約", "不會上傳真實卷證"]
+      },
+      {
+        id: "budget",
+        title: "如果這套工具確實幫得上忙，每位律師每月預算大約多少？",
+        type: "single",
+        options: ["不考慮付費", "未滿 1,000 元", "1,000～2,999 元", "3,000～5,999 元", "6,000 元以上", "偏好按件計費"]
+      },
+      {
+        id: "pilot",
+        title: "願意拿一件已結案的案子（去除個資）免費試用嗎？",
+        type: "single",
+        options: ["願意", "要再考慮", "不願意"]
       }
     ];
+
+    const FIRM_SIZE_OPTIONS = ["1 位", "2～5 位", "6～19 位", "20 位以上"];
 
     // 第一審財產權訴訟裁判費：民事訴訟法第77條之13，並依第77條之27提高徵收（114/1/1 生效，司法院公告）
     // https://www.judicial.gov.tw/tw/cp-1654-2592-cc5cf-1.html
@@ -359,27 +361,10 @@
 
       const [lawyerName, setLawyerName] = useState("");
       const [firmName, setFirmName] = useState("");
-      const [caseTypes, setCaseTypes] = useState(["車禍／侵權損害賠償", "一般契約／債務糾紛"]);
-      const [otherCaseType, setOtherCaseType] = useState("");
-      const [evidenceSources, setEvidenceSources] = useState(["LINE / 對話截圖", "診斷證明與醫療單據", "估價單 / 發票 / 薪資單"]);
-      const [aiBoundary, setAiBoundary] = useState("AI 擬稿與整理，律師逐段審閱核定（高風險引用需人工確認）");
-      const [switcherIntentNote, setSwitcherIntentNote] = useState(
-        "已納入「多訴訟類型切換意圖」：未來支援依訴訟類型切換對應模組與書狀架構，目前階段先對齊需求意圖、暫不實作。"
-      );
-
-      const [moduleStates, setModuleStates] = useState(() => {
-        const init = {};
-        MODULES_CONFIG.forEach((m) => {
-          init[m.id] = {
-            priority: m.defaultPriority,
-            pains: [m.painChoices[0]],
-            customPain: "",
-            expectation: ""
-          };
-        });
-        return init;
-      });
-
+      const [firmSize, setFirmSize] = useState("");
+      const [contact, setContact] = useState("");
+      const [surveyAnswers, setSurveyAnswers] = useState({});
+      const [surveyOther, setSurveyOther] = useState({});
       const [generalNote, setGeneralNote] = useState("");
       const [copied, setCopied] = useState(false);
 
@@ -475,103 +460,68 @@
         );
       }
 
-      function toggleListItem(setter, item) {
-        setter((prev) =>
-          prev.includes(item) ? prev.filter((x) => x !== item) : [...prev, item]
-        );
-      }
-
-      function updateModule(modId, patch) {
-        setModuleStates((prev) => ({
-          ...prev,
-          [modId]: { ...prev[modId], ...patch }
-        }));
-      }
-
-      function toggleModulePain(modId, painText) {
-        setModuleStates((prev) => {
-          const current = prev[modId].pains;
-          const nextPains = current.includes(painText)
-            ? current.filter((p) => p !== painText)
-            : [...current, painText];
-          return {
-            ...prev,
-            [modId]: { ...prev[modId], pains: nextPains }
-          };
+      // 單選再點一次可取消；複選切換勾選
+      function answerSurvey(q, option) {
+        setSurveyAnswers((prev) => {
+          if (q.type === "multi") {
+            const cur = prev[q.id] || [];
+            return {
+              ...prev,
+              [q.id]: cur.includes(option) ? cur.filter((x) => x !== option) : [...cur, option]
+            };
+          }
+          return { ...prev, [q.id]: prev[q.id] === option ? undefined : option };
         });
+      }
+
+      function surveyAnswerList(q) {
+        const a = surveyAnswers[q.id];
+        const list = Array.isArray(a) ? [...a] : a ? [a] : [];
+        const other = (surveyOther[q.id] || "").trim();
+        if (q.allowOther && other) list.push(`其他：${other}`);
+        return list;
       }
 
       const summaryMarkdown = useMemo(() => {
-        const allCaseTypes = [
-          ...caseTypes,
-          ...(otherCaseType.trim() ? [`其他：${otherCaseType.trim()}`] : [])
-        ];
-        const lines = [];
-        lines.push("# 律師訴訟輔助功能與卷證痛點確認單");
-        lines.push("");
+        const lines = ["# 律師需求確認（第一版：攻、防、寫狀）", ""];
         lines.push(`- 填寫人：${lawyerName.trim() || "（未填寫）"}`);
-        lines.push(`- 事務所／團隊：${firmName.trim() || "（未填寫）"}`);
-        lines.push(`- 常見訴訟／案件類型：${allCaseTypes.length ? allCaseTypes.join("、") : "（未勾選）"}`);
-        lines.push(`- 常見卷證來源：${evidenceSources.length ? evidenceSources.join("、") : "（未勾選）"}`);
-        lines.push(`- 期望 AI 與律師分工方式：${aiBoundary}`);
-        lines.push(`- 多訴訟類型切換意圖說明：${switcherIntentNote.trim() || "（未填寫）"}`);
+        lines.push(`- 事務所：${firmName.trim() || "（未填寫）"}${firmSize ? `，${firmSize}律師` : ""}`);
+        lines.push(`- 聯絡方式：${contact.trim() || "（未填寫）"}`);
         lines.push("");
-        lines.push("## 各模組優先級、痛點與期望");
-
-        MODULES_CONFIG.forEach((m) => {
-          const st = moduleStates[m.id];
-          const pLabel = PRIORITY_OPTIONS.find((p) => p.value === st.priority)?.label || st.priority;
-          const painList = [
-            ...st.pains,
-            ...(st.customPain.trim() ? [`補充痛點：${st.customPain.trim()}`] : [])
-          ];
-          lines.push("");
-          lines.push(`### ${m.title}`);
-          lines.push(`- 優先級：**${pLabel}**`);
-          lines.push(`- 痛點：${painList.length ? painList.join("；") : "（未勾選）"}`);
-          lines.push(`- 期望／補充：${st.expectation.trim() || "（未填寫）"}`);
+        SURVEY_QUESTIONS.forEach((q, i) => {
+          const list = surveyAnswerList(q);
+          lines.push(`${i + 1}. ${q.title}`);
+          lines.push(`   → ${list.length ? list.join("、") : "（未作答）"}`);
         });
-
         if (generalNote.trim()) {
           lines.push("");
-          lines.push("## 其他建議或開會討論重點");
+          lines.push("## 其他想說的");
           lines.push(generalNote.trim());
         }
-
         return lines.join("\n");
-      }, [lawyerName, firmName, caseTypes, otherCaseType, evidenceSources, aiBoundary, switcherIntentNote, moduleStates, generalNote]);
+      }, [lawyerName, firmName, firmSize, contact, surveyAnswers, surveyOther, generalNote]);
 
-      const summaryJson = useMemo(() => {
-        const allCaseTypes = [
-          ...caseTypes,
-          ...(otherCaseType.trim() ? [`其他：${otherCaseType.trim()}`] : [])
-        ];
-        return JSON.stringify(
-          {
-            lawyerName: lawyerName.trim(),
-            firmName: firmName.trim(),
-            caseTypes: allCaseTypes,
-            evidenceSources,
-            aiBoundary,
-            litigationTypeSwitcherIntent: {
-              implemented: false,
-              stage: "intent_only",
-              note: switcherIntentNote.trim()
+      const summaryJson = useMemo(
+        () =>
+          JSON.stringify(
+            {
+              lawyerName: lawyerName.trim(),
+              firmName: firmName.trim(),
+              firmSize,
+              contact: contact.trim(),
+              answers: Object.fromEntries(
+                SURVEY_QUESTIONS.map((q) => {
+                  const list = surveyAnswerList(q);
+                  return [q.id, q.type === "multi" ? list : list[0] || ""];
+                })
+              ),
+              generalNote: generalNote.trim()
             },
-            modules: MODULES_CONFIG.map((m) => ({
-              id: m.id,
-              title: m.title,
-              priority: moduleStates[m.id].priority,
-              pains: moduleStates[m.id].pains,
-              customPain: moduleStates[m.id].customPain.trim(),
-              expectation: moduleStates[m.id].expectation.trim()
-            })),
-            generalNote: generalNote.trim()
-          },
-          null,
-          2
-        );
-      }, [lawyerName, firmName, caseTypes, otherCaseType, evidenceSources, aiBoundary, switcherIntentNote, moduleStates, generalNote]);
+            null,
+            2
+          ),
+        [lawyerName, firmName, firmSize, contact, surveyAnswers, surveyOther, generalNote]
+      );
 
       async function handleCopy() {
         try {
@@ -664,7 +614,7 @@
                   <p>
                     1. <strong>書狀與實務見解連動</strong>：第 1 分頁左側參照區可直接檢視與釘選判決，並由律師指定段落套用引用。
                     2. <strong>攻防與體檢</strong>：第 4 分頁「對造攻防與書狀健檢」檢視折舊、請假證明與缺漏提醒；第 5 分頁處理答辯狀反駁。
-                    3. <strong>多訴訟類型切換</strong>：僅保留第 6 分頁問卷中的意圖對齊，目前不實作實際切換引擎。
+                    3. <strong>需求問卷</strong>：第 6 分頁 11 題點選題，確認第一版「攻、防、寫狀」先解決哪一步，以及卷證存放、收費與試用意願。
                   </p>
                 </div>
                 <button
@@ -685,7 +635,7 @@
                 { id: "research", label: "3. 實務見解檢索" },
                 { id: "check", label: "4. 對造攻防與書狀健檢" },
                 { id: "opponent", label: "5. 對造書狀比對與反駁" },
-                { id: "survey", label: "6. 需求與痛點確認問卷" }
+                { id: "survey", label: "6. 律師需求問卷" }
               ].map((tab) => {
                 const active = activeTab === tab.id;
                 return (
@@ -961,7 +911,7 @@
                       <div className="font-bold mb-1">為請求損害賠償事件，依法起訴事：</div>
                       <div className="font-bold mt-3 mb-1">一、訴之聲明</div>
                       <p className="pl-4">
-                        （一）被告應給付原告新臺幣（下同）485,000元，及自起訴狀繕本送達翌日起至清償日止，按週年利率百分之5計算之利息。
+                        （一）被告應給付原告新臺幣（下同）405,000元，及自起訴狀繕本送達翌日起至清償日止，按週年利率百分之5計算之利息。
                       </p>
                       <p className="pl-4">
                         （二）訴訟費用由被告負擔，並請准予宣告假執行。
@@ -1005,18 +955,12 @@
                       </p>
 
                       <p className="mb-3">
-                        （二）按因故意或過失，不法侵害他人之權利者，負損害賠償責任；違反保護他人之法律，致生損害於他人者，推定其有過失，民法第184條第1項前段及第2項定有明文。
+                        （二）按因故意或過失，不法侵害他人之權利者，負損害賠償責任；違反保護他人之法律，致生損害於他人者，負賠償責任，但能證明其行為無過失者，不在此限；汽車、機車或其他非依軌道行駛之動力車輛，在使用中加損害於他人者，駕駛人應賠償因此所生之損害，民法第184條第1項前段、第2項及第191條之2前段分別定有明文。
                         {tone === "加強攻勢"
                           ? "被告既違反道路交通安全規則且已自承未注意車況，過失事證明確，竟遲未履行賠償義務，顯已侵害原告權益。"
                           : tone === "平和穩健"
                           ? "被告就本件事故具有過失，爰依侵權行為法律關係請求填補原告因此所受之損害。"
-                          : "本件被告違反保護他人之法律致生損害，依法推定有過失，且有實務見解可資參照"}
-                        <button
-                          onClick={() => handleCitationClick("j1")}
-                          className="mx-1 px-1.5 py-0.5 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-sans font-semibold align-baseline cursor-pointer"
-                        >
-                          [臺中地院113中簡3946]
-                        </button>
+                          : "本件被告違反道路交通安全規則第102條第1項第2款此一保護他人之法律致生損害，應負損害賠償責任"}
                         {(insertedCitations.p2 || []).map((c) => (
                           <button
                             key={c.id}
@@ -1030,7 +974,7 @@
                       </p>
 
                       <p className="mb-3">
-                        （三）原告因本件事故受有下列損害，合計485,000元：
+                        （三）原告因本件事故受有下列損害，合計405,000元，爰依民法第193條第1項（醫療費、薪資損失）、第196條（車輛修復費）及第195條第1項（精神慰撫金）規定請求賠償：
                         1. 醫療費用45,000元
                         <button
                           onClick={() => handleCitationClick("原證3")}
@@ -1053,7 +997,7 @@
                           [最高法院77年第9次民庭決議]
                         </button>
                         ）；
-                        3. 無法工作期間薪資損失130,000元
+                        3. 無法工作期間薪資損失50,000元
                         <button
                           onClick={() => handleCitationClick("原證5")}
                           className="mx-1 px-1.5 py-0.5 rounded bg-blue-100 hover:bg-blue-200 text-blue-800 text-xs font-sans font-semibold align-baseline cursor-pointer"
@@ -1343,7 +1287,7 @@
                       <p className="text-slate-700 leading-relaxed">
                         1. 被告就本件事故是否應負全部過失責任？原告有無與有過失？<br />
                         2. 車輛修復零件費應如何計算折舊？<br />
-                        3. 原告請求休養6週薪資損失130,000元及精神慰撫金150,000元，是否為必要且相當？
+                        3. 原告請求休養6週薪資損失50,000元及精神慰撫金150,000元，是否為必要且相當？
                       </p>
                     </div>
                   </div>
@@ -1434,247 +1378,119 @@
             {activeTab === "survey" && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 <div className="lg:col-span-7 space-y-5">
-                  <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
-                    <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-100 pb-2">
+                  <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-5">
+                    <div className="border-b border-slate-100 pb-2.5">
                       <h2 className="text-sm font-bold text-slate-900">
-                        A. 基本背景、多訴訟類型切換意圖與辦案習慣
+                        律師需求問卷（約 3 分鐘，每題點選即可）
                       </h2>
-                      <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-semibold">
-                        切換訴訟類型：僅對齊意圖，暫不實作
-                      </span>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        用來決定第一版「攻、防、寫狀」要先解決哪一步。全部選填，再點一次可取消。
+                      </p>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">
-                          律師／填寫人稱呼（選填）
-                        </label>
+                        <label className="block font-semibold text-slate-700 mb-1">稱呼</label>
                         <input
                           type="text"
                           value={lawyerName}
                           onChange={(e) => setLawyerName(e.target.value)}
-                          placeholder="例如：王律師 / 林法務"
+                          placeholder="例如：王律師"
                           className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
                         />
                       </div>
                       <div>
-                        <label className="block font-semibold text-slate-700 mb-1">
-                          事務所或團隊名稱（選填）
-                        </label>
+                        <label className="block font-semibold text-slate-700 mb-1">事務所</label>
                         <input
                           type="text"
                           value={firmName}
                           onChange={(e) => setFirmName(e.target.value)}
-                          placeholder="例如：桃園民事訴訟團隊"
+                          placeholder="例如：○○法律事務所"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">律師人數</label>
+                        <select
+                          value={firmSize}
+                          onChange={(e) => setFirmSize(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-amber-500"
+                        >
+                          <option value="">請選擇</option>
+                          {FIRM_SIZE_OPTIONS.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">聯絡方式（願意試用時方便聯繫）</label>
+                        <input
+                          type="text"
+                          value={contact}
+                          onChange={(e) => setContact(e.target.value)}
+                          placeholder="Email 或 LINE ID"
                           className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
                         />
                       </div>
                     </div>
 
-                    <div className="space-y-2 text-xs">
-                      <div className="font-semibold text-slate-700">
-                        常處理的訴訟／案件類型（可複選，用於對齊未來各類訴訟切換意圖）
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {[
-                          "車禍／侵權損害賠償",
-                          "一般契約／債務糾紛",
-                          "工程／建築爭議",
-                          "不動產／租賃爭議",
-                          "勞資／行政／家事等其他訴訟"
-                        ].map((ct) => {
-                          const active = caseTypes.includes(ct);
-                          return (
-                            <button
-                              key={ct}
-                              type="button"
-                              onClick={() => toggleListItem(setCaseTypes, ct)}
-                              className={`px-3 py-1.5 rounded-lg border font-medium cursor-pointer transition ${
-                                active
-                                  ? "bg-slate-900 text-white border-slate-900"
-                                  : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
-                              }`}
-                            >
-                              {active ? `✓ ${ct}` : ct}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <input
-                        type="text"
-                        value={otherCaseType}
-                        onChange={(e) => setOtherCaseType(e.target.value)}
-                        placeholder="其他訴訟或案件類型補充（選填）"
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-
-                    <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
-                      <label className="block font-semibold text-slate-800">
-                        「能切換訴訟類型因應各類訴訟」的意圖備註（目前僅記錄意圖，尚未開發切換功能）
-                      </label>
-                      <input
-                        type="text"
-                        value={switcherIntentNote}
-                        onChange={(e) => setSwitcherIntentNote(e.target.value)}
-                        placeholder="說明未來希望依不同訴訟類型調整哪些重點（目前先不做功能）"
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-
-                    <div className="space-y-2 text-xs">
-                      <div className="font-semibold text-slate-700">
-                        當事人最常拿來的卷證形式（可複選）
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {[
-                          "LINE / 對話截圖",
-                          "診斷證明與醫療單據",
-                          "估價單 / 發票 / 薪資單",
-                          "警方研判表 / 筆錄",
-                          "合約 / 存證信函 / 掃描 PDF"
-                        ].map((ev) => {
-                          const active = evidenceSources.includes(ev);
-                          return (
-                            <button
-                              key={ev}
-                              type="button"
-                              onClick={() => toggleListItem(setEvidenceSources, ev)}
-                              className={`px-3 py-1.5 rounded-lg border font-medium cursor-pointer transition ${
-                                active
-                                  ? "bg-amber-100 text-amber-950 border-amber-400"
-                                  : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
-                              }`}
-                            >
-                              {active ? `✓ ${ev}` : ev}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5 text-xs">
-                      <label className="block font-semibold text-slate-700">
-                        你最接受的 AI 與律師分工方式
-                      </label>
-                      <select
-                        value={aiBoundary}
-                        onChange={(e) => setAiBoundary(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-amber-500"
-                      >
-                        <option value="AI 擬稿與整理，律師逐段審閱核定（高風險引用需人工確認）">
-                          AI 擬稿與整理，律師逐段審閱核定（高風險引用需人工確認）
-                        </option>
-                        <option value="只先讓 AI 整理卷證索引、時間軸與缺漏清單，書狀仍由律師主筆">
-                          只先讓 AI 整理卷證索引、時間軸與缺漏清單，書狀仍由律師主筆
-                        </option>
-                        <option value="AI 產出完整初稿與反駁論述，律師做重點修改與最終定稿">
-                          AI 產出完整初稿與反駁論述，律師做重點修改與最終定稿
-                        </option>
-                      </select>
-                    </div>
-                  </section>
-
-                  {MODULES_CONFIG.map((mod) => {
-                    const st = moduleStates[mod.id];
-                    return (
-                      <section
-                        key={mod.id}
-                        className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3.5"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-                          <h2 className="text-sm font-bold text-slate-900">{mod.title}</h2>
-                          <div className="flex items-center gap-1.5 text-xs flex-wrap">
-                            {PRIORITY_OPTIONS.map((p) => {
-                              const selected = st.priority === p.value;
+                    {SURVEY_QUESTIONS.map((q, i) => {
+                      const current = surveyAnswers[q.id];
+                      return (
+                        <div key={q.id} className="space-y-2 text-xs">
+                          <div className="font-semibold text-slate-800">
+                            {i + 1}. {q.title}
+                            {q.type === "multi" && <span className="font-normal text-slate-500">（可複選）</span>}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {q.options.map((opt) => {
+                              const active = q.type === "multi" ? (current || []).includes(opt) : current === opt;
                               return (
                                 <button
-                                  key={p.value}
+                                  key={opt}
                                   type="button"
-                                  onClick={() => updateModule(mod.id, { priority: p.value })}
-                                  className={`px-2.5 py-1 rounded-md border font-semibold cursor-pointer transition ${
-                                    selected
-                                      ? p.badge
-                                      : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
+                                  onClick={() => answerSurvey(q, opt)}
+                                  className={`px-3 py-1.5 rounded-lg border font-medium cursor-pointer transition ${
+                                    active
+                                      ? "bg-slate-900 text-white border-slate-900"
+                                      : "bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100"
                                   }`}
                                 >
-                                  {p.label}
+                                  {active ? `✓ ${opt}` : opt}
                                 </button>
                               );
                             })}
                           </div>
-                        </div>
-
-                        <div className="space-y-2 text-xs">
-                          <div className="font-semibold text-slate-700">
-                            這個環節目前遇到的痛點（可複選）：
-                          </div>
-                          <div className="space-y-1.5">
-                            {mod.painChoices.map((pain) => {
-                              const checked = st.pains.includes(pain);
-                              return (
-                                <label
-                                  key={pain}
-                                  className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition ${
-                                    checked
-                                      ? "bg-amber-50/70 border-amber-300 text-slate-900"
-                                      : "bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100"
-                                  }`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => toggleModulePain(mod.id, pain)}
-                                    className="mt-0.5"
-                                  />
-                                  <span className="leading-relaxed">{pain}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                          <div>
-                            <label className="block font-semibold text-slate-700 mb-1">
-                              其他痛點補充（選填）
-                            </label>
+                          {q.allowOther && (
                             <input
                               type="text"
-                              value={st.customPain}
-                              onChange={(e) => updateModule(mod.id, { customPain: e.target.value })}
-                              placeholder="輸入你實際碰到的其他問題"
+                              value={surveyOther[q.id] || ""}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setSurveyOther((prev) => ({ ...prev, [q.id]: value }));
+                              }}
+                              placeholder="其他（選填）"
                               className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
                             />
-                          </div>
-                          <div>
-                            <label className="block font-semibold text-slate-700 mb-1">
-                              你希望系統怎麼幫你（選填）
-                            </label>
-                            <input
-                              type="text"
-                              value={st.expectation}
-                              onChange={(e) => updateModule(mod.id, { expectation: e.target.value })}
-                              placeholder={mod.expectationPlaceholder}
-                              className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500"
-                            />
-                          </div>
+                          )}
                         </div>
-                      </section>
-                    );
-                  })}
+                      );
+                    })}
 
-                  <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-2 text-xs">
-                    <label className="block font-bold text-sm text-slate-900">
-                      B. 其他建議或開會時想先確認的事
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={generalNote}
-                      onChange={(e) => setGeneralNote(e.target.value)}
-                      placeholder="例如：希望先拿一個真實或脫敏案件測試、對卷證保密與權限有什麼要求等。"
-                      className="w-full p-3 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500 leading-relaxed"
-                    />
+                    <div className="space-y-1.5 text-xs">
+                      <label className="block font-semibold text-slate-800">
+                        {SURVEY_QUESTIONS.length + 1}. 其他想說的（選填）
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={generalNote}
+                        onChange={(e) => setGeneralNote(e.target.value)}
+                        placeholder="例如：最希望系統先幫忙的一件事、對卷證保密的要求。"
+                        className="w-full p-3 rounded-lg border border-slate-300 focus:outline-none focus:border-amber-500 leading-relaxed"
+                      />
+                    </div>
                   </section>
                 </div>
 
@@ -1685,7 +1501,7 @@
                         即時產出的「需求確認摘要」
                       </h2>
                       <p className="text-[11px] text-slate-500 mt-0.5">
-                        填寫完成後按「一鍵複製摘要」，貼到 LINE 或 Email 傳回即可
+                        填寫完成後按「一鍵複製摘要」，用 LINE 或 Email 傳回給邀請您填寫的人
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5">
