@@ -130,7 +130,12 @@ export type RoundSettings = { narrative?: string | null; joint_liability?: boole
   claim_value?: number | null; statement_variant?: 'alive' | 'deceased' | null }
 export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgment' | 'statute'; quote: string;
   label: string | null; verify_status: 'ok' | 'warn' | 'failed'; verify_reasons: string[]; lawyer_confirmed: boolean
-  court_confirmed: boolean; annotation?: string | null }  // annotation：判決的註記，例如「少數見解：否定配偶權」
+  court_confirmed: boolean; annotation?: string | null  // annotation：判決的註記，例如「少數見解：否定配偶權」
+  support?: SupportView | null }  // 支持度檢查（計畫 2B）；null＝這筆引用不需要檢查
+export type SupportVerdict = 'supports' | 'partial' | 'not_supported' | 'party_claim_misuse'
+export type SupportView = { status: 'pending' | 'done' | 'failed'; verdict: SupportVerdict | null
+  explanation: string | null; error: string | null; blocking: boolean
+  released: { name: string | null; bar_number: string | null; at: string; reason: string | null } | null }
 // display_heading＝系統編號＋標題（顯示與匯出一致）；heading_text＝去掉編號的標題（修改表單用）
 export type ParagraphView = { id: string; seq: number; kind?: 'body' | 'statement'; heading: string
   display_heading: string; heading_text: string;
@@ -276,6 +281,11 @@ export const confirmAmount = (paragraphId: string, amount: number) =>
   req<ParagraphView>(`/paragraphs/${paragraphId}/confirm-amount`, json('POST', { amount }))
 // 「可能是法院轉述的當事人主張」的引用：律師讀原文後確認此句為法院判斷
 export const confirmCourt = (id: string) => req<CitationView>(`/citations/${id}/confirm-court`, json('POST'))
+// 支持度檢查（計畫 2B）：律師填理由放行；重新檢查＝整份草稿尚未檢查成功的引用合併重查
+export const releaseSupport = (citationId: string, reason: string) =>
+  req<ParagraphView>(`/citations/${citationId}/support/release`, json('POST', { reason }))
+export const retrySupport = (draftId: string) =>
+  req<{ queued: number }>(`/drafts/${draftId}/support/retry`, json('POST'))
 // version：律師畫面上那一版的指紋；後端發現內容已變就回 409，不會把沒看過的版本記成已審
 export const reviewParagraph = (id: string, version: string) =>
   req<ParagraphView>(`/paragraphs/${id}/review`, json('POST', { version }))

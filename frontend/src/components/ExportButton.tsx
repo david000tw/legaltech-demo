@@ -42,6 +42,12 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
     const n = i < 0 ? a : a.slice(0, i)
     return `金額 ${Number(n).toLocaleString('en-US')} 出自未對照原圖的辨識文字（${i < 0 ? '' : a.slice(i + 1)}）`
   },
+  // 計畫 2B：支持度檢查
+  support_pending: (a) => `${a} 支持度檢查中`,
+  support_unchecked: (a) => `${a} 支持度尚未檢查，請重新檢查或填理由放行`,
+  support_not_supported: (a) => `${a} 經 AI 判斷不支持這句話，請修改或填理由放行`,
+  support_misuse: (a) => `${a} 經 AI 判斷是把當事人主張當成法院見解，請修改或填理由放行`,
+  support_partial: (a) => `${a} 只部分支持這句話，請確認後放行`,
 }
 
 // 阻擋原因的位置：聲明與整份書狀沒有段落編號

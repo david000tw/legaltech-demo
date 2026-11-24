@@ -5,7 +5,8 @@ import { useMe } from '../MeContext'
 import { BTN_SECONDARY, BTN_SMALL, CARD } from '../ui'
 
 const STEP_LABEL: Record<string, string> = { claims: '拆解主張', requests: '整理請求項目', select: '挑選引用', draft: '起草',
-  rewrite: 'AI 重寫段落', evidence_notes: '卷證說明', timeline: '大事記', health: '書狀健檢', ocr: '辨識' }
+  rewrite: 'AI 重寫段落', evidence_notes: '卷證說明', timeline: '大事記', health: '書狀健檢', ocr: '辨識',
+  support: '支持度檢查' }
 const PRICE_FIELDS: [keyof api.PriceValues, string][] = [['input_usd', '讀入'], ['output_usd', '寫出'],
   ['cache_read_usd', '快取讀'], ['cache_write_5m_usd', '快取寫（5 分鐘）'], ['cache_write_1h_usd', '快取寫（1 小時）']]
 const INPUT = 'rounded border border-slate-300 px-2 py-1 text-sm'

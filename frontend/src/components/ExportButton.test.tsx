@@ -12,4 +12,12 @@ describe('ExportButton reason labels', () => {
     expect(reasonLabel('amount_image_unverified:5000:對造書狀「答辯狀.pdf」第2頁'))
       .toBe('金額 5,000 出自未對照原圖的辨識文字（對造書狀「答辯狀.pdf」第2頁）')
   })
+
+  it('labels the support check reasons', () => {
+    expect(reasonLabel('support_pending:J1')).toBe('J1 支持度檢查中')
+    expect(reasonLabel('support_unchecked:E1')).toBe('E1 支持度尚未檢查，請重新檢查或填理由放行')
+    expect(reasonLabel('support_not_supported:J1')).toBe('J1 經 AI 判斷不支持這句話，請修改或填理由放行')
+    expect(reasonLabel('support_misuse:J1')).toBe('J1 經 AI 判斷是把當事人主張當成法院見解，請修改或填理由放行')
+    expect(reasonLabel('support_partial:E1')).toBe('E1 只部分支持這句話，請確認後放行')
+  })
 })

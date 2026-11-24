@@ -30,10 +30,10 @@ const draft: api.DraftView = {
   }],
 }
 
-function renderEditor() {
+function renderEditor(pollMs?: number) {
   return render(
     <MemoryRouter initialEntries={['/drafts/dr1']}>
-      <Routes><Route path="/drafts/:draftId" element={<DraftEditor />} /></Routes>
+      <Routes><Route path="/drafts/:draftId" element={<DraftEditor pollMs={pollMs} />} /></Routes>
     </MemoryRouter>,
   )
 }
@@ -437,5 +437,22 @@ describe('DraftEditor side tabs', () => {
     await userEvent.click(screen.getByRole('tab', { name: '已釘選判決' }))
     expect(api.listPins).toHaveBeenCalledWith('c1')
     expect(await screen.findByText('還沒有釘選的判決：請到案件頁的「判決檢索」分頁搜尋並釘選。')).toBeInTheDocument()
+  })
+
+  it('refreshes while a support check is pending and stops once it is done', async () => {
+    const withSupport = (support: api.SupportView): api.DraftView => ({ ...draft, paragraphs: [{ ...draft.paragraphs[0],
+      citations: [{ ...draft.paragraphs[0].citations[0], support }] }] })
+    const pending = withSupport({ status: 'pending', verdict: null, explanation: null, error: null, blocking: true,
+      released: null })
+    const checked = withSupport({ status: 'done', verdict: 'not_supported', explanation: '原文沒有提到闖紅燈',
+      error: null, blocking: true, released: null })
+    vi.mocked(api.getDraft).mockResolvedValueOnce(pending).mockResolvedValueOnce(pending).mockResolvedValue(checked)
+    renderEditor(20)
+    expect(await screen.findAllByText('支持度檢查中')).toHaveLength(2)  // 引用旁與匯出區
+    expect(await screen.findByText('不支持')).toBeInTheDocument()
+    expect(screen.getByText('原文沒有提到闖紅燈')).toBeInTheDocument()
+    const calls = vi.mocked(api.getDraft).mock.calls.length
+    await new Promise((r) => setTimeout(r, 100))
+    expect(vi.mocked(api.getDraft).mock.calls.length).toBe(calls)
   })
 })

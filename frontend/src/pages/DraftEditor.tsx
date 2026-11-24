@@ -9,15 +9,18 @@ import FilingPackageButton from '../components/FilingPackageButton'
 import PinnedPanel from '../components/PinnedPanel'
 import SourcePane from '../components/SourcePane'
 import StatementBlock, { AmountButtons, ClaimValueField } from '../components/StatementBlock'
+import SupportBadge from '../components/SupportBadge'
 import TimelineSection from '../components/TimelineSection'
+import { POLL_MS, useJobPolling } from '../aiJobs'
 import { BTN_SECONDARY } from '../ui'
 
 // 草稿頁左側：原文對照（引用與出處的原文）、卷證說明、大事記（設計 5.6、5.7，只看不改）
 const SIDE_TABS = [['source', '原文對照'], ['notes', '卷證說明'], ['timeline', '大事記'], ['pinned', '已釘選判決']] as const
 type SideTab = typeof SIDE_TABS[number][0]
 
-function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
+function ParagraphCard({ p, draftId, canReview, onShowSource, onChanged, onError }: {
   p: api.ParagraphView
+  draftId: string
   canReview: boolean
   onShowSource: (c: api.CitationView) => void
   onChanged: () => Promise<void>
@@ -107,6 +110,13 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
           </span>
         ))}
       </div>
+      {p.citations.some((c) => c.support) && (
+        <div className="space-y-1">
+          {p.citations.map((c) => (
+            <SupportBadge key={c.id} citation={c} draftId={draftId} canReview={canReview} onAction={act} />
+          ))}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
         <button type="button" onClick={() => setEditing(true)} className="rounded border px-3 py-1 text-sm">修改</button>
         {confirmDelete ? (
@@ -135,7 +145,7 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
   )
 }
 
-export default function DraftEditor() {
+export default function DraftEditor({ pollMs = POLL_MS }: { pollMs?: number } = {}) {
   const { draftId = '' } = useParams()
   const [draft, setDraft] = useState<api.DraftView | null>(null)
   const [source, setSource] = useState<api.CitationSource | null>(null)
@@ -152,6 +162,11 @@ export default function DraftEditor() {
   }, [draftId])
 
   useEffect(() => { void load() }, [load])
+
+  // 支持度檢查在背景執行（計畫 2B）：還有檢查中的引用時定時重新載入，查完自動更新
+  const checking = !!draft && [...draft.paragraphs, ...(draft.statement ? [draft.statement] : [])]
+    .some((p) => p.citations.some((c) => c.support?.status === 'pending'))
+  useJobPolling(checking, load, pollMs)
 
   async function showSource(c: api.CitationView) {
     try {
@@ -230,6 +245,7 @@ export default function DraftEditor() {
           {draft.procedure_warning && (
             <p className="rounded bg-yellow-50 p-2 text-sm text-yellow-800">{draft.procedure_warning}</p>
           )}
+          {checking && <p className="rounded bg-slate-100 p-2 text-sm text-slate-700">支持度檢查中</p>}
           <ExportButton blockers={draft.blockers} onExport={doExport} />
           <FilingPackageButton draftId={draftId} blockers={draft.blockers} canReview={draft.can_review} />
         </div>
@@ -275,7 +291,8 @@ export default function DraftEditor() {
           )}
           {draft.body_label && <h2 className="text-lg font-semibold text-slate-800">{draft.body_label}</h2>}
           {draft.paragraphs.map((p) => (
-            <ParagraphCard key={`${p.id}-${p.text}`} p={p} canReview={draft.can_review} onShowSource={showSource}
+            <ParagraphCard key={`${p.id}-${p.text}`} p={p} draftId={draftId} canReview={draft.can_review}
+              onShowSource={showSource}
               onChanged={load} onError={setError} />
           ))}
         </div>
