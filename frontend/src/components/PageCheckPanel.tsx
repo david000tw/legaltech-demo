@@ -123,12 +123,13 @@ export default function PageCheckPanel({ pageId, canReview, onChanged }: {
           className="w-full rounded border border-slate-300 p-2 font-mono text-xs" />
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {/* 沒改字就不能存：存了會產生新版本，引用這頁的段落會被當成「依據頁已修正」 */}
         {data.can_edit && (
-          <button type="button" disabled={busy} className={BTN_SECONDARY}
+          <button type="button" disabled={busy || !dirty} className={BTN_SECONDARY}
             onClick={() => run(() => api.savePageText(pageId, text, data.version, false))}>儲存</button>
         )}
         {canReview && data.can_edit && (
-          <button type="button" disabled={busy || !data.can_verify} className={BTN_SECONDARY}
+          <button type="button" disabled={busy || !data.can_verify || !dirty} className={BTN_SECONDARY}
             onClick={() => run(() => api.savePageText(pageId, text, data.version, true))}>儲存並標為已對照</button>
         )}
         {canReview && (
@@ -137,7 +138,10 @@ export default function PageCheckPanel({ pageId, canReview, onChanged }: {
             className={BTN_SECONDARY}
             onClick={() => run(() => api.verifyPage(pageId, data.version as number))}>已對照原圖</button>
         )}
-        {canReview && dirty && <span className="text-xs text-amber-700">有未儲存的修改：請按「儲存並標為已對照」</span>}
+        {data.can_edit && dirty && (
+          <span className="text-xs text-amber-700">{canReview && data.can_verify
+            ? '有未儲存的修改：請按「儲存並標為已對照」' : '有未儲存的修改：請先按「儲存」，再對照原圖'}</span>
+        )}
         {data.blank_unconfirmed && (
           <button type="button" disabled={busy} className={BTN_SECONDARY}
             onClick={() => run(() => api.confirmBlank(pageId))}>確認是空白頁</button>

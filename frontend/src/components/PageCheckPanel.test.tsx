@@ -54,6 +54,7 @@ describe('PageCheckPanel', () => {
     expect(api.savePageText).toHaveBeenCalledWith('p1', TEXT + '整', 2, false)
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
     vi.mocked(api.savePageText).mockRejectedValueOnce(new api.ApiError(409, '這一頁的文字已更新，請重新載入'))
+    fireEvent.change(box, { target: { value: TEXT + '整。' } })
     await userEvent.click(screen.getByRole('button', { name: '儲存' }))
     expect(await screen.findByText('這一頁的文字已更新，請重新載入')).toBeInTheDocument()
     expect(api.getPageOcr).toHaveBeenCalledTimes(2)
@@ -85,6 +86,27 @@ describe('PageCheckPanel', () => {
     expect(screen.getByRole('button', { name: '儲存並標為已對照' })).toBeEnabled()
     fireEvent.change(box, { target: { value: TEXT } })
     expect(verify).toBeEnabled()
+  })
+
+  it('save buttons stay disabled until the text changes (no new version for an unchanged page)', async () => {
+    render(<PageCheckPanel pageId="p1" canReview onChanged={vi.fn()} />)
+    const box = await screen.findByRole('textbox', { name: '辨識文字' })
+    expect(screen.getByRole('button', { name: '儲存' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '儲存並標為已對照' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '已對照原圖' })).toBeEnabled()
+    fireEvent.change(box, { target: { value: TEXT + '整' } })
+    expect(screen.getByRole('button', { name: '儲存' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '儲存並標為已對照' })).toBeEnabled()
+  })
+
+  it('unsaved edits on a page that cannot be verified yet point to 儲存', async () => {
+    vi.mocked(api.getPageOcr).mockResolvedValue({ ...PAGE, ocr_state: 'failed', ocr_error: 'refusal: 模型拒絕回答',
+      text: null, version: null, needs_check: false, can_verify: false, alerts: [] })
+    render(<PageCheckPanel pageId="p1" canReview onChanged={vi.fn()} />)
+    fireEvent.change(await screen.findByRole('textbox', { name: '辨識文字' }), { target: { value: '手動輸入的內容' } })
+    expect(screen.getByText('有未儲存的修改：請先按「儲存」，再對照原圖')).toBeInTheDocument()
+    expect(screen.queryByText('有未儲存的修改：請按「儲存並標為已對照」')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '儲存' })).toBeEnabled()
   })
 
   it('verify disabled when can_verify is false', async () => {

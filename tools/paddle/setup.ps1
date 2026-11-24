@@ -15,7 +15,8 @@ if (-not (Test-Path $py)) {
 }
 
 Write-Host '2/4 安裝 paddlepaddle、paddleocr、opencc-python-reimplemented'
-uv pip install --python $py paddlepaddle paddleocr opencc-python-reimplemented
+# 固定為驗收測過的版本（2026-11-24）：新版輸出格式若改變，每頁都會變成「校對員未執行」；paddlex 是 paddleocr 的相依套件
+uv pip install --python $py paddlepaddle==3.3.1 paddleocr==3.7.0 paddlex==3.7.2 opencc-python-reimplemented==0.1.7
 if ($LASTEXITCODE -ne 0) { throw '安裝失敗' }
 
 Write-Host '3/4 授權'

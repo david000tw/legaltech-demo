@@ -56,6 +56,9 @@ def start_proofreader(cmd: Sequence[str], image_paths: Sequence[Path | str], out
     except OSError:
         _SLOT.release()
         return None
+    except BaseException:  # 其他啟動錯誤也要放回名額，否則之後每一批都要等到逾時
+        _SLOT.release()
+        raise
     proc._holds_slot = True
     return proc
 

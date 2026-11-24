@@ -112,3 +112,25 @@ def test_on_wait_exception_kills_process(tmp_path, monkeypatch):
     nxt = start_proofreader(FAKE, _imgs(tmp_path), tmp_path / "next.json")
     assert nxt is not None
     kill_proofreader(nxt)
+
+
+def test_start_releases_slot_on_any_launch_error(tmp_path, monkeypatch):
+    # 啟動失敗（不只 OSError）一律放回名額；否則之後每一批都要白等 paddle_timeout_s
+    from app.ocr import proofreader
+
+    def boom(*a, **kw):
+        raise ValueError("embedded null byte")
+
+    monkeypatch.setattr(proofreader.subprocess, "Popen", boom)
+    with pytest.raises(ValueError):
+        proofreader.start_proofreader(["paddle"], [tmp_path / "1.png"], tmp_path / "out.json")
+    assert proofreader._SLOT.acquire(blocking=False)
+    proofreader._SLOT.release()
+
+
+def test_setup_pins_the_tested_paddle_versions():
+    # 安裝腳本固定為驗收測過、查過授權的版本：新版輸出格式一變，每頁都會變成「校對員未執行」
+    script = (Path(__file__).resolve().parents[2] / "tools" / "paddle" / "setup.ps1").read_text(encoding="utf-8-sig")
+    (line,) = [ln for ln in script.splitlines() if ln.strip().startswith("uv pip install")]
+    for pin in ("paddlepaddle==3.3.1", "paddleocr==3.7.0", "paddlex==3.7.2", "opencc-python-reimplemented==0.1.7"):
+        assert pin in line, pin

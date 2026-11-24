@@ -87,6 +87,12 @@ describe('OcrStatus', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('辨識已停下：系統內部錯誤，請查看伺服器紀錄後重跑')
   })
 
+  it('drops the stop reason once nothing is left to resume (pages typed in by hand)', () => {
+    render(<OcrStatus doc={doc({ job: { ...job('failed'), error: 'usage_limit: Claude AI usage limit reached' },
+      can_resume: false }, [page('p1', 1)])} onChanged={vi.fn(async () => {})} onOpenPage={vi.fn()} />)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('resume button when can_resume', async () => {
     render(<OcrStatus doc={doc({ can_resume: true, job: { ...job('running'), stale: true } },
       [page('p1', 1, { ocr_state: 'pending' })])} onChanged={vi.fn(async () => {})} onOpenPage={vi.fn()} />)

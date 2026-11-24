@@ -99,7 +99,7 @@ export default function OcrStatus({ doc, onChanged, onOpenPage, pollMs = POLL_MS
           <span className="text-amber-700">這份看起來是掃描後加上文字的 PDF，建議改用辨識</span>
         )}
       </div>
-      {job?.status === 'failed' && job.error && !error && (
+      {job?.status === 'failed' && job.error && ocr.can_resume && !error && (
         <p role="alert" className="text-red-700">{ocrStopReason(job.error)}</p>
       )}
       {error && <p role="alert" className="text-red-700">{error}</p>}
