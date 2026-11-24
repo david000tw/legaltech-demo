@@ -92,6 +92,16 @@ def test_usage_limit_fails_remaining(db):
     assert {(r.status, r.error) for r in _all(ctx).values()} == {("failed", "usage_limit: 額度用完")}
 
 
+def test_timeout_fails_remaining_at_once(db):
+    # AI 卡住時不要一批一批各等 240 秒：剩下的列立刻記成尚未檢查，律師才能放行、按一次重新檢查即可
+    ctx, ids = _rows(10)
+    fake = FakeProvider({"support": AIError("timeout", "Claude Code 超過 240 秒沒有回應")})
+    _run(ctx, ids, fake)
+    assert len(fake.calls) == 1
+    assert {(r.status, r.error) for r in _all(ctx).values()} == {
+        ("failed", "timeout: Claude Code 超過 240 秒沒有回應")}
+
+
 def test_other_error_fails_batch_and_continues(db):
     ctx, ids = _rows(10)
     calls = []

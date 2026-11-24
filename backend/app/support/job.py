@@ -33,7 +33,9 @@ log = logging.getLogger(__name__)
 SUPPORT_BATCH = 8
 SOURCE_WINDOW = 2000  # 字
 KIND_ZH = {"evidence": "卷證", "judgment": "判決", "statute": "法條"}
-STOP_KINDS = ("usage_limit", "not_logged_in")  # 之後的批次也不會成功，剩下的直接記失敗
+# 之後的批次也不會成功，剩下的直接記失敗。逾時也算：AI 卡住時若一批一批各等 240 秒，
+# 後面的引用會「檢查中」好幾十分鐘、律師不能放行（設計 7.3）；記成尚未檢查後按一次「重新檢查」即可
+STOP_KINDS = ("usage_limit", "not_logged_in", "timeout")
 MISSING = "invalid_output: 缺少結果"
 OTHER = "other: 系統內部錯誤"
 

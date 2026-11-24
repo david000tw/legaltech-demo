@@ -29,6 +29,28 @@ def test_citing_sentences_marker_after_period_and_two_sentences():
     assert citing_sentences("醫療費用5,780元。{{cite:E1}}", "E1") == ["醫療費用5,780元。{{cite:E1}}"]
 
 
+def test_marker_after_period_followed_by_more_text():
+    # 律師把出處放在句號後面、後面還有別句：出處要跟前一句（主張所在的句子）在一起
+    assert citing_sentences("原告支出醫療費5,780元。（見{{cite:E1}}）被告自應賠償。", "E1") == [
+        "原告支出醫療費5,780元。（見{{cite:E1}}）"]
+    assert citing_sentences("原告支出醫療費5,780元。（見{{cite:E1}}）\n被告自應賠償。", "E1") == [
+        "原告支出醫療費5,780元。（見{{cite:E1}}）"]
+    assert citing_sentences("原告支出5,780元。（參{{cite:E1}}、{{cite:E2}}第3頁）另查無誤。", "E2") == [
+        "原告支出5,780元。（參{{cite:E1}}、{{cite:E2}}第3頁）"]
+    # 標記緊接在上一句結尾之後、作為下一句開頭：連同上一句一起看（寧可多看，不要漏看主張）
+    assert citing_sentences("按民法規定「應負責任。」{{cite:S1}}本件被告過失。", "S1") == [
+        "按民法規定「應負責任。」", "{{cite:S1}}本件被告過失。"]
+
+
+def test_claim_before_trailing_marker_is_in_fingerprint():
+    q = {"E1": "合計新臺幣5,780元"}
+    a = support_fingerprint("evidence", "收據", q["E1"],
+                            citing_sentences("原告支出醫療費5,780元。（見{{cite:E1}}）被告自應賠償。", "E1"), "E1", q)
+    b = support_fingerprint("evidence", "收據", q["E1"],
+                            citing_sentences("原告支出醫療費57,800元。（見{{cite:E1}}）被告自應賠償。", "E1"), "E1", q)
+    assert a != b
+
+
 def test_neutral_sentence():
     q = {"E1": "合計5,780元", "E2": "支出醫療費"}
     assert neutral_sentence("依{{cite:E2}}及{{cite:E1}}，{{quote:E2}}{{quote:E1}}。", "E1", q) == \

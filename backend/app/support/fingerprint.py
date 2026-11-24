@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import unicodedata
 from dataclasses import dataclass
 
@@ -19,6 +20,11 @@ from app.verify.citations import MARKER_RE, paragraph_citations
 TERMINATORS = "。！？!?；"
 CLOSERS = "」』）)”’"  # 句末標點後面緊接的收尾符號算在同一句
 BRACKETS = "（）()「」『』"
+# 放在句號後面的出處括號，例如「（見{{cite:E1}}）」「（參{{cite:E1}}、{{cite:E2}}第3頁）」：屬於前一句（主張所在的句子）
+_LEAD_CITE = re.compile(
+    r"^[（(]\s*(?:另參|參見|參照|見|參|詳)?\s*"
+    r"(?:\{\{(?:cite|quote):[A-Z]\d+\}\}\s*(?:第\s*\d+\s*頁)?\s*[、及,，]?\s*)+"
+    r"(?:參照|可稽|可參)?\s*[）)]")
 
 
 @dataclass(frozen=True)
@@ -60,6 +66,9 @@ def split_sentences(text: str) -> list[str]:
     raw.append("".join(buf))
     out: list[str] = []
     for frag in (f.strip() for f in raw):
+        if out and (m := _LEAD_CITE.match(frag)):
+            out[-1] += m.group(0)
+            frag = frag[m.end():].strip()
         if not frag:
             continue
         if out and _is_empty(frag):
@@ -71,10 +80,14 @@ def split_sentences(text: str) -> list[str]:
 
 def citing_sentences(text: str, code: str) -> list[str]:
     marks = (f"{{{{cite:{code}}}}}", f"{{{{quote:{code}}}}}")
+    sentences = split_sentences(text)
     out: list[str] = []
-    for sentence in split_sentences(text):
-        if any(m in sentence for m in marks) and sentence not in out:
-            out.append(sentence)
+    for i, sentence in enumerate(sentences):
+        if not any(m in sentence for m in marks):
+            continue
+        # 句子以標記開頭（例如「……責任。」{{cite:S1}}本件……」）：主張可能在上一句，一起看（寧可多看，不要漏看）
+        wanted = [sentences[i - 1], sentence] if i > 0 and MARKER_RE.match(sentence) else [sentence]
+        out.extend(x for x in wanted if x not in out)
     return out
 
 
