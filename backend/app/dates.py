@@ -21,16 +21,17 @@ class PartialDate(NamedTuple):
     day: int | None
 
 
-_CN_DIGIT = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
-_CN = "〇零一二三四五六七八九十百"
+# 「○」「◯」是民國 100～110 年常見的 0 寫法（一一○年）
+_CN_DIGIT = {"〇": 0, "○": 0, "◯": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_CN = "〇○◯零一二三四五六七八九十百"
 _NUM = rf"(?:[0-9]+|[{_CN}]+)"
 # 「年」後面直接接月：「114年度訴字」的「度」擋掉案號；年份前面不能緊接數字（避免從長串數字中間切）
 _CJK_DATE = re.compile(
-    rf"(?P<era>中華民國|民國|西元)?\s*(?<![0-9{_CN}])(?P<y>{_NUM})\s*年\s*(?P<m>{_NUM})\s*月"
+    rf"(?P<era>中華民國|民國|西元)?\s*(?<![0-9{_CN}])(?P<y>{_NUM})\s*年\s*(?P<m>{_NUM}|元)\s*月"
     rf"(?:\s*(?P<d>{_NUM})\s*日)?")
 # 2025/03/09、114.3.9、2025-3-9：三段且分隔符號一致；「09/25 18:30」只有兩段，不算
 _SEP_DATE = re.compile(r"(?<![0-9./:\-])(?P<y>[0-9]{2,4})(?P<sep>[/.\-])(?P<m>[0-9]{1,2})(?P=sep)(?P<d>[0-9]{1,2})"
-                       r"(?![0-9:/\-]|\.[0-9])")
+                       r"(?![0-9:/\-]|\.[0-9]|號)")  # 「100-1-2號」是門牌
 _ISO = re.compile(r"^([0-9]{4})-([0-9]{1,2})(?:-([0-9]{1,2}))?$")
 
 
@@ -86,7 +87,8 @@ def parse_dates(text: str) -> list[PartialDate]:
         day = _cn_int(m.group("d")) if m.group("d") else None
         if m.group("d") and day is None:
             continue
-        pd = _make(_year(raw, m.group("era")) if raw is not None else None, _cn_int(m.group("m")), day)
+        month = 1 if m.group("m") == "元" else _cn_int(m.group("m"))  # 元月＝一月
+        pd = _make(_year(raw, m.group("era")) if raw is not None else None, month, day)
         if pd is not None:
             hits.append((m.start(), pd))
     for m in _SEP_DATE.finditer(norm):

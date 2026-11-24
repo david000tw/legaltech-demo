@@ -189,3 +189,14 @@ def test_prompt_rules():
     for rule in ("案件本身", "高風險", "補強建議", "證據缺口", "6 字", "other_references", "absence", "承認",
                  "預期爭點", "已證實"):
         assert rule in text
+
+
+def test_health_forbidden_wording_softened(db):
+    # critic #3：健檢標題、說明、爭點、不爭執事項都不得出現「已證實」「已驗證」
+    ctx = drafted()
+    item = {**HIGH, "title": "過失已證實", "explanation": "研判表已驗證被告未讓車"}
+    undisputed = [{"fact": "事故已證實發生", "source": "對造書狀A", "page_no": 1, "quote": OPP_QUOTE}]
+    report, _, _ = run(ctx, report_data(items=[item], undisputed=undisputed, issues=["責任已驗證？"]), db)
+    text = repr(report)
+    assert "已證實" not in text and "已驗證" not in text
+    assert report["items"][0]["title"] == "過失可佐證"

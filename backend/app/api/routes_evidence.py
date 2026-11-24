@@ -13,7 +13,7 @@ from app.models import Case, Document, EvidenceNote, Page, TimelineEvent
 from app.pipeline.evidence_notes import note_json, notes_view
 from app.pipeline.jobs import BUSY, JobBusy, JobRule, job_json, latest_job, run_job, start_job
 from app.pipeline.timeline import event_json, lawyer_event, set_date, timeline_view
-from app.sources import pending_ocr, source_pages
+from app.sources import MAX_AMOUNT, pending_ocr, source_pages
 
 router = APIRouter(prefix="/api")
 
@@ -116,7 +116,7 @@ def _date_or_422(value: str | None) -> PartialDate | None:
 class EventBody(BaseModel):
     date: str | None = None
     description: _Description
-    amount: int | None = Field(default=None, ge=0)
+    amount: int | None = Field(default=None, ge=0, le=MAX_AMOUNT)
     page_id: UUID | None = None
     quote: str = Field(default="", max_length=2000)
 
@@ -124,7 +124,7 @@ class EventBody(BaseModel):
 class EventPatch(BaseModel):
     date: str | None = None
     description: _Description | None = None
-    amount: int | None = Field(default=None, ge=0)
+    amount: int | None = Field(default=None, ge=0, le=MAX_AMOUNT)
     quote: str | None = Field(default=None, max_length=2000)
 
 

@@ -21,7 +21,9 @@ from app.db import tenant_session
 from app.models import AIJob, Case, TimelineEvent
 from app.pipeline.case_context import case_context
 from app.pipeline.jobs import JobContext, JobRule
-from app.sources import OPPONENT_PREFIX, SourcePage, check_source, code_key, source_pages, source_view
+from app.sources import (
+    MAX_AMOUNT, OPPONENT_PREFIX, SourcePage, check_source, code_key, soften, source_pages, source_view,
+)
 
 TIMELINE_BATCH_CHARS = 60_000
 
@@ -67,8 +69,9 @@ def _save(s: Session, job: AIJob, events: list[dict], pages: dict[tuple[str, int
     s.execute(delete(TimelineEvent).where(TimelineEvent.case_id == job.case_id, TimelineEvent.origin == "ai"))
     s.flush()
     seq = _next_seq(s, job.case_id)
+    evidence_codes = {k[0] for k, p in pages.items() if p.kind == "evidence"}
     for e in events:
-        description = str(e.get("description", "")).strip()
+        description = soften(str(e.get("description", "")).strip())
         if not description:
             continue
         code = str(e.get("source", "")).strip()
@@ -78,15 +81,17 @@ def _save(s: Session, job: AIJob, events: list[dict], pages: dict[tuple[str, int
         raw_date = str(e.get("date") or "").strip()
         pd = parse_iso(raw_date) if raw_date else None
         raw_amount = e.get("amount")
-        amount = raw_amount if isinstance(raw_amount, int) and not isinstance(raw_amount, bool) and raw_amount >= 0 \
-            else None
+        valid = isinstance(raw_amount, int) and not isinstance(raw_amount, bool) and 0 <= raw_amount <= MAX_AMOUNT
+        amount = raw_amount if valid else None
         dates = ([pd] if pd else []) + parse_dates(description)
         amounts = ([amount] if amount is not None else []) + parse_amounts(description)
         reasons = check_source(page, quote, dates=dates, amounts=amounts)
         if raw_date and pd is None:
             reasons.append("date_invalid")
         event_date, precision = _event_date(pd)
-        kind = "opponent" if code_key(code).startswith(OPPONENT_PREFIX) else ("evidence" if code else None)
+        # 「對造書狀」開頭＝對造主張（頁碼對不到也一樣）；我方卷證要對得到證物代號，其他代號不標
+        key = code_key(code)
+        kind = "opponent" if key.startswith(OPPONENT_PREFIX) else ("evidence" if key in evidence_codes else None)
         s.add(TimelineEvent(firm_id=job.firm_id, case_id=job.case_id, seq=seq, event_date=event_date,
                             date_precision=precision, description=description, amount=amount,
                             page_id=page.page_id if page else None, quote=quote, source_kind=kind, origin="ai",

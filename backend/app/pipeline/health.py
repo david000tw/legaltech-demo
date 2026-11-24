@@ -32,7 +32,7 @@ from app.pipeline.case_context import case_context
 from app.pipeline.claims import claim_filers, selected_claims
 from app.pipeline.evidence_notes import document_fingerprint
 from app.pipeline.jobs import JobContext, JobRule
-from app.sources import SourcePage, check_source, code_key, pending_ocr, source_pages, source_view
+from app.sources import SourcePage, check_source, code_key, pending_ocr, soften, source_pages, source_view
 from app.statements import confirmed_requests
 
 REF_KINDS = ("judgment", "statute")
@@ -111,11 +111,11 @@ def _save(s: Session, job: AIJob, data: dict, pages: dict[tuple[str, int], Sourc
     cands = round_candidates(s, job.round_id)
     items = []
     for it in data.get("items", []) or []:
-        title = str(it.get("title", "")).strip()
+        title = soften(str(it.get("title", "")).strip())
         if it.get("level") not in HEALTH_LEVELS or not title:
             continue
         refs, not_in_list = _references(s, it, cands)
-        items.append({"level": it["level"], "title": title, "explanation": str(it.get("explanation", "")).strip(),
+        items.append({"level": it["level"], "title": title, "explanation": soften(str(it.get("explanation", "")).strip()),
                       "claim_seqs": [x for x in it.get("claim_seqs", []) or [] if isinstance(x, int)],
                       "absence": bool(it.get("absence")),
                       "basis": [_basis(pages, ev)[0] for ev in it.get("evidence", []) or []],
@@ -124,14 +124,14 @@ def _save(s: Session, job: AIJob, data: dict, pages: dict[tuple[str, int], Sourc
     if not complaint:
         undisputed = []
         for u in data.get("undisputed", []) or []:
-            fact = str(u.get("fact", "")).strip()
+            fact = soften(str(u.get("fact", "")).strip())
             if not fact:
                 continue
             b, page = _basis(pages, u)
             if page is not None and page.kind != "opponent":  # 不爭執事項只能來自本輪對造書狀
                 b.update(status="not_found", reasons=["not_opponent"])
             undisputed.append({"fact": fact, "basis": b})
-    issues = [str(x).strip() for x in data.get("issues", []) or [] if str(x).strip()]
+    issues = [soften(str(x).strip()) for x in data.get("issues", []) or [] if str(x).strip()]
     report = s.scalars(select(HealthReport).where(HealthReport.round_id == job.round_id)).first()
     if report is None:
         report = HealthReport(firm_id=job.firm_id, round_id=job.round_id)

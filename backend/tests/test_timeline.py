@@ -229,3 +229,29 @@ def test_prompt_rules():
     text = load_prompt("timeline")
     for rule in ("資料", "YYYY-MM-DD", "YYYY-MM", "6 字", "對造書狀", "已證實"):
         assert rule in text
+
+
+def test_unknown_source_code_has_no_kind(db, firm, case_id):
+    # critic #4：AI 寫了對不到的代號（例如「被告答辯狀」）時不標成我方卷證
+    fake = FakeProvider({"timeline": {"events": [ev("被告稱原告闖紅燈", source="被告答辯狀"), ev("付款", source="原證9")]}})
+    view = by_desc(generate(firm, case_id, fake, db))
+    assert view["被告稱原告闖紅燈"]["source_kind"] is None and view["付款"]["source_kind"] is None
+
+
+def test_huge_amount_dropped(db, firm, case_id):
+    # critic #5：超出範圍的金額不寫入（否則整份大事記在最後寫入時失敗）
+    fake = FakeProvider({"timeline": {"events": [ev("原告支付醫療費用", amount=10**19)]}})
+    view = generate(firm, case_id, fake, db)
+    assert view[0]["amount"] is None
+
+
+def test_lawyer_amount_out_of_range_422(lawyer_client):
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm, opponent_pages=BRIEF, evidence=EVIDENCE)
+    r = client.post(f"/api/cases/{case_id}/timeline/events", json={"description": "x", "amount": 10**19})
+    assert r.status_code == 422
+
+
+def test_timeline_forbidden_wording_softened(db, firm, case_id):
+    fake = FakeProvider({"timeline": {"events": [ev("原告已證實支付醫療費用")]}})
+    assert generate(firm, case_id, fake, db)[0]["description"] == "原告可佐證支付醫療費用"

@@ -23,7 +23,7 @@ from app.ingest.service import current_page_text
 from app.models import AIJob, Case, Document, EvidenceNote, Page
 from app.pipeline.case_context import case_context
 from app.pipeline.jobs import JobContext, JobRule
-from app.sources import SourcePage, check_source, code_key, evidence_documents, pending_ocr, source_view
+from app.sources import SourcePage, check_source, code_key, evidence_documents, pending_ocr, soften, source_view
 
 log = logging.getLogger(__name__)
 NOTES_BATCH_CHARS = 60_000
@@ -82,16 +82,16 @@ def _save(s: Session, job: AIJob, batch, data: dict, fingerprints: dict[UUID, st
                                                   EvidenceNote.origin == "lawyer")):
         lawyer[(n.document_id, n.kind)] = lawyer.get((n.document_id, n.kind), 0) + 1
     s.execute(delete(EvidenceNote).where(EvidenceNote.document_id.in_(doc_ids), EvidenceNote.origin == "ai"))
+    counts = {(doc_id, k): lawyer.get((doc_id, k), 0) for doc_id in doc_ids for k in KINDS}  # 同一份被分成兩組也一起算
     for group in data.get("documents", []) or []:
         entry = by_code.get(code_key(str(group.get("exhibit", ""))))
         if entry is None:
             log.warning("evidence_notes job %s: exhibit %r not in this batch; discarded", job.id, group.get("exhibit"))
             continue
         doc_id, pages = entry
-        counts = {k: lawyer.get((doc_id, k), 0) for k in KINDS}
         for seq, n in enumerate(group.get("notes", []) or [], start=1):
-            kind, text = n.get("kind"), str(n.get("text", "")).strip()
-            if kind not in KINDS or not text or counts[kind] >= MAX_PER_KIND:
+            kind, text = n.get("kind"), soften(str(n.get("text", "")).strip())
+            if kind not in KINDS or not text or counts[(doc_id, kind)] >= MAX_PER_KIND:
                 continue
             page_no = n.get("page_no")
             page = pages.get(page_no) if isinstance(page_no, int) else None
@@ -104,9 +104,12 @@ def _save(s: Session, job: AIJob, batch, data: dict, fingerprints: dict[UUID, st
             s.add(EvidenceNote(firm_id=job.firm_id, case_id=job.case_id, document_id=doc_id, kind=kind, seq=seq,
                                text=text, page_id=page.page_id if page else None, quote=quote, status=status,
                                reasons=reasons, origin="ai"))
-            counts[kind] += 1
-    for doc_id in doc_ids:  # AI 沒回的卷證也算處理過，免得每按一次都重新收費
-        s.get(Document, doc_id).notes_fingerprint = fingerprints[doc_id]
+            counts[(doc_id, kind)] += 1
+    # 有說明（AI 新寫的或保留的律師句）才算處理過；AI 漏寫的卷證維持待處理，可以再按一次（critic #1）。
+    # 律師之後刪光說明也不會被重新處理，因為指紋已經記下。
+    for doc_id in doc_ids:
+        if any(counts[(doc_id, k)] for k in KINDS):
+            s.get(Document, doc_id).notes_fingerprint = fingerprints[doc_id]
 
 
 def generate_evidence_notes(job: AIJob, provider: AIProvider, ctx: JobContext) -> None:

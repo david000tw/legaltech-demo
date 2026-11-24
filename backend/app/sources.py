@@ -27,6 +27,15 @@ REASON_LABEL = {
     "not_opponent": "不是本輪對造書狀的內容",
 }
 OPPONENT_PREFIX = "對造書狀"
+# 畫面與 AI 文字都不得出現「已驗證」「已證實」（設計 5.1）：提示詞之外，程式也把 AI 寫的字換成較保守的說法
+_OVERCLAIM = {"已證實": "可佐證", "已驗證": "可佐證"}
+MAX_AMOUNT = 10**15  # 金額上限（新臺幣）：超過就當成 AI 寫錯，不寫入資料庫
+
+
+def soften(text: str) -> str:
+    for word, plain in _OVERCLAIM.items():
+        text = text.replace(word, plain)
+    return text
 
 
 @dataclass(frozen=True)

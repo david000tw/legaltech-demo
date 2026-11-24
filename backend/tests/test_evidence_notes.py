@@ -123,9 +123,15 @@ def _new_text_version(firm, case_id, filename, text):
         s.add(PageText(firm_id=firm, page_id=page.id, version=version, source="manual", text=text))
 
 
+def answer_all(call):
+    """每份送來的卷證都回一句（摘錄對不對不重要，只要有說明）。"""
+    codes = sorted(set(re.findall(r"【(原證\d+) 第\d+頁】", call["user"])))
+    return reply(*[(c, [note("這份卷證的內容", "不在原文也沒關係")]) for c in codes])
+
+
 def test_notes_only_pending_documents(db, firm):
     case_id, _ = make_round(firm, evidence=TWO)
-    fake = FakeProvider({"evidence_notes": reply(("原證1", [FOUND]))})
+    fake = FakeProvider({"evidence_notes": answer_all})
     generate(firm, case_id, fake, db)
     assert _exhibits_sent(fake) == ["原證1", "原證2"]
     _ingest(firm, case_id, "evidence", "03_估價單.txt", "估價單：車輛修復費用新臺幣60,000元。".encode("utf-8"))
@@ -135,6 +141,33 @@ def test_notes_only_pending_documents(db, firm):
     view = by_exhibit(generate(firm, case_id, fake, db))
     assert _exhibits_sent(fake) == ["原證1"]
     assert len(view["原證1"]["notes"]) == 1  # 重新產生時換掉舊的 AI 說明，不會重複
+
+
+def test_skipped_document_stays_pending(db, firm):
+    # critic #1：AI 漏寫某份卷證時，那份仍算待處理，可以再按一次（不會卡在「所有卷證都已有說明」）
+    case_id, _ = make_round(firm, evidence=TWO)
+    fake = FakeProvider({"evidence_notes": reply(("原證1", [FOUND]))})
+    view = by_exhibit(generate(firm, case_id, fake, db))
+    assert view["原證1"]["needs_notes"] is False and view["原證2"]["needs_notes"] is True
+    generate(firm, case_id, fake, db)
+    assert _exhibits_sent(fake) == ["原證2"]
+
+
+def test_note_cap_across_repeated_groups(db, firm):
+    # critic #6：同一份卷證被 AI 分成兩組回傳，每種說明仍最多 3 句
+    case_id, _ = make_round(firm, evidence={"01_收據.txt": RECEIPT})
+    three = [note(f"第{i}句", "支付醫療費用新臺幣45,000元") for i in range(1, 4)]
+    view = by_exhibit(generate(firm, case_id, FakeProvider({"evidence_notes": reply(("原證1", three), ("原證1", three))}), db))
+    assert len(view["原證1"]["notes"]) == 3
+
+
+def test_forbidden_wording_softened(db, firm):
+    # critic #3：AI 文字不得出現「已證實」「已驗證」（提示詞之外，程式也要擋）
+    case_id, _ = make_round(firm, evidence={"01_收據.txt": RECEIPT})
+    fake = FakeProvider({"evidence_notes": reply(("原證1", [
+        {**FOUND, "text": "收據已證實原告支出醫療費用"}, note("金額已驗證無誤", "支付醫療費用新臺幣45,000元")]))})
+    texts = [n["text"] for n in by_exhibit(generate(firm, case_id, fake, db))["原證1"]["notes"]]
+    assert texts == ["收據可佐證原告支出醫療費用", "金額可佐證無誤"]
 
 
 def test_deleted_notes_not_reprocessed(lawyer_client, db):
