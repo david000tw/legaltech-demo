@@ -58,7 +58,14 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
   return (
     <article className="space-y-2 rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-slate-900">{p.display_heading}</h3>
+        <h3 className="font-semibold text-slate-900">
+          {p.display_heading}
+          {p.source_notice && (
+            <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-normal text-amber-800">
+              {p.source_notice}
+            </span>
+          )}
+        </h3>
         <span className={`text-xs ${p.status === 'reviewed' ? 'text-emerald-700' : 'text-slate-500'}`}>
           {p.status === 'reviewed' ? `已審（${p.reviewed_bar_number ?? ''}）` : '未審'}
         </span>
@@ -183,6 +190,19 @@ export default function DraftEditor() {
     }
   }
 
+  // 卷證引用的原文是辨識文字：律師對照原圖後勾「已對照原圖」，再重新讀取草稿（阻擋原因）與原文卡片
+  async function verifySource(s: api.CitationSource) {
+    if (!s.page_id || s.version == null) return
+    setError(null)
+    try {
+      await api.verifyPage(s.page_id, s.version)
+      if (sourceCitationId) setSource(await api.getCitationSource(sourceCitationId))
+    } catch (e) {
+      setError((e as Error).message)
+    }
+    await load()
+  }
+
   async function confirmCourt(c: api.CitationView) {
     setError(null)
     try {
@@ -215,6 +235,11 @@ export default function DraftEditor() {
         </div>
       </div>
       {error && <p className="text-sm text-red-700">{error}</p>}
+      {(draft.unverified_ocr_pages ?? []).length > 0 && (
+        <p className="rounded bg-amber-50 p-2 text-sm text-amber-900">
+          {`本輪資料來源含未對照原圖的辨識文字（${(draft.unverified_ocr_pages ?? []).join('、')}）；日期、姓名、車號等內容請逐段核對原圖。`}
+        </p>
+      )}
       <div className="grid gap-4 lg:grid-cols-2">
         <aside className="rounded-lg border border-slate-200 bg-white lg:sticky lg:top-4 lg:max-h-[85vh] lg:overflow-auto">
           <div role="tablist" aria-label="左側內容" className="flex border-b border-slate-200 text-sm">
@@ -226,7 +251,8 @@ export default function DraftEditor() {
             ))}
           </div>
           {tab === 'source' && (
-            <SourcePane source={source} citation={sourceCitation} canReview={draft.can_review} onConfirmCourt={confirmCourt} />
+            <SourcePane source={source} citation={sourceCitation} canReview={draft.can_review} onConfirmCourt={confirmCourt}
+              onVerify={verifySource} />
           )}
           {tab === 'notes' && (
             <div className="p-3"><EvidenceNotesSection caseId={draft.case_id} compact onShowSource={showPageSource} /></div>

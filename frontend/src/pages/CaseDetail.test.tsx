@@ -307,7 +307,7 @@ describe('CaseDetail header and parties', () => {
       rounds: [{ id: 'r1', seq: 1, status: 'created', error: null }] })
     vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'created', stale: false, brief_kind: 'preparatory', failed_stage: null, draft_id: null,
       error: null, claims: [] })
-    vi.mocked(api.uploadDocument).mockResolvedValue({ id: 'd9', page_count: 1 })
+    vi.mocked(api.uploadDocuments).mockResolvedValue({ id: 'd9', page_count: 1 })
     renderAt()
     await openTab('書狀')
     const filer = await screen.findByLabelText('遞狀人')
@@ -316,7 +316,7 @@ describe('CaseDetail header and parties', () => {
     await userEvent.selectOptions(filer, 'pt3')
     const file = new File(['被告主張原告請求無理由等語。'], '答辯狀.txt', { type: 'text/plain' })
     await userEvent.upload(screen.getByLabelText('上傳對造書狀'), file)
-    expect(api.uploadDocument).toHaveBeenCalledWith('c1', file, 'opponent_brief', 'r1', 'pt3')
+    expect(api.uploadDocuments).toHaveBeenCalledWith('c1', [file], 'opponent_brief', 'r1', 'pt3')
   })
 })
 
@@ -448,6 +448,52 @@ describe('CaseDetail brief filer and notices', () => {
     expect(api.draftRound).toHaveBeenCalledWith('r1')
   })
 
+  // ---- 計畫 2A Task 9：對造書狀的辨識、拆解前把關、主張出處 ----
+  it('disables extract with the blocking message from the round detail', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'created', error: null,
+      brief_kind: 'preparatory' }] })
+    vi.mocked(api.getRound).mockResolvedValue({ ...extracted, status: 'created', claims: [],
+      extract_blocked: '對造書狀第 3 頁尚未辨識，完成後才能拆解' })
+    renderAt()
+    await openTab('書狀')
+    expect(await screen.findByText('對造書狀第 3 頁尚未辨識，完成後才能拆解')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '拆解' })).toBeDisabled()
+    expect(screen.getByLabelText('上傳對造書狀')).toHaveAttribute('accept', '.pdf,.docx,.txt,.jpg,.jpeg,.png')
+  })
+
+  it('complaint extract asks to confirm when evidence pages are pending', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'created', error: null,
+      brief_kind: 'complaint' }] })
+    vi.mocked(api.getRound).mockResolvedValue({ ...extracted, status: 'created', brief_kind: 'complaint', claims: [],
+      narrative: '請求醫療費', pending_ocr_pages: ['原證3 第1頁', '原證4 第2頁'] })
+    vi.mocked(api.patchRound).mockResolvedValue({})
+    vi.mocked(api.extractRound).mockResolvedValue({ status: 'extracting' })
+    const ask = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    renderAt()
+    await openTab('書狀')
+    await userEvent.click(await screen.findByRole('button', { name: '拆解' }))
+    expect(ask).toHaveBeenCalledWith('卷證原證3 第1頁、原證4 第2頁尚未辨識，請求項目可能不完整，要先拆解嗎？')
+    expect(api.extractRound).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '拆解' }))
+    await waitFor(() => expect(api.extractRound).toHaveBeenCalledWith('r1'))
+    ask.mockRestore()
+  })
+
+  it('opponent claims from unverified OCR pages show the tag and open the image', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null }] })
+    vi.mocked(api.getRound).mockResolvedValue({ ...extracted, claims: [
+      { ...extracted.claims[0], page_id: 'p9', ocr_unverified: true }, extracted.claims[1]] })
+    vi.mocked(api.getPageOcr).mockResolvedValue({ page_id: 'p9', document_id: 'd9', label: '對造書狀「答辯狀.pdf」第1頁',
+      ocr_state: 'done', ocr_error: null, text: '原告與有過失', version: 1, source: 'ai_ocr', needs_check: true,
+      verified: null, alerts: [], has_image: true, can_edit: true, can_verify: false, blank_unconfirmed: false })
+    renderAt()
+    await openTab('書狀')
+    expect(await screen.findByText('辨識文字，未對照原圖')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '看原圖' }))
+    expect(await screen.findByRole('img', { name: '對造書狀「答辯狀.pdf」第1頁 原圖' })).toBeInTheDocument()
+    expect(api.getPageOcr).toHaveBeenCalledWith('p9')
+  })
+
   // ---- 子專案甲 Task 8：書狀種類、起訴狀請求項目、重新起草 ----
   const complaintRound: api.RoundDetail = { ...extracted, brief_kind: 'complaint', can_review: true,
     narrative: '請求醫療費與慰撫金', joint_liability: false, provisional_execution: true, claim_value: null,
@@ -524,7 +570,8 @@ describe('CaseDetail brief filer and notices', () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase,
       rounds: [{ id: 'r1', seq: 1, status: 'created', error: null, brief_kind: 'complaint', failed_stage: null,
         copied_from_seq: null }] })
-    vi.mocked(api.getRound).mockResolvedValue({ ...complaintRound, status: 'created', narrative: null, claims: [] })
+    vi.mocked(api.getRound).mockResolvedValue({ ...complaintRound, status: 'created', narrative: null, claims: [],
+      pending_ocr_pages: [] })  // 卷證都辨識完（有待辨識頁時會先問律師，另有測試）
     vi.mocked(api.patchRound).mockResolvedValue({})
     vi.mocked(api.extractRound).mockResolvedValue({ status: 'extracting' })
     renderAt()

@@ -33,6 +33,15 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
   amount_unverified: (a) => `金額未對到請求項目或卷證：${Number(a).toLocaleString('en-US')}元`,
   amount_marker_misplaced: () => '系統金額標記只能用在起訴狀的訴之聲明',
   claim_value_missing: () => '請填寫訴訟標的金額或價額',
+  // 計畫 2A：寫進書狀的辨識文字要先對照原圖
+  image_unverified: (a) => `${a} 的頁尚未對照原圖`,
+  quote_unreadable: () => '引文含看不清楚的字，請先修正辨識文字',
+  inline_quote_image_unverified: (a) => `引文「${a}…」出自未對照原圖的對造書狀頁`,
+  amount_image_unverified: (a) => {
+    const i = a.indexOf(':')
+    const n = i < 0 ? a : a.slice(0, i)
+    return `金額 ${Number(n).toLocaleString('en-US')} 出自未對照原圖的辨識文字（${i < 0 ? '' : a.slice(i + 1)}）`
+  },
 }
 
 // 阻擋原因的位置：聲明與整份書狀沒有段落編號

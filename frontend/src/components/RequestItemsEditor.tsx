@@ -2,6 +2,7 @@
 // 金額一旦修改就要重新確認；訴之聲明的金額由系統依確認過的項目加總，AI 不寫金額。
 import { useState, type FocusEvent } from 'react'
 import * as api from '../api'
+import { OCR_TAG } from './SourceBadge'
 
 const NOTE_LABEL: Record<string, string> = {
   amount_not_in_evidence: '金額未在卷證中找到',
@@ -14,8 +15,9 @@ function money(n: number | null | undefined): string {
   return n == null ? '' : `新臺幣${n.toLocaleString('en-US')}元`
 }
 
-function ItemRow({ item, canReview, act }: {
+function ItemRow({ item, canReview, act, onOpenPage }: {
   item: api.ClaimView; canReview: boolean; act: (f: () => Promise<unknown>) => Promise<void>
+  onOpenPage?: (pageId: string) => void
 }) {
   const [label, setLabel] = useState(item.summary)
   const [type, setType] = useState(item.request_type ?? 'monetary')
@@ -57,7 +59,16 @@ function ItemRow({ item, canReview, act }: {
           {item.confirmed ? '已確認' : '待確認'}
         </span>
         {canReview && !item.confirmed && !changed && (
-          <button type="button" aria-label={`確認 ${name}`} onClick={() => act(() => api.confirmClaim(item.id))}
+          <button type="button" aria-label={`確認 ${name}`} onClick={() => act(async () => {
+            try {
+              await api.confirmClaim(item.id)
+            } catch (e) {
+              // 依據是還沒對照原圖的辨識文字：顯示訊息並打開第一頁的對照面板
+              const first = (item.evidence ?? []).find((ev) => ev.found && ev.ocr_unverified && ev.page_id)
+              if (e instanceof api.ApiError && e.code === 'image_unverified' && first?.page_id) onOpenPage?.(first.page_id)
+              throw e
+            }
+          })}
             className="rounded bg-emerald-600 px-2 py-0.5 text-xs text-white">確認</button>
         )}
         <button type="button" aria-label={`刪除 ${name}`} onClick={() => act(() => api.deleteClaim(item.id))}
@@ -70,14 +81,24 @@ function ItemRow({ item, canReview, act }: {
             ? <span className="text-slate-700">{`原文出處：${e.exhibit} 第${e.page_no}頁`}</span>
             : <span className="text-red-700">未找到原文</span>}
           ：「{e.quote}」
+          {e.ocr_unverified && e.page_id && (
+            <>
+              <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">{OCR_TAG}</span>
+              {onOpenPage && (
+                <button type="button" onClick={() => onOpenPage(e.page_id as string)}
+                  className="ml-1 rounded border border-slate-300 px-1.5 py-0.5 text-slate-700">對照原圖</button>
+              )}
+            </>
+          )}
         </p>
       ))}
     </li>
   )
 }
 
-export default function RequestItemsEditor({ round, onChanged, onError }: {
+export default function RequestItemsEditor({ round, onChanged, onError, onOpenPage }: {
   round: api.RoundDetail; onChanged: () => Promise<void>; onError: (m: string | null) => void
+  onOpenPage?: (pageId: string) => void  // 打開對照原圖面板（計畫 2A）
 }) {
   const [label, setLabel] = useState('')
   const [type, setType] = useState<'monetary' | 'non_monetary'>('monetary')
@@ -107,7 +128,7 @@ export default function RequestItemsEditor({ round, onChanged, onError }: {
       <ul className="divide-y divide-slate-100">
         {items.map((it) => (
           <ItemRow key={`${it.id}-${it.amount}-${it.summary}-${it.confirmed}`} item={it} canReview={!!round.can_review}
-            act={act} />
+            act={act} onOpenPage={onOpenPage} />
         ))}
       </ul>
       <div className="flex flex-wrap items-center gap-2">

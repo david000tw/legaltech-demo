@@ -9,6 +9,20 @@ const src = (over: Partial<SourceView>): SourceView => ({
 })
 
 describe('SourceBadge', () => {
+  it('marks unverified OCR sources in notes and timeline', () => {
+    const { unmount } = render(<SourceBadge source={src({ ocr_unverified: true })} origin="ai" lawyerLabel="律師修改" />)
+    expect(screen.getByText('辨識文字，未對照原圖')).toBeInTheDocument()
+    unmount()
+    const nf = render(<SourceBadge source={src({ ocr_unverified: true, status: 'not_found', reasons: ['quote_not_found'] })}
+      origin="ai" lawyerLabel="律師修改" />)
+    expect(screen.getByText('辨識文字，未對照原圖')).toBeInTheDocument()
+    nf.unmount()
+    render(<SourceBadge source={src({ ocr_unverified: true })} origin="lawyer" lawyerLabel="律師" />)
+    expect(screen.getByText('辨識文字，未對照原圖')).toBeInTheDocument()
+    render(<SourceBadge source={src({ ocr_unverified: false })} origin="ai" lawyerLabel="律師修改" />)
+    expect(screen.getAllByText('辨識文字，未對照原圖')).toHaveLength(1)
+  })
+
   it('shows found / not found / absence with their colours', () => {
     const { container, unmount } = render(<SourceBadge source={src({})} origin="ai" lawyerLabel="律師修改" />)
     expect(screen.getByText('原文出處：原證3 第1頁').className).toMatch(/text-slate-700/)

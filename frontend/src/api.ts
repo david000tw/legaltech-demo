@@ -79,7 +79,8 @@ export type CaseDetail = CaseSummary & { header: CaseHeader; parties: Party[]; p
 // 新步驟（卷證說明、大事記、健檢）的原文出處（設計 5.1）：label 讀取時才算（證物可以改號）
 // status：found＝摘錄在那一頁；not_found＝沒過（reasons 說明哪一項）；absence＝缺漏類；unchecked＝律師填的，不比對
 export type SourceView = { page_id: string | null; label: string | null; quote: string
-  status: 'found' | 'not_found' | 'absence' | 'unchecked'; reasons: string[] }
+  status: 'found' | 'not_found' | 'absence' | 'unchecked'; reasons: string[]
+  ocr_unverified?: boolean }  // 出處是還沒對照原圖的辨識文字（計畫 2A）
 // 按鈕觸發的 AI 工作；stale＝心跳逾時，可以重新執行
 export type JobView = { id: string; status: 'running' | 'done' | 'failed'; error: string | null; started_at: string
   stale: boolean }
@@ -109,19 +110,22 @@ export type RoundStatus = 'created' | 'extracting' | 'extracted' | 'drafting' | 
 // AI 想引用、但沒用候選代碼填的項目（設計 5.7）：mapped＝系統對回；ambiguous_passage＝對到判決但段落不確定；unmatched＝不在候選清單
 export type ReferenceView = { text: string; status: 'mapped' | 'ambiguous_passage' | 'unmatched'; code: string | null }
 // 起訴狀的請求項目（kind＝request）另有金額、確認狀態與佐證原文；evidence.found＝原文在那一頁找得到
-export type RequestEvidence = { exhibit: string; page_no: number | null; quote: string; found: boolean }
+export type RequestEvidence = { exhibit: string; page_no: number | null; quote: string; found: boolean
+  page_id?: string | null; ocr_unverified?: boolean }
 export type ClaimView = { id: string; seq: number; kind: 'opponent_claim' | 'request'; selected: boolean
   summary: string; quote: string; quote_verified: boolean; page_no: number | null; references?: ReferenceView[]
   request_type?: 'monetary' | 'non_monetary'; amount?: number | null
   amount_note?: 'amount_not_in_evidence' | 'no_receipt' | 'amount_missing' | null; basis_text?: string | null
-  confirmed?: boolean; evidence?: RequestEvidence[] }
+  confirmed?: boolean; evidence?: RequestEvidence[]
+  page_id?: string | null; ocr_unverified?: boolean }  // 出處頁；ocr_unverified＝辨識文字、還沒對照原圖
 export type BriefKind = 'complaint' | 'answer' | 'preparatory'
 export type RoundDetail = { id: string; seq: number; status: RoundStatus; error: string | null; stale: boolean;
   brief_kind: BriefKind; failed_stage: 'extract' | 'draft' | null; draft_id: string | null; claims: ClaimView[]
   can_review?: boolean; narrative?: string | null; joint_liability?: boolean; provisional_execution?: boolean
   claim_value?: number | null; statement_variant?: 'alive' | 'deceased' | null; total_amount?: number
   statement_preview?: string | null; pending_ocr_pages?: string[]
-  health_job?: JobView | null }  // 書狀健檢的 AI 工作（設計 5.8）
+  health_job?: JobView | null  // 書狀健檢的 AI 工作（設計 5.8）
+  extract_blocked?: string | null }  // 對造書狀還沒辨識完等：「拆解」停用並顯示這段話
 export type RoundSettings = { narrative?: string | null; joint_liability?: boolean; provisional_execution?: boolean
   claim_value?: number | null; statement_variant?: 'alive' | 'deceased' | null }
 export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgment' | 'statute'; quote: string;
@@ -132,7 +136,8 @@ export type ParagraphView = { id: string; seq: number; kind?: 'body' | 'statemen
   display_heading: string; heading_text: string;
   text: string; rendered_text: string;
   version: string; status: 'unreviewed' | 'reviewed'; verify_reasons: string[]; reviewed_bar_number: string | null;
-  reviewed_at: string | null; citations: CitationView[] }
+  reviewed_at: string | null; citations: CitationView[]
+  source_notice?: string | null }  // 例：「依據頁已修正」
 // brief_title：依程序的書狀名稱（民事／家事準備書狀）；procedure_warning：案號與案型程序不一致時的提醒（不阻擋匯出）
 export type DraftView = { id: string; round_id: string; case_id: string; case_title: string; can_review: boolean
   brief_title: string
@@ -141,9 +146,12 @@ export type DraftView = { id: string; round_id: string; case_id: string; case_ti
   brief_kind?: BriefKind; case_type?: string; statement?: ParagraphView | null; statement_label?: string | null
   body_label?: string | null
   // 起訴狀狀頭的訴訟標的金額（有金錢請求，預設＝請求項目加總）或價額（只有非金錢請求，要律師填）；其他書狀為 null
-  claim_value?: { label: string; value: number | null } | null }
+  claim_value?: { label: string; value: number | null } | null
+  unverified_ocr_pages?: string[] }  // 本輪資料來源中還沒對照原圖的辨識頁
 export type CitationSource = { kind: string; title: string; text: string; span: [number, number] | null
-  annotation?: string | null }
+  annotation?: string | null
+  // 卷證引用（計畫 2A）：原文卡片並排原圖；needs_check＝辨識文字、律師要對照後才能標記已審
+  page_id?: string; has_image?: boolean; needs_check?: boolean; version?: number }
 export type CitationInput = { code: string; quote: string }
 
 async function detail(r: Response): Promise<{ message: string; code?: string }> {

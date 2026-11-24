@@ -12,6 +12,11 @@ export const SOURCE_REASON_LABEL: Record<string, string> = {
 export const reasonsText = (reasons: string[]) =>
   reasons.length ? reasons.map((r) => SOURCE_REASON_LABEL[r] ?? r).join('、') : '未找到原文'
 
+// 出處是還沒對照原圖的辨識文字（計畫 2A）
+export const OCR_TAG = '辨識文字，未對照原圖'
+const ocrTag = (s: SourceView | null) => s?.ocr_unverified
+  ? <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">{OCR_TAG}</span> : null
+
 export default function SourceBadge({ source, origin, lawyerLabel, onShow }: {
   source: SourceView | null
   origin: 'ai' | 'lawyer'
@@ -24,6 +29,7 @@ export default function SourceBadge({ source, origin, lawyerLabel, onShow }: {
       <span className="inline-flex flex-wrap items-center gap-1 text-xs">
         <span className="rounded bg-slate-200 px-1.5 py-0.5 text-slate-700">{lawyerLabel}</span>
         {source?.label && <span className="text-slate-500">出處：{source.label}</span>}
+        {ocrTag(source)}
       </span>
     )
   }
@@ -39,6 +45,7 @@ export default function SourceBadge({ source, origin, lawyerLabel, onShow }: {
           <button type="button" onClick={() => onShow(source)} className="text-slate-700 underline">{text}</button>
         ) : <span className="text-slate-700">{text}</span>}
         {source.quote && <span className="text-slate-500">「{source.quote}」</span>}
+        {ocrTag(source)}
       </span>
     )
   }
@@ -46,6 +53,7 @@ export default function SourceBadge({ source, origin, lawyerLabel, onShow }: {
     <span className="inline-flex flex-wrap items-center gap-1 text-xs">
       <span className="text-red-700">{reasonsText(source.reasons)}</span>
       {source.label && <span className="text-slate-500">（{source.label}）</span>}
+      {ocrTag(source)}
     </span>
   )
 }

@@ -17,6 +17,7 @@ import RequestItemsEditor from '../components/RequestItemsEditor'
 import SourcePane from '../components/SourcePane'
 import TimelineSection from '../components/TimelineSection'
 import { KIND_LABEL, UPLOAD_ACCEPT, UPLOAD_HINT } from '../labels'
+import { OCR_TAG } from '../components/SourceBadge'
 import { useMe } from '../MeContext'
 import { confirmOcr } from '../ocrConfirm'
 import { BTN_PRIMARY, BTN_SECONDARY, BTN_SMALL, CARD } from '../ui'
@@ -39,6 +40,7 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
   const [deceased, setDeceased] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [checkPage, setCheckPage] = useState<string | null>(null)  // 輪次卡片內的對照原圖面板（計畫 2A）
   const fileRef = useRef<HTMLInputElement>(null)
   // 遞狀人只能是對造或立場相同者；只有一位對造時預設是他，好幾位時預設未指定（避免張冠李戴）
   const filers = parties.filter((p) => p.alignment !== 'ours')
@@ -67,14 +69,21 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
 
   useEffect(() => { if (status === 'drafted' || status === 'failed') onChanged() }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 辨識狀態變了：案件（對造書狀的頁）與輪次（拆解前把關）都要重新讀
+  const ocrChanged = useCallback(async () => {
+    onChanged()
+    await refresh()
+  }, [onChanged, refresh])
+
   async function upload() {
-    const file = fileRef.current?.files?.[0]
-    if (!file) return
+    const files = Array.from(fileRef.current?.files ?? [])
+    if (files.length === 0) return
     setBusy(true)
     setMessage(null)
     try {
-      await api.uploadDocument(caseId, file, 'opponent_brief', round.id, filer || undefined)
-      onChanged()
+      // 多張照片合成一份對造書狀；掃描頁會自動辨識
+      await api.uploadDocuments(caseId, files, 'opponent_brief', round.id, filer || undefined)
+      await ocrChanged()
     } catch (e) {
       setMessage((e as Error).message)
     } finally {
@@ -113,7 +122,11 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
   const provisionalValue = provisional ?? detail?.provisional_execution ?? true
   const deceasedValue = deceased ?? detail?.statement_variant === 'deceased'
   // 起訴狀：先存案情說明與聲明設定，再拆解（AI 依案情說明與卷證整理請求項目）
+  const pendingEvidence = detail?.pending_ocr_pages ?? []
   const extract = () => act(async () => {
+    // 起訴狀：卷證還有頁沒辨識完，AI 整理的請求項目可能不完整，先問律師
+    if (complaint && pendingEvidence.length > 0
+      && !window.confirm(`卷證${pendingEvidence.join('、')}尚未辨識，請求項目可能不完整，要先拆解嗎？`)) return
     if (complaint) {
       await api.patchRound(round.id, { narrative: narrativeText, joint_liability: jointValue,
         provisional_execution: provisionalValue,
@@ -215,6 +228,7 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
                 <span>{d.filename}：{d.filed_by_party_id && byId.get(d.filed_by_party_id)
                   ? `遞狀人 ${partyLabel(byId.get(d.filed_by_party_id)!)}` : '遞狀人未指定'}</span>
               )}
+              <OcrStatus doc={d} onChanged={ocrChanged} onOpenPage={setCheckPage} />
             </li>
           ))}
         </ul>
@@ -269,14 +283,17 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
           )}
           <label className="text-sm text-slate-700">
             上傳對造書狀
-            <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" className="ml-2 text-sm" onChange={upload} disabled={busy} />
+            <input ref={fileRef} type="file" accept={UPLOAD_ACCEPT} multiple className="ml-2 text-sm" onChange={upload}
+              disabled={busy} />
           </label>
           {!(status === 'extracting' && stale) && (
-            <button type="button" onClick={extract} disabled={busy}
+            <button type="button" onClick={extract} disabled={busy || !!detail?.extract_blocked}
               className={BTN_SECONDARY}>
               拆解
             </button>
           )}
+          {detail?.extract_blocked && <span className="text-xs text-amber-700">{detail.extract_blocked}</span>}
+          <span className="w-full text-xs text-slate-500">{UPLOAD_HINT}</span>
         </div>
       )}
       {(status === 'extracted' || (status === 'failed' && failedStage === 'draft')) && (
@@ -294,7 +311,15 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
         </div>
       )}
       {status === 'extracted' && complaint && detail && (
-        <RequestItemsEditor round={detail} onChanged={refresh} onError={setMessage} />
+        <RequestItemsEditor round={detail} onChanged={refresh} onError={setMessage} onOpenPage={setCheckPage} />
+      )}
+      {checkPage && (
+        <div className="mt-3 space-y-2 rounded border border-slate-200 p-3">
+          <div className="flex justify-end">
+            <button type="button" className={BTN_SMALL} onClick={() => setCheckPage(null)}>關閉</button>
+          </div>
+          <PageCheckPanel key={checkPage} pageId={checkPage} canReview={!!detail?.can_review} onChanged={ocrChanged} />
+        </div>
       )}
       {status === 'drafted' && detail?.draft_id && (
         <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -315,6 +340,13 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
               )}
               主張{c.seq}：{c.summary}
               {!c.quote_verified && <span className="ml-1 text-red-600">（原文對不上）</span>}
+              {c.ocr_unverified && c.page_id && (
+                <>
+                  <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">{OCR_TAG}</span>
+                  <button type="button" onClick={() => setCheckPage(c.page_id as string)}
+                    className="ml-1 rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700">看原圖</button>
+                </>
+              )}
               {(c.references ?? []).length > 0 && (
                 <ul className="ml-4 list-disc text-xs">
                   {(c.references ?? []).map((r, i) => (

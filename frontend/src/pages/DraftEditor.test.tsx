@@ -11,7 +11,7 @@ vi.mock('../api', async (orig) => {
   return { ...real, getDraft: vi.fn(), getCitationSource: vi.fn(), confirmCitation: vi.fn(), confirmCourt: vi.fn(), reviewParagraph: vi.fn(),
     patchParagraph: vi.fn(), rewriteParagraph: vi.fn(), exportDraft: vi.fn(), confirmAmount: vi.fn(),
     ackAmounts: vi.fn(), patchRound: vi.fn(), getEvidenceNotes: vi.fn(), getTimeline: vi.fn(), getPageSource: vi.fn(),
-    listPins: vi.fn(), insertPin: vi.fn() }
+    listPins: vi.fn(), insertPin: vi.fn(), verifyPage: vi.fn() }
 })
 
 const draft: api.DraftView = {
@@ -42,6 +42,63 @@ describe('DraftEditor', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     vi.mocked(api.getDraft).mockResolvedValue(draft)
+  })
+
+  it('draft shows unverified OCR banner and source notice', async () => {
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft, unverified_ocr_pages: ['原證2 第1頁', '對造書狀「答辯狀.pdf」第2頁'],
+      paragraphs: [{ ...draft.paragraphs[0], source_notice: '依據頁已修正' }] })
+    renderEditor()
+    expect(await screen.findByText(
+      '本輪資料來源含未對照原圖的辨識文字（原證2 第1頁、對造書狀「答辯狀.pdf」第2頁）；日期、姓名、車號等內容請逐段核對原圖。',
+    )).toBeInTheDocument()
+    expect(screen.getByText('依據頁已修正').className).toMatch(/amber/)
+  })
+
+  it('no banner when every OCR page is checked', async () => {
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft, unverified_ocr_pages: [] })
+    renderEditor()
+    await screen.findByText(/未在適當位置暫停禮讓幹線道之系爭車輛」。/)
+    expect(screen.queryByText(/本輪資料來源含未對照原圖的辨識文字/)).not.toBeInTheDocument()
+  })
+
+  it('evidence citation shows page image and lawyer can verify', async () => {
+    const ev: api.CitationView = { id: 'ce2', code: 'E2', kind: 'evidence', quote: '診斷證明書：右腕骨折，宜休養四週',
+      label: '原證2', verify_status: 'ok', verify_reasons: [], lawyer_confirmed: false, court_confirmed: false }
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft, blockers: [{ paragraph_seq: 1, reason: 'image_unverified:E2' }],
+      paragraphs: [{ ...draft.paragraphs[0], text: '按{{cite:E2}}。', citations: [ev] }] })
+    const source: api.CitationSource = { kind: 'evidence', title: '原證2 第1頁（掃描.pdf）',
+      text: '診斷證明書：右腕骨折，宜休養四週，需專人照護兩週', span: [0, 16], page_id: 'p2', has_image: true,
+      needs_check: true, version: 1 }
+    vi.mocked(api.getCitationSource).mockResolvedValueOnce(source).mockResolvedValue({ ...source, needs_check: false })
+    vi.mocked(api.verifyPage).mockResolvedValue({ page_id: 'p2', document_id: 'd2', label: '原證2 第1頁',
+      ocr_state: 'done', ocr_error: null, text: source.text, version: 1, source: 'ai_ocr', needs_check: false,
+      verified: { by_name: '王律師', at: null }, alerts: [], has_image: true, can_edit: true, can_verify: false,
+      blank_unconfirmed: false })
+    renderEditor()
+    expect(await screen.findByText('第 1 段：E2 的頁尚未對照原圖')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /E2/ }))
+    const pane = await screen.findByTestId('source-pane')
+    expect(within(pane).getByRole('img', { name: '原證2 第1頁（掃描.pdf） 原圖' })).toHaveAttribute('src', '/api/pages/p2/image')
+    expect(within(pane).getByText('辨識文字，未對照原圖')).toBeInTheDocument()
+    const before = vi.mocked(api.getDraft).mock.calls.length
+    await userEvent.click(within(pane).getByRole('button', { name: '已對照原圖' }))
+    expect(api.verifyPage).toHaveBeenCalledWith('p2', 1)
+    await waitFor(() => expect(vi.mocked(api.getDraft).mock.calls.length).toBe(before + 1))
+    await waitFor(() => expect(within(pane).queryByRole('button', { name: '已對照原圖' })).not.toBeInTheDocument())
+  })
+
+  it('assistants see the image but no verify button', async () => {
+    const ev: api.CitationView = { id: 'ce2', code: 'E2', kind: 'evidence', quote: '診斷證明書：右腕骨折，宜休養四週',
+      label: '原證2', verify_status: 'ok', verify_reasons: [], lawyer_confirmed: false, court_confirmed: false }
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft, can_review: false,
+      paragraphs: [{ ...draft.paragraphs[0], text: '按{{cite:E2}}。', citations: [ev] }] })
+    vi.mocked(api.getCitationSource).mockResolvedValue({ kind: 'evidence', title: '原證2 第1頁（掃描.pdf）',
+      text: '診斷證明書', span: null, page_id: 'p2', has_image: true, needs_check: true, version: 1 })
+    renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: /E2/ }))
+    const pane = await screen.findByTestId('source-pane')
+    expect(within(pane).getByRole('img')).toBeInTheDocument()
+    expect(within(pane).queryByRole('button', { name: '已對照原圖' })).not.toBeInTheDocument()
   })
 
   it('shows rendered paragraphs and the source of a clicked citation', async () => {

@@ -1,10 +1,12 @@
-import type { CitationSource, CitationView } from '../api'
+import { pageImageUrl, type CitationSource, type CitationView } from '../api'
+import { OCR_TAG } from './SourceBadge'
 
-export default function SourcePane({ source, citation, canReview = false, onConfirmCourt }: {
+export default function SourcePane({ source, citation, canReview = false, onConfirmCourt, onVerify }: {
   source: CitationSource | null
   citation?: CitationView | null
   canReview?: boolean
   onConfirmCourt?: (c: CitationView) => void
+  onVerify?: (s: CitationSource) => void  // 律師對照原圖後勾「已對照原圖」（計畫 2A）
 }) {
   if (!source) {
     return <div data-testid="source-pane" className="p-4 text-sm text-slate-500">點選引用，這裡會顯示原文並標出被引用的段落。</div>
@@ -13,6 +15,19 @@ export default function SourcePane({ source, citation, canReview = false, onConf
   return (
     <div data-testid="source-pane" className="space-y-2 p-4">
       <h3 className="font-semibold text-slate-800">{source.title}</h3>
+      {source.needs_check && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">{OCR_TAG}</span>
+          {canReview && onVerify && (
+            <button type="button" onClick={() => onVerify(source)}
+              className="rounded border border-amber-400 bg-white px-2 py-0.5 text-amber-900">已對照原圖</button>
+          )}
+        </div>
+      )}
+      {source.has_image && source.page_id && (
+        <img src={pageImageUrl(source.page_id)} alt={`${source.title} 原圖`}
+          className="w-full rounded border border-slate-200" />
+      )}
       {source.annotation && (
         <p className="rounded border border-purple-300 bg-purple-50 p-2 text-xs text-purple-900">{source.annotation}</p>
       )}
