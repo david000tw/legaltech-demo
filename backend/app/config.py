@@ -17,8 +17,12 @@ class Settings(BaseSettings):
     claude_cmd: list[str] = ["claude"]
     ai_model: str = "opus"
     ocr_model: str = "opus"  # 辨識固定用 Opus（比較測試：Sonnet 會偷改原文）
-    # 校對員（PaddleOCR 指令工具）：JSON 陣列，例 ["...\.venv\Scripts\python.exe", "...\paddle_proofread.py"]；
-    # 空的＝沒有校對員，每頁加「校對員未執行」。dev.ps1 會在已安裝時自動設定 PADDLE_CMD。
+    # 辨識要不要讓校對員（PaddleOCR）再讀一次比對（設計 5.1）。預設 False＝只用 AI：
+    # 2026-11-25 使用者依設計 10.15 決定改回只用 AI（驗收每頁平均黃色提醒 2.43 則，超過門檻 2）。
+    # True 時才用到 paddle_cmd；那時 paddle_cmd 空的＝沒有校對員，每頁加「校對員未執行」。
+    ocr_proofread: bool = False
+    # 校對員（PaddleOCR 指令工具）：JSON 陣列，例 ["...\.venv\Scripts\python.exe", "...\paddle_proofread.py"]。
+    # dev.ps1 會在已安裝時自動設定 PADDLE_CMD；ocr_proofread 為 False 時不會執行。
     paddle_cmd: list[str] = []
     paddle_timeout_s: int = 900
     bind_host: str = "127.0.0.1"

@@ -206,6 +206,14 @@ def _mark_failed(s: Session, page_id: UUID, error: str) -> None:
         page.ocr_state, page.ocr_error = "failed", error[:1000]
 
 
+def _finish_unproofed(s: Session, page_ids: list[UUID]) -> None:
+    """只用 AI（設定 ocr_proofread=False）：讀完的頁直接完成，不加「校對員未執行」（提醒在存 AI 文字時已算好）。"""
+    for page_id in page_ids:
+        page = _lock_page(s, page_id)
+        if page.ocr_state == "read":
+            page.ocr_state = "done"
+
+
 def _save_proofs(s: Session, proofs: dict[UUID, list[dict] | None]) -> None:
     """校對結果寫在該頁「目前」的文字版本上（讀完後若已有人修正，比對的是修正後的文字）。"""
     for page_id, cells in proofs.items():
@@ -242,9 +250,18 @@ def _run_batch(job: AIJob, ctx, settings, storage: LocalStorage, batch: list[tup
     tmp = Path(tempfile.mkdtemp(prefix="ocr-"))
     proc = None
     read: list[UUID] = []
+    proofread = settings.ocr_proofread  # False＝只用 AI（設計 5.1 備案），不啟動校對員
+
+    def stop_unproofed(s: Session) -> None:
+        if proofread:  # 有校對員的模式：沒拿到校對結果的頁直接完成並標「校對員未執行」
+            _save_proofs(s, {pid: None for pid in read})
+        else:
+            _finish_unproofed(s, read)
+
     try:
         items = _batch_images(ctx.firm_id, storage, batch, tmp, ctx)
-        proc = start_proofreader(settings.paddle_cmd, [i[4] for i in items], tmp / "proof.json")
+        if proofread:
+            proc = start_proofreader(settings.paddle_cmd, [i[4] for i in items], tmp / "proof.json")
         for page_id, _, state, png, _ in items:
             if state == "read":
                 read.append(page_id)
@@ -256,13 +273,17 @@ def _run_batch(job: AIJob, ctx, settings, storage: LocalStorage, batch: list[tup
                 if e.kind in FATAL_KINDS:
                     # 整份停下：本批已讀完的頁直接完成（沒有校對），律師照常可以對照
                     kill_proofreader(proc)
-                    ctx.write(lambda s: _save_proofs(s, {pid: None for pid in read}))
+                    ctx.write(stop_unproofed)
                     raise
                 ctx.write(lambda s, pid=page_id, err=f"{e.kind}: {e.message}": _mark_failed(s, pid, err))
                 continue
             text = str(result.data.get("text") or "")
             ctx.write(lambda s, pid=page_id, t=text: _save_read(s, pid, t))
             read.append(page_id)
+        if not proofread:
+            ctx.write(stop_unproofed)
+            ctx.beat()
+            return
         index = {i[0]: n for n, i in enumerate(items)}
         if proc is None and settings.paddle_cmd and read:
             # 開始時校對員被別份文件占用：AI 讀完後等名額（期間更新心跳），不要直接略過校對

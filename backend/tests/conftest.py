@@ -25,6 +25,8 @@ def make_settings(tmp_path: Path, **overrides) -> Settings:
         storage_dir=tmp_path / "storage",
         session_secret="test-secret",
         paddle_cmd=[],  # 測試一律不跑真的校對員，不受環境變數 PADDLE_CMD 影響
+        # 既有的辨識測試測的是「AI 讀、校對員比對」模式（產品預設已改成只用 AI）；只用 AI 的測試明確傳 False
+        ocr_proofread=True,
     )
     values.update(overrides)
     return Settings(**values)

@@ -141,10 +141,11 @@ def get_page_ocr(page_id: UUID, m: CurrentMember = Depends(current_member)) -> d
 
 
 @router.put("/pages/{page_id}/text")
-def put_page_text(page_id: UUID, body: TextBody, m: CurrentMember = Depends(current_member)) -> dict:
+def put_page_text(page_id: UUID, body: TextBody, request: Request, m: CurrentMember = Depends(current_member)) -> dict:
     """修正辨識文字或手動輸入；律師可以同時標為已對照原圖。"""
+    proofread = request.app.state.settings.ocr_proofread
     return _page_action(m, page_id, lambda s: save_page_text(s, page_id, body.text, m, base_version=body.base_version,
-                                                             verify=body.verify))
+                                                             verify=body.verify, proofread=proofread))
 
 
 @router.post("/pages/{page_id}/verify")

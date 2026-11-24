@@ -30,7 +30,8 @@ try {
     Pop-Location
 }
 
-# 校對員（PaddleOCR，計畫 2A）：已安裝就讓後端知道怎麼執行；沒裝也能辨識，只是每頁多一則「校對員未執行」
+# 校對員（PaddleOCR，計畫 2A）：2026-11-25 起預設只用 AI 辨識，校對員不執行（設定 OCR_PROOFREAD=true 才會用）。
+# 已安裝就讓後端知道怎麼執行，之後要恢復校對時不用再設定
 $paddle = "$root\tools\paddle"
 if (Test-Path "$paddle\.venv\Scripts\python.exe") {
     $env:PADDLE_CMD = ConvertTo-Json -Compress -InputObject @("$paddle\.venv\Scripts\python.exe", "$paddle\paddle_proofread.py")

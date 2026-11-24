@@ -79,8 +79,9 @@ def page_ocr_json(s: Session, page: Page, member: CurrentMember) -> dict:
 
 
 def save_page_text(s: Session, page_id: UUID, text: str, member: CurrentMember, *, base_version: int | None,
-                   verify: bool) -> PageText:
-    """修正辨識文字或手動輸入（失敗頁沒有版本，base_version 傳 None）。新版本一律要對照原圖。"""
+                   verify: bool, proofread: bool = True) -> PageText:
+    """修正辨識文字或手動輸入（失敗頁沒有版本，base_version 傳 None）。新版本一律要對照原圖。
+    proofread＝設定 ocr_proofread；只用 AI 時，沒有校對結果不算「校對員未執行」。"""
     page = lock_page(s, page_id)
     if page.ocr_state == "none":
         raise OcrRuleError(422, NOT_EDITABLE)
@@ -91,7 +92,7 @@ def save_page_text(s: Session, page_id: UUID, text: str, member: CurrentMember, 
         raise PermissionError("限已驗證律師")
     pt = PageText(firm_id=page.firm_id, page_id=page_id, version=(old.version + 1) if old is not None else 1,
                   source="manual", text=text, needs_image_check=True, created_by=member.id,
-                  alerts=compute_alerts(text, page.proof, page.proof is not None))
+                  alerts=compute_alerts(text, page.proof, page.proof is not None or not proofread))
     if verify:
         pt.verified_against_image, pt.verified_by, pt.verified_at = True, member.id, _now()
     s.add(pt)
