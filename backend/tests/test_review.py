@@ -186,7 +186,8 @@ def test_cross_firm_routes_404(env, db):
         ex_id = s.scalars(select(Exhibit.id).where(Exhibit.document_id == env["exhibit_doc"])).one()
     for method, url in [("get", f"/api/cases/{case_id}"), ("get", f"/api/drafts/{env['draft_id']}"),
                         ("get", f"/api/citations/{cid}/source"), ("get", f"/api/pages/{page_id}"),
-                        ("post", f"/api/rounds/{round_id}/run"), ("post", f"/api/citations/{cid}/confirm"),
+                        ("post", f"/api/rounds/{round_id}/extract"), ("post", f"/api/rounds/{round_id}/draft"),
+                        ("post", f"/api/citations/{cid}/confirm"),
                         ("post", f"/api/paragraphs/{env['good']}/review"),
                         ("patch", f"/api/paragraphs/{env['good']}"), ("patch", f"/api/exhibits/{ex_id}"),
                         ("post", f"/api/drafts/{env['draft_id']}/export")]:

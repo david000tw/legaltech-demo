@@ -8,7 +8,8 @@ import CaseDetail from './CaseDetail'
 
 vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
-  return { ...real, getCase: vi.fn(), getRound: vi.fn(), createRound: vi.fn(), runRound: vi.fn(), uploadDocument: vi.fn(),
+  return { ...real, getCase: vi.fn(), getRound: vi.fn(), createRound: vi.fn(), extractRound: vi.fn(), draftRound: vi.fn(),
+    resetRound: vi.fn(), patchClaim: vi.fn(), uploadDocument: vi.fn(),
     renumberExhibit: vi.fn(), getCaseOptions: vi.fn(), patchCase: vi.fn(), putParties: vi.fn(), setDocumentFiler: vi.fn() }
 })
 
@@ -49,7 +50,7 @@ describe('CaseDetail', () => {
 
   it('lists exhibits with numbers and marks scanned pages as 待辨識', async () => {
     vi.mocked(api.getCase).mockResolvedValue(baseCase)
-    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'failed', stale: false, draft_id: null,
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'failed', stale: false, brief_kind: 'preparatory', failed_stage: null, draft_id: null,
       error: "usage_limit: You've hit your session limit", claims: [] })
     renderAt()
     expect(await screen.findByText('原證1')).toBeInTheDocument()
@@ -79,7 +80,7 @@ describe('CaseDetail', () => {
 
   it('links to the draft once the round is drafted', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'drafted', error: null }] })
-    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', stale: false, draft_id: 'dr1',
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', stale: false, brief_kind: 'preparatory', failed_stage: null, draft_id: 'dr1',
       error: null, claims: [] })
     renderAt()
     const link = await screen.findByRole('link', { name: '開啟草稿' })
@@ -90,8 +91,8 @@ describe('CaseDetail', () => {
 describe('CaseDetail references', () => {
   it('shows references the AI wanted but the system could not use', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'drafted', error: null }] })
-    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', stale: false, draft_id: 'dr1',
-      error: null, claims: [{ seq: 1, summary: '原告與有過失', quote: 'q', quote_verified: true, page_no: 1, references: [
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', stale: false, brief_kind: 'preparatory', failed_stage: null, draft_id: 'dr1',
+      error: null, claims: [{ id: 'k1', seq: 1, kind: 'opponent_claim', selected: true, summary: '原告與有過失', quote: 'q', quote_verified: true, page_no: 1, references: [
         { text: '民法第184條第1項前段', status: 'mapped', code: 'S1' },
         { text: '臺灣臺中地方法院113年度中簡字第3946號民事判決', status: 'ambiguous_passage', code: null },
         { text: '民法第1030條之1', status: 'unmatched', code: null },
@@ -173,7 +174,7 @@ describe('CaseDetail header and parties', () => {
   it('uploads an opponent brief with its filer', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: PARTIES,
       rounds: [{ id: 'r1', seq: 1, status: 'created', error: null }] })
-    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'created', stale: false, draft_id: null,
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'created', stale: false, brief_kind: 'preparatory', failed_stage: null, draft_id: null,
       error: null, claims: [] })
     vi.mocked(api.uploadDocument).mockResolvedValue({ id: 'd9', page_count: 1 })
     renderAt()
@@ -193,7 +194,7 @@ describe('CaseDetail brief filer and notices', () => {
   const created = [{ id: 'r1', seq: 1, status: 'created' as const, error: null }]
 
   beforeEach(() => {
-    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'created', stale: false, draft_id: null,
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'created', stale: false, brief_kind: 'preparatory', failed_stage: null, draft_id: null,
       error: null, claims: [] })
   })
 
@@ -224,7 +225,7 @@ describe('CaseDetail brief filer and notices', () => {
       filed_by_party_id: null, page_count: 2, pages: [] }
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: TWO_OPPOSING,
       rounds: [{ id: 'r1', seq: 1, status: 'drafted', error: null }], documents: [brief] })
-    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', stale: false, draft_id: 'dr1',
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', stale: false, brief_kind: 'preparatory', failed_stage: null, draft_id: 'dr1',
       error: null, claims: [] })
     renderAt()
     expect(await screen.findByText('答辯狀.txt：遞狀人未指定')).toBeInTheDocument()
@@ -244,5 +245,66 @@ describe('CaseDetail brief filer and notices', () => {
     await userEvent.click(screen.getByRole('button', { name: '儲存當事人' }))
     await waitFor(() => expect(screen.queryByText(/當事人沒有存成功/)).not.toBeInTheDocument())
     expect(screen.queryByText('案號太長')).not.toBeInTheDocument()
+  })
+
+  // ---- 子專案甲 Task 2：兩段式執行 ----
+  const extracted: api.RoundDetail = { id: 'r1', seq: 1, status: 'extracted', stale: false, draft_id: null, error: null,
+    brief_kind: 'preparatory', failed_stage: null,
+    claims: [
+      { id: 'k1', seq: 1, kind: 'opponent_claim', selected: true, summary: '原告與有過失', quote: 'q1', quote_verified: true, page_no: 1 },
+      { id: 'k2', seq: 2, kind: 'opponent_claim', selected: true, summary: '慰撫金過高', quote: 'q2', quote_verified: true, page_no: 2 },
+    ] }
+
+  it('shows checkboxes after extract and unticking calls patchClaim', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null }] })
+    vi.mocked(api.getRound).mockResolvedValueOnce(extracted)
+      .mockResolvedValue({ ...extracted, claims: [extracted.claims[0], { ...extracted.claims[1], selected: false }] })
+    vi.mocked(api.patchClaim).mockResolvedValue({ id: 'k2', selected: false })
+    renderAt()
+    const box = await screen.findByRole('checkbox', { name: '回應 主張2' })
+    expect(box).toBeChecked()
+    await userEvent.click(box)
+    expect(api.patchClaim).toHaveBeenCalledWith('k2', { selected: false })
+    expect(await screen.findByText('未勾選的 1 條主張不會被回應')).toBeInTheDocument()
+  })
+
+  it('drafts after extract', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null }] })
+    vi.mocked(api.getRound).mockResolvedValue(extracted)
+    vi.mocked(api.draftRound).mockResolvedValue({ status: 'drafting' })
+    renderAt()
+    await userEvent.click(await screen.findByRole('button', { name: '起草' }))
+    expect(api.draftRound).toHaveBeenCalledWith('r1')
+  })
+
+  it('reset asks for confirmation on confirm_reset', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null }] })
+    vi.mocked(api.getRound).mockResolvedValue(extracted)
+    vi.mocked(api.resetRound).mockRejectedValueOnce(new api.ApiError(409, '會清除勾選，確定要重新拆解嗎？', 'confirm_reset'))
+      .mockResolvedValue({ status: 'created' })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderAt()
+    await userEvent.click(await screen.findByRole('button', { name: '重新拆解' }))
+    await waitFor(() => expect(api.resetRound).toHaveBeenLastCalledWith('r1', true))
+    expect(confirm).toHaveBeenCalledWith('會清除勾選，確定要重新拆解嗎？')
+    confirm.mockRestore()
+  })
+
+  it('shows restart button when a stage is stale', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'drafting', error: null }] })
+    vi.mocked(api.getRound).mockResolvedValue({ ...extracted, status: 'drafting', stale: true })
+    vi.mocked(api.draftRound).mockResolvedValue({ status: 'drafting' })
+    renderAt()
+    await userEvent.click(await screen.findByRole('button', { name: '重新開始' }))
+    expect(api.draftRound).toHaveBeenCalledWith('r1')
+  })
+
+  it('retries the failed stage', async () => {
+    vi.mocked(api.getCase).mockResolvedValue(baseCase)
+    vi.mocked(api.getRound).mockResolvedValue({ ...extracted, status: 'failed', failed_stage: 'draft', error: 'timeout: slow' })
+    vi.mocked(api.draftRound).mockResolvedValue({ status: 'drafting' })
+    renderAt()
+    await userEvent.click(await screen.findByRole('button', { name: '重新起草' }))
+    expect(api.draftRound).toHaveBeenCalledWith('r1')
   })
 })

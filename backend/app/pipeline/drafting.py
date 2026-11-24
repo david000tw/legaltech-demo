@@ -13,7 +13,7 @@ from app.models import Case, Citation, Claim, Draft, Paragraph, ReviewEvent, Rou
 from app.numbering import strip_heading_number
 from app.pipeline.candidates import filer_line, format_candidates, round_candidates
 from app.pipeline.case_context import case_context
-from app.pipeline.claims import SIDE_LABEL, claim_filers
+from app.pipeline.claims import SIDE_LABEL, claim_filers, selected_claims
 from app.verify.citations import MARKER_RE, attach_citations, verify_paragraph
 
 
@@ -42,7 +42,7 @@ def _claim_lines(claims: list[Claim], filers: dict | None = None) -> str:
 def draft_context(s: Session, round_id: UUID, extra_codes: list[str] | None = None) -> str:
     rnd = s.get(Round, round_id)
     case = s.get(Case, rnd.case_id)
-    claims = list(s.scalars(select(Claim).where(Claim.round_id == round_id).order_by(Claim.seq)))
+    claims = selected_claims(s, round_id)
     cands = round_candidates(s, round_id)
     codes = [c for c in _selected_codes(claims) + (extra_codes or []) if c in cands]
     codes = list(dict.fromkeys(codes))

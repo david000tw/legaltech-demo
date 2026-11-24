@@ -57,6 +57,12 @@ def _filer_label(party: CaseParty) -> str:
     return f"{party.role} {party.name}（{note}）"
 
 
+def selected_claims(s: Session, round_id: UUID) -> list[Claim]:
+    """律師勾選「回應」的主張（或請求項目），依順序；第二段的建候選、挑判決、起草只處理這些（設計 5.4）。"""
+    return list(s.scalars(select(Claim).where(Claim.round_id == round_id, Claim.selected.is_(True))
+                          .order_by(Claim.seq)))
+
+
 def claim_filers(s: Session, claims: list[Claim]) -> dict[UUID, str]:
     """每條主張的提出者，由系統帶入對應與起草步驟，不靠 AI 在摘要裡寫名字；立場與我方相同者標明不得反駁（設計 5.2）。
     - 本輪對造書狀都是同一位遞狀人：每條主張都是他說的。

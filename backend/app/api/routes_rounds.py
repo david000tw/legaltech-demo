@@ -10,24 +10,83 @@ from app.auth import CurrentMember, current_member
 from app.db import tenant_session
 from app.models import RUNNING_STATUSES, Claim, Draft, Firm, Page, Paragraph, Round
 from app.pipeline.drafting import ParagraphChanged, rewrite_paragraph
-from app.pipeline.run import STALE_AFTER, RoundBusy, run_round, start_round
+from app.pipeline.run import (STALE_AFTER, RoundBusy, RoundRule, reset_round, run_draft, run_extract,
+                              start_stage)
 
 router = APIRouter(prefix="/api")
 
 
-@router.post("/rounds/{round_id}/run", status_code=202)
-def run(round_id: UUID, request: Request, background: BackgroundTasks,
-        m: CurrentMember = Depends(current_member)) -> dict:
+def _rule(e: RoundRule) -> HTTPException:
+    return HTTPException(409, {"code": e.code, "message": e.message})
+
+
+def _start(round_id: UUID, stage: str, request: Request, background: BackgroundTasks, m: CurrentMember) -> dict:
     with tenant_session(m.firm_id) as s:
         if s.get(Round, round_id) is None:
             raise HTTPException(404, "找不到輪次")
         try:
-            start_round(s, round_id)
+            start_stage(s, round_id, stage)
         except RoundBusy as e:
             raise HTTPException(409, str(e))
-    background.add_task(run_round, m.firm_id, round_id, m.id, request.app.state.settings,
+        except RoundRule as e:
+            raise _rule(e)
+    runner = run_extract if stage == "extract" else run_draft
+    background.add_task(runner, m.firm_id, round_id, m.id, request.app.state.settings,
                         provider_factory=request.app.state.provider_factory)
-    return {"status": "extracting"}
+    return {"status": "extracting" if stage == "extract" else "drafting"}
+
+
+@router.post("/rounds/{round_id}/extract", status_code=202)
+def extract(round_id: UUID, request: Request, background: BackgroundTasks,
+            m: CurrentMember = Depends(current_member)) -> dict:
+    return _start(round_id, "extract", request, background, m)
+
+
+@router.post("/rounds/{round_id}/draft", status_code=202)
+def draft(round_id: UUID, request: Request, background: BackgroundTasks,
+          m: CurrentMember = Depends(current_member)) -> dict:
+    return _start(round_id, "draft", request, background, m)
+
+
+class ResetBody(BaseModel):
+    confirm: bool = False
+
+
+@router.post("/rounds/{round_id}/reset")
+def reset(round_id: UUID, body: ResetBody, m: CurrentMember = Depends(current_member)) -> dict:
+    with tenant_session(m.firm_id) as s:
+        if s.get(Round, round_id) is None:
+            raise HTTPException(404, "找不到輪次")
+        try:
+            reset_round(s, round_id, body.confirm)
+        except RoundBusy as e:
+            raise HTTPException(409, str(e))
+        except RoundRule as e:
+            raise _rule(e)
+    return {"status": "created"}
+
+
+class ClaimBody(BaseModel):
+    selected: bool
+
+
+@router.patch("/claims/{claim_id}")
+def patch_claim(claim_id: UUID, body: ClaimBody, m: CurrentMember = Depends(current_member)) -> dict:
+    with tenant_session(m.firm_id) as s:
+        claim = s.get(Claim, claim_id)
+        if claim is None:
+            raise HTTPException(404, "找不到主張")
+        if s.get(Round, claim.round_id, with_for_update=True).status != "extracted":
+            raise HTTPException(409, "這一輪已不在待確認狀態，不能改勾選")
+        claim.selected = body.selected
+        return {"id": str(claim.id), "selected": claim.selected}
+
+
+def claim_json(s, c: Claim) -> dict:
+    return {"id": str(c.id), "seq": c.seq, "kind": c.kind, "selected": c.selected, "summary": c.summary,
+            "quote": c.quote, "quote_verified": c.quote_verified,
+            "page_no": s.get(Page, c.page_id).page_no if c.page_id else None,
+            "references": (c.selection or {}).get("references", [])}
 
 
 @router.get("/rounds/{round_id}")
@@ -42,10 +101,9 @@ def get_round(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
             datetime.now(timezone.utc) - rnd.started_at > STALE_AFTER)
         return {
             "id": str(rnd.id), "seq": rnd.seq, "status": rnd.status, "error": rnd.error, "stale": stale,
+            "brief_kind": rnd.brief_kind, "failed_stage": rnd.failed_stage,
             "draft_id": str(draft.id) if draft else None,
-            "claims": [{"seq": c.seq, "summary": c.summary, "quote": c.quote, "quote_verified": c.quote_verified,
-                        "page_no": s.get(Page, c.page_id).page_no if c.page_id else None,
-                        "references": (c.selection or {}).get("references", [])} for c in claims],
+            "claims": [claim_json(s, c) for c in claims],
         }
 
 

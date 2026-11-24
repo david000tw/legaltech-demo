@@ -24,7 +24,7 @@ from app.models import (
     Candidate, Case, Citation, Claim, Draft, Judgment, JudgmentPassage, Paragraph, Round, StatuteArticle, UsageRecord,
 )
 from app.pipeline.candidates import resolve_references, round_candidates
-from app.pipeline.run import run_round, start_round
+from tests.pipeline_helpers import run_two_stage
 from app.render import render_text
 from app.text_norm import normalize_text
 from app.verify.citations import export_blockers, paragraph_citations
@@ -224,12 +224,9 @@ def test_nine_cases_end_to_end(db):
     member = create_member(firm, "lawyer@e2e.test", bar_number=BAR)
     rounds = {name: import_testcase(CASES_DIR / name, FIRM) for name in CASES}
     recorders = {name: _Recorder() for name in CASES}
-    for _, round_id in rounds.values():
-        with tenant_session(firm) as s:
-            start_round(s, round_id)
-    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        list(pool.map(lambda n: run_round(firm, rounds[n][1], member, db,
-                                          provider_factory=recorders[n].factory), CASES))
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:  # 兩段式、全部勾選（子專案甲 Task 9 再擴充）
+        list(pool.map(lambda n: run_two_stage(firm, rounds[n][1], db, provider_factory=recorders[n].factory,
+                                              member_id=member), CASES))
 
     report = {name: _collect(firm, member, name, rounds[name][1], recorders[name].select) for name in CASES}
     REPORT.parent.mkdir(parents=True, exist_ok=True)

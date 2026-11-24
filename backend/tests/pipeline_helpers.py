@@ -26,3 +26,26 @@ def make_round(firm_id: UUID, our_side: str = "plaintiff",
             ingest_document(s, firm_id, case.id, "opponent_brief", "答辯狀.txt",
                             "\f".join(opponent_pages).encode("utf-8"), rnd.id)
         return case.id, rnd.id
+
+
+def run_two_stage(firm_id: UUID, round_id: UUID, settings, provider=None, provider_factory=None,
+                  member_id: UUID | None = None) -> None:
+    """依序跑拆解、起草（全部勾選，照舊測試的「一鍵執行」）；第一段沒停在待確認就不跑第二段。"""
+    from app.pipeline.run import run_draft, run_extract, start_stage
+    kw = {"provider": provider} if provider_factory is None else {"provider_factory": provider_factory}
+    with tenant_session(firm_id) as s:
+        start_stage(s, round_id, "extract")
+    run_extract(firm_id, round_id, member_id, settings, **kw)
+    with tenant_session(firm_id) as s:
+        if s.get(Round, round_id).status != "extracted":
+            return
+        start_stage(s, round_id, "draft")
+    run_draft(firm_id, round_id, member_id, settings, **kw)
+
+
+def api_run(client, round_id):
+    """透過 API 依序呼叫兩段（全部勾選）；回傳最後一個請求的回應。"""
+    r = client.post(f"/api/rounds/{round_id}/extract")
+    if r.status_code == 202 and client.get(f"/api/rounds/{round_id}").json()["status"] == "extracted":
+        r = client.post(f"/api/rounds/{round_id}/draft")
+    return r

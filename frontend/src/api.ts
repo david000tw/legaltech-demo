@@ -2,9 +2,11 @@
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  code?: string  // 後端以 {code, message} 回報的規則錯誤，例如 confirm_reset
+  constructor(status: number, message: string, code?: string) {
     super(message)
     this.status = status
+    this.code = code
   }
 }
 
@@ -52,10 +54,11 @@ export type CaseInput = Partial<Omit<CaseHeader, 'attorneys'>> & { title: string
 export type RoundStatus = 'created' | 'extracting' | 'extracted' | 'drafting' | 'drafted' | 'failed'
 // AI 想引用、但沒用候選代碼填的項目（設計 5.7）：mapped＝系統對回；ambiguous_passage＝對到判決但段落不確定；unmatched＝不在候選清單
 export type ReferenceView = { text: string; status: 'mapped' | 'ambiguous_passage' | 'unmatched'; code: string | null }
-export type ClaimView = { seq: number; summary: string; quote: string; quote_verified: boolean; page_no: number | null
-  references?: ReferenceView[] }
+export type ClaimView = { id: string; seq: number; kind: 'opponent_claim' | 'request'; selected: boolean
+  summary: string; quote: string; quote_verified: boolean; page_no: number | null; references?: ReferenceView[] }
+export type BriefKind = 'complaint' | 'answer' | 'preparatory'
 export type RoundDetail = { id: string; seq: number; status: RoundStatus; error: string | null; stale: boolean;
-  draft_id: string | null; claims: ClaimView[] }
+  brief_kind: BriefKind; failed_stage: 'extract' | 'draft' | null; draft_id: string | null; claims: ClaimView[] }
 export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgment' | 'statute'; quote: string;
   label: string | null; verify_status: 'ok' | 'warn' | 'failed'; verify_reasons: string[]; lawyer_confirmed: boolean
   court_confirmed: boolean; annotation?: string | null }  // annotation：判決的註記，例如「少數見解：否定配偶權」
@@ -71,23 +74,29 @@ export type CitationSource = { kind: string; title: string; text: string; span: 
   annotation?: string | null }
 export type CitationInput = { code: string; quote: string }
 
-async function detail(r: Response): Promise<string> {
+async function detail(r: Response): Promise<{ message: string; code?: string }> {
   try {
     const body = await r.json()
-    if (typeof body.detail === 'string') return body.detail
+    if (typeof body.detail === 'string') return { message: body.detail }
     if (Array.isArray(body.detail)) {  // 欄位驗證錯誤：只留說明文字
-      return `輸入資料有誤：${body.detail.map((e: { msg?: string }) => e.msg ?? '').filter(Boolean).join('；')}`
+      return { message: `輸入資料有誤：${body.detail.map((e: { msg?: string }) => e.msg ?? '').filter(Boolean).join('；')}` }
     }
-    return JSON.stringify(body.detail ?? body)
+    if (body.detail && typeof body.detail.message === 'string') return { message: body.detail.message, code: body.detail.code }
+    return { message: JSON.stringify(body.detail ?? body) }
   } catch {
-    return r.statusText
+    return { message: r.statusText }
   }
+}
+
+async function apiError(r: Response): Promise<ApiError> {
+  const d = await detail(r)
+  return new ApiError(r.status, d.message, d.code)
 }
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = init.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined
   const r = await fetch(`/api${path}`, { credentials: 'same-origin', headers, ...init })
-  if (!r.ok) throw new ApiError(r.status, await detail(r))
+  if (!r.ok) throw await apiError(r)
   return r.json() as Promise<T>
 }
 
@@ -119,7 +128,14 @@ export function uploadDocument(caseId: string, file: File, kind: 'evidence' | 'o
   return req<{ id: string; page_count: number }>(`/cases/${caseId}/documents`, { method: 'POST', body: form })
 }
 
-export const runRound = (roundId: string) => req<{ status: string }>(`/rounds/${roundId}/run`, json('POST'))
+// 兩段式執行：先拆解（停在待確認，律師勾選），再起草
+export const extractRound = (roundId: string) => req<{ status: string }>(`/rounds/${roundId}/extract`, json('POST'))
+export const draftRound = (roundId: string) => req<{ status: string }>(`/rounds/${roundId}/draft`, json('POST'))
+// 重新拆解：律師改過勾選時，後端回 409 confirm_reset，畫面要先確認再帶 confirm=true
+export const resetRound = (roundId: string, confirm: boolean) =>
+  req<{ status: string }>(`/rounds/${roundId}/reset`, json('POST', { confirm }))
+export const patchClaim = (claimId: string, body: { selected: boolean }) =>
+  req<{ id: string; selected: boolean }>(`/claims/${claimId}`, json('PATCH', body))
 export const getRound = (roundId: string) => req<RoundDetail>(`/rounds/${roundId}`)
 export const getDraft = (draftId: string) => req<DraftView>(`/drafts/${draftId}`)
 export const getCitationSource = (citationId: string) => req<CitationSource>(`/citations/${citationId}/source`)
@@ -139,6 +155,6 @@ export const renumberExhibit = (id: string, number: number) =>
 export async function exportDraft(draftId: string): Promise<Blob> {
   const r = await fetch(`/api/drafts/${draftId}/export`, { method: 'POST', credentials: 'same-origin' })
   if (r.status === 409) throw new ExportBlockedError((await r.json()).blockers)
-  if (!r.ok) throw new ApiError(r.status, await detail(r))
+  if (!r.ok) throw await apiError(r)
   return r.blob()
 }

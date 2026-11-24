@@ -74,11 +74,11 @@ function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
     }
   }
 
-  async function run() {
+  async function act(fn: () => Promise<unknown>) {
     setBusy(true)
     setMessage(null)
     try {
-      await api.runRound(round.id)
+      await fn()
       await refresh()
     } catch (e) {
       setMessage((e as Error).message)
@@ -87,15 +87,48 @@ function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
     }
   }
 
+  const extract = () => act(() => api.extractRound(round.id))
+  const draft = () => act(() => api.draftRound(round.id))
+  // 重新拆解：律師改過勾選時後端要求確認，確認後再送一次
+  const reset = () => act(async () => {
+    try {
+      await api.resetRound(round.id, false)
+    } catch (e) {
+      if (!(e instanceof api.ApiError) || e.code !== 'confirm_reset') throw e
+      if (window.confirm(e.message)) await api.resetRound(round.id, true)
+    }
+  })
+  async function tick(claim: api.ClaimView, selected: boolean) {
+    setMessage(null)
+    try {
+      await api.patchClaim(claim.id, { selected })
+      await refresh()
+    } catch (e) {
+      setMessage((e as Error).message)
+    }
+  }
+
   const error = detail?.error ?? round.error
-  const editable = status === 'created' || status === 'failed' || !!detail?.stale
+  const failedStage = detail?.failed_stage ?? null
+  const stale = !!detail?.stale
+  // 可以上傳書狀、按「拆解」：還沒拆解、拆解失敗、或拆解逾時
+  const editable = status === 'created' || (status === 'failed' && failedStage !== 'draft')
+    || (status === 'extracting' && stale)
+  const claims = detail?.claims ?? []
+  const unticked = claims.filter((c) => !c.selected).length
   const byId = new Map(parties.map((p) => [p.id, p]))
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-slate-800">第 {round.seq} 輪</h3>
-        <span className="text-sm text-slate-600">{STATUS_LABEL[status]}{detail?.stale ? '（逾時，可重跑）' : ''}</span>
+        <span className="text-sm text-slate-600">{STATUS_LABEL[status]}{stale ? '（逾時，可重新開始）' : ''}</span>
       </div>
+      {stale && (status === 'extracting' || status === 'drafting') && (
+        <button type="button" onClick={status === 'extracting' ? extract : draft} disabled={busy}
+          className="mt-2 rounded border border-amber-400 px-3 py-1 text-sm text-amber-800 disabled:opacity-50">
+          重新開始
+        </button>
+      )}
       {status === 'failed' && error && <p className="mt-2 rounded bg-red-50 p-2 text-sm text-red-700">{error}</p>}
       {briefs.length > 0 && (
         <ul className="mt-2 space-y-1 text-sm text-slate-700">
@@ -138,10 +171,25 @@ function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
             上傳對造書狀
             <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" className="ml-2 text-sm" onChange={upload} disabled={busy} />
           </label>
-          <button type="button" onClick={run} disabled={busy}
+          {!(status === 'extracting' && stale) && (
+            <button type="button" onClick={extract} disabled={busy}
+              className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+              拆解
+            </button>
+          )}
+        </div>
+      )}
+      {(status === 'extracted' || (status === 'failed' && failedStage === 'draft')) && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={draft} disabled={busy || claims.every((c) => !c.selected)}
             className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
-            開始分析與起草
+            {status === 'failed' ? '重新起草' : '起草'}
           </button>
+          <button type="button" onClick={reset} disabled={busy}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-50">
+            重新拆解
+          </button>
+          {unticked > 0 && <span className="text-xs text-amber-700">未勾選的 {unticked} 條主張不會被回應</span>}
         </div>
       )}
       {status === 'drafted' && detail?.draft_id && (
@@ -153,6 +201,10 @@ function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
         <ol className="mt-3 space-y-1 text-sm text-slate-700">
           {detail.claims.map((c) => (
             <li key={c.seq}>
+              {status === 'extracted' && (
+                <input type="checkbox" aria-label={`回應 主張${c.seq}`} checked={c.selected} className="mr-1"
+                  onChange={(e) => tick(c, e.target.checked)} />
+              )}
               主張{c.seq}：{c.summary}
               {!c.quote_verified && <span className="ml-1 text-red-600">（原文對不上）</span>}
               {(c.references ?? []).length > 0 && (

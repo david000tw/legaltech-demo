@@ -11,10 +11,10 @@ from app.db import tenant_session
 from app.main import create_app
 from app.models import Candidate, Citation, Claim, Draft, Paragraph, ReviewEvent, Round, UsageRecord
 from app.pipeline.drafting import draft_round, rewrite_paragraph
-from app.pipeline.run import RoundBusy, run_round, start_round
+from app.pipeline.run import RoundBusy, run_draft, run_extract, start_stage
 from tests.fakes.fake_provider import FakeProvider
 from tests.helpers import create_member, login
-from tests.pipeline_helpers import make_round
+from tests.pipeline_helpers import api_run, make_round, run_two_stage
 from tests.verify_helpers import E_QUOTE, EVIDENCE_TEXT, J_REASONING, setup_verify_round
 
 CLAIMS_OK = {"claims": [{"summary": "原告與有過失", "quote": "原告行經無號誌路口時亦未減速慢行，未作隨時停車之準備",
@@ -84,9 +84,7 @@ def test_run_round_success_sets_drafted(db):
     firm = __import__("tests.helpers", fromlist=["create_firm"]).create_firm("甲事務所")
     _, round_id = round_with_evidence(firm)
     fake = fake_all()
-    with tenant_session(firm) as s:
-        start_round(s, round_id)
-    run_round(firm, round_id, None, db, provider=fake)
+    run_two_stage(firm, round_id, db, provider=fake)
     assert status_of(firm, round_id) == ("drafted", None)
     assert fake.steps() == ["claims", "select", "draft"]
     assert counts(firm, round_id) == (1, 1, 1)
@@ -96,9 +94,7 @@ def test_run_round_marks_failed_on_ai_error(db):
     from tests.helpers import create_firm
     firm = create_firm("甲事務所")
     _, round_id = round_with_evidence(firm)
-    with tenant_session(firm) as s:
-        start_round(s, round_id)
-    run_round(firm, round_id, None, db, provider=fake_all(draft=AIError("usage_limit", "You've hit your session limit")))
+    run_two_stage(firm, round_id, db, provider=fake_all(draft=AIError("usage_limit", "You've hit your session limit")))
     status, error = status_of(firm, round_id)
     assert status == "failed" and error.startswith("usage_limit")
 
@@ -107,13 +103,11 @@ def test_rerun_after_failure_is_clean(db):
     from tests.helpers import create_firm
     firm = create_firm("甲事務所")
     _, round_id = round_with_evidence(firm)
-    with tenant_session(firm) as s:
-        start_round(s, round_id)
-    run_round(firm, round_id, None, db, provider=fake_all(draft=AIError("timeout", "slow")))
+    run_two_stage(firm, round_id, db, provider=fake_all(draft=AIError("timeout", "slow")))
     assert status_of(firm, round_id)[0] == "failed"
     with tenant_session(firm) as s:
-        start_round(s, round_id)
-    run_round(firm, round_id, None, db, provider=fake_all())
+        start_stage(s, round_id, "draft")  # 失敗在起草：重跑起草，主張保留
+    run_draft(firm, round_id, None, db, provider=fake_all())
     assert status_of(firm, round_id) == ("drafted", None)
     assert counts(firm, round_id) == (1, 1, 1)
 
@@ -123,14 +117,14 @@ def test_stale_running_can_restart(db):
     firm = create_firm("甲事務所")
     _, round_id = round_with_evidence(firm)
     with tenant_session(firm) as s:
-        start_round(s, round_id)
+        start_stage(s, round_id, "extract")
     with tenant_session(firm) as s:
         with pytest.raises(RoundBusy):
-            start_round(s, round_id)
+            start_stage(s, round_id, "extract")
     with tenant_session(firm) as s:
         s.get(Round, round_id).started_at = datetime.now(timezone.utc) - timedelta(minutes=46)
     with tenant_session(firm) as s:
-        start_round(s, round_id)
+        start_stage(s, round_id, "extract")
         assert s.get(Round, round_id).status == "extracting"
 
 
@@ -143,9 +137,7 @@ def test_scanned_opponent_brief_fails_no_text(db):
     with tenant_session(firm) as s:
         ingest_document(s, firm, case_id, "opponent_brief", "掃描答辯狀.pdf", blank_pdf(), round_id)
     fake = fake_all()
-    with tenant_session(firm) as s:
-        start_round(s, round_id)
-    run_round(firm, round_id, None, db, provider=fake)
+    run_two_stage(firm, round_id, db, provider=fake)
     status, error = status_of(firm, round_id)
     assert status == "failed" and error.startswith("no_text")
     assert fake.calls == []
@@ -162,7 +154,7 @@ def api(lawyer_client):
 def test_run_route_runs_in_background_and_reports(api):
     client, firm, _, fake = api
     _, round_id = round_with_evidence(firm)
-    r = client.post(f"/api/rounds/{round_id}/run")
+    r = api_run(client, round_id)
     assert r.status_code == 202
     body = client.get(f"/api/rounds/{round_id}").json()
     assert body["status"] == "drafted" and body["draft_id"] and body["claims"][0]["quote_verified"] is True
@@ -172,21 +164,21 @@ def test_run_while_running_409(api):
     client, firm, _, _ = api
     _, round_id = round_with_evidence(firm)
     with tenant_session(firm) as s:
-        start_round(s, round_id)
-    assert client.post(f"/api/rounds/{round_id}/run").status_code == 409
+        start_stage(s, round_id, "extract")
+    assert client.post(f"/api/rounds/{round_id}/extract").status_code == 409
 
 
 def test_drafted_round_cannot_rerun_409(api):
     client, firm, _, _ = api
     _, round_id = round_with_evidence(firm)
-    assert client.post(f"/api/rounds/{round_id}/run").status_code == 202
-    assert client.post(f"/api/rounds/{round_id}/run").status_code == 409
+    assert api_run(client, round_id).status_code == 202
+    assert client.post(f"/api/rounds/{round_id}/extract").status_code == 409
 
 
 def test_rewrite_resets_review_status(api):
     client, firm, member, _ = api
     _, round_id = round_with_evidence(firm)
-    client.post(f"/api/rounds/{round_id}/run")
+    api_run(client, round_id)
     with tenant_session(firm) as s:
         p = s.scalars(select(Paragraph).join(Draft).where(Draft.round_id == round_id)).one()
         p.status, p.reviewed_by, p.reviewed_bar_number = "reviewed", member, "(110)北律字第0001號"
@@ -205,7 +197,7 @@ def test_rewrite_resets_review_status(api):
 def test_rewrite_conflicts_with_edit_made_while_ai_was_working(api):
     client, firm, member, _ = api
     _, round_id = round_with_evidence(firm)
-    client.post(f"/api/rounds/{round_id}/run")
+    api_run(client, round_id)
     with tenant_session(firm) as s:
         pid = s.scalars(select(Paragraph.id).join(Draft).where(Draft.round_id == round_id)).one()
 
@@ -253,7 +245,7 @@ def test_concurrent_start_round_one_busy(db):
         barrier.wait()
         try:
             with tenant_session(firm) as s:
-                start_round(s, round_id)
+                start_stage(s, round_id, "extract")
             results.append("started")
         except RoundBusy:
             results.append("busy")
@@ -271,14 +263,17 @@ def test_superseded_run_does_not_overwrite(db):
     firm = create_firm("甲事務所")
     _, round_id = round_with_evidence(firm)
     with tenant_session(firm) as s:
-        start_round(s, round_id)
+        start_stage(s, round_id, "extract")
+    run_extract(firm, round_id, None, db, provider=fake_all())
+    with tenant_session(firm) as s:
+        start_stage(s, round_id, "draft")
 
     def takeover(call):
         with tenant_session(firm) as s2:
             s2.get(Round, round_id).started_at = datetime.now(timezone.utc) + timedelta(seconds=5)
         return DRAFT_OK
-    run_round(firm, round_id, None, db, provider=fake_all(draft=takeover))
-    assert status_of(firm, round_id)[0] == "extracting"
+    run_draft(firm, round_id, None, db, provider=fake_all(draft=takeover))
+    assert status_of(firm, round_id)[0] == "drafting"
 
 
 def test_provider_not_allowed_marks_failed(db):
@@ -286,12 +281,10 @@ def test_provider_not_allowed_marks_failed(db):
     from tests.helpers import create_firm
     firm = create_firm("甲事務所")
     _, round_id = round_with_evidence(firm)
-    with tenant_session(firm) as s:
-        start_round(s, round_id)
 
     def factory(settings, f):
         raise ProviderNotAllowed("本機 Claude Code 只能用於內部測試事務所")
-    run_round(firm, round_id, None, db, provider_factory=factory)
+    run_two_stage(firm, round_id, db, provider_factory=factory)
     status, error = status_of(firm, round_id)
     assert status == "failed" and error.startswith("provider:")
 
@@ -300,9 +293,7 @@ def test_unexpected_error_marks_failed(db):
     from tests.helpers import create_firm
     firm = create_firm("甲事務所")
     _, round_id = round_with_evidence(firm)
-    with tenant_session(firm) as s:
-        start_round(s, round_id)
-    run_round(firm, round_id, None, db, provider=fake_all(select=RuntimeError("boom")))
+    run_two_stage(firm, round_id, db, provider=fake_all(select=RuntimeError("boom")))
     status, error = status_of(firm, round_id)
     assert status == "failed" and error.startswith("other:")
 
@@ -314,9 +305,7 @@ def test_select_input_too_long_fails_clearly(db, monkeypatch):
     firm = create_firm("甲事務所")
     _, round_id = round_with_evidence(firm)
     fake = fake_all()
-    with tenant_session(firm) as s:
-        start_round(s, round_id)
-    run_round(firm, round_id, None, db, provider=fake)
+    run_two_stage(firm, round_id, db, provider=fake)
     status, error = status_of(firm, round_id)
     assert status == "failed" and "過長" in error
     assert fake.steps() == ["claims"]
@@ -330,7 +319,7 @@ def test_assistant_can_run_round(db):
     c.app.state.provider_factory = lambda settings, f: fake_all()
     assert login(c, "assistant@a.test").status_code == 200
     _, round_id = round_with_evidence(firm)
-    assert c.post(f"/api/rounds/{round_id}/run").status_code == 202
+    assert api_run(c, round_id).status_code == 202
     assert status_of(firm, round_id)[0] == "drafted"
 
 
@@ -338,7 +327,7 @@ def test_cross_firm_round_routes_404(api, db):
     from tests.helpers import create_firm
     client, firm, _, _ = api
     _, round_id = round_with_evidence(firm)
-    client.post(f"/api/rounds/{round_id}/run")
+    api_run(client, round_id)
     with tenant_session(firm) as s:
         pid = s.scalars(select(Paragraph.id).join(Draft).where(Draft.round_id == round_id)).first()
     other = create_firm("乙事務所")
@@ -347,14 +336,15 @@ def test_cross_firm_round_routes_404(api, db):
     b.app.state.provider_factory = lambda settings, f: fake_all()
     assert login(b, "lawyer@b.test").status_code == 200
     assert b.get(f"/api/rounds/{round_id}").status_code == 404
-    assert b.post(f"/api/rounds/{round_id}/run").status_code == 404
+    assert b.post(f"/api/rounds/{round_id}/extract").status_code == 404
+    assert b.post(f"/api/rounds/{round_id}/draft").status_code == 404
     assert b.post(f"/api/paragraphs/{pid}/rewrite", json={"instruction": "x"}).status_code == 404
 
 
 def test_rewrite_ai_error_503(api):
     client, firm, _, _ = api
     _, round_id = round_with_evidence(firm)
-    client.post(f"/api/rounds/{round_id}/run")
+    api_run(client, round_id)
     with tenant_session(firm) as s:
         pid = s.scalars(select(Paragraph.id).join(Draft).where(Draft.round_id == round_id)).first()
     client.app.state.provider_factory = lambda settings, f: FakeProvider(
@@ -373,7 +363,7 @@ def test_round_reports_claim_references(api):
     """設計 5.7：輪次畫面要看得到 AI 提到、但系統沒直接採用的每一項。"""
     client, firm, _, _ = api
     _, round_id = round_with_evidence(firm)
-    client.post(f"/api/rounds/{round_id}/run")
+    api_run(client, round_id)
     refs = [{"text": "民法第1030條之1", "status": "unmatched", "code": None}]
     with tenant_session(firm) as s:
         c = s.scalars(select(Claim).where(Claim.round_id == round_id).order_by(Claim.seq)).first()

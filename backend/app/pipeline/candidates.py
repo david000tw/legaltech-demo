@@ -23,7 +23,7 @@ from app.models import (
     StatuteArticle,
 )
 from app.pipeline.case_context import case_context
-from app.pipeline.claims import SIDE_LABEL, claim_filers
+from app.pipeline.claims import SIDE_LABEL, claim_filers, selected_claims
 from app.text_norm import find_quote, normalize_text, quote_length
 
 EVIDENCE_TOKEN_BUDGET = 150_000
@@ -36,7 +36,7 @@ KIND_PREFIX = {"evidence": "E", "judgment": "J", "statute": "S"}
 
 
 def _claims(s: Session, round_id: UUID) -> list[Claim]:
-    return list(s.scalars(select(Claim).where(Claim.round_id == round_id).order_by(Claim.seq)))
+    return selected_claims(s, round_id)
 
 
 def _evidence_pages(s: Session, case_id: UUID) -> list[PageText]:
