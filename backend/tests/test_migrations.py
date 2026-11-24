@@ -273,3 +273,36 @@ def test_0010_round_trip(db):
         command.upgrade(cfg, "head")
     tables, can_read = state()
     assert "work_calendar" in tables and can_read is True
+
+
+def test_0011_round_trip(db):
+    """子專案丙：匯出紀錄分 Word 與遞狀包；舊紀錄升級後是 docx。"""
+    from alembic import command
+
+    from app.db import admin_session
+    from app.models import ExportRecord
+    from tests.helpers import create_member
+    from tests.verify_helpers import setup_verify_round
+    cfg = _cfg()
+    ctx = setup_verify_round()
+    member = create_member(ctx["firm"], "lawyer@a.test")
+    with admin_session() as s:
+        s.add(ExportRecord(firm_id=ctx["firm"], draft_id=ctx["draft_id"], member_id=member, sha256="0" * 64))
+
+    def kinds():
+        eng = create_engine(TEST_ADMIN_DB)
+        try:
+            with eng.connect() as c:
+                cols = set(c.execute(text("select column_name from information_schema.columns "
+                                          "where table_name='export_records'")).scalars())
+                return cols, (c.execute(text("select kind from export_records")).scalars().all()
+                              if "kind" in cols else None)
+        finally:
+            eng.dispose()
+
+    command.downgrade(cfg, "0010")
+    try:
+        assert kinds()[1] is None
+    finally:
+        command.upgrade(cfg, "head")
+    assert kinds()[1] == ["docx"]

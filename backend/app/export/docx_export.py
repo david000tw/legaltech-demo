@@ -106,7 +106,20 @@ SCHEDULE_ROWS = 4
 
 
 def export_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date | None = None) -> bytes:
-    """狀頭內容與順序照設計 5.6；today 預設為台灣時區的今天（測試可指定）。"""
+    """產生 Word 並寫一筆匯出紀錄。"""
+    data = render_draft(s, draft_id, member, today)
+    record_export(s, draft_id, member, data, "docx")
+    return data
+
+
+def record_export(s: Session, draft_id: UUID, member: CurrentMember, data: bytes, kind: str) -> None:
+    s.add(ExportRecord(firm_id=member.firm_id, draft_id=draft_id, member_id=member.id, kind=kind,
+                       bar_number=member.bar_number, sha256=hashlib.sha256(data).hexdigest()))
+    s.flush()
+
+
+def render_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date | None = None) -> bytes:
+    """鎖段落、檢查阻擋、產生 Word（不寫紀錄）。狀頭內容與順序照設計 5.6；today 預設為台灣時區的今天。"""
     # 先鎖住整份草稿的段落（依 id 排序避免互鎖），檢查到產生檔案之間別人不能改段落或確認引用
     s.scalars(select(Paragraph.id).where(Paragraph.draft_id == draft_id).order_by(Paragraph.id)
               .with_for_update(read=True)).all()
@@ -167,8 +180,4 @@ def export_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date 
 
     buf = io.BytesIO()
     d.save(buf)
-    data = buf.getvalue()
-    s.add(ExportRecord(firm_id=member.firm_id, draft_id=draft_id, member_id=member.id,
-                       bar_number=member.bar_number, sha256=hashlib.sha256(data).hexdigest()))
-    s.flush()
-    return data
+    return buf.getvalue()

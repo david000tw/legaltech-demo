@@ -1,7 +1,7 @@
 from urllib.parse import quote as urlquote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -11,7 +11,8 @@ from app.case_types import procedure_warning
 from app.corpus.search import article_display
 from app.db import tenant_session
 from app.exhibit_labels import evidence_label
-from app.export.docx_export import ExportBlocked, export_brief_title, export_draft
+from app.export.docx_export import ExportBlocked, export_brief_title, export_draft, record_export
+from app.export.package import build_package
 from app.models import (
     Case, Citation, Document, Draft, Exhibit, Judgment, JudgmentPassage, Page, PageText, Paragraph, Round,
     StatuteArticle,
@@ -25,6 +26,7 @@ from app.review.service import (
 from app.review.insert import InsertRejected, insert_pin
 from app.text_norm import find_quote
 from app.statements import BODY_LABEL, STATEMENT_LABEL, claim_value, statement_of
+from app.storage import LocalStorage
 from app.verify.citations import body_paragraphs, export_blockers, is_removed, paragraph_citations
 
 router = APIRouter(prefix="/api")
@@ -232,6 +234,23 @@ def patch_exhibit(exhibit_id: UUID, body: ExhibitBody, m: CurrentMember = Depend
 
 
 DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+@router.post("/drafts/{draft_id}/filing-package")  # 會寫匯出紀錄，不用 GET
+def filing_package(draft_id: UUID, request: Request, m: CurrentMember = Depends(current_member)):
+    """電子遞狀包：只有律師能下載；阻擋條件與匯出 Word 相同。"""
+    with tenant_session(m.firm_id) as s:
+        _get_or_404(s, Draft, draft_id, "草稿")
+        require_lawyer(m)
+        try:
+            data, name = build_package(s, draft_id, m, LocalStorage(request.app.state.settings.storage_dir))
+        except ExportBlocked as e:
+            return JSONResponse(status_code=409, content={
+                "blockers": [blocker_json(b) for b in e.blockers]})
+        record_export(s, draft_id, m, data, "package")
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition":
+                             f"attachment; filename=filing-package.zip; filename*=UTF-8''{urlquote(name)}"})
 
 
 @router.post("/drafts/{draft_id}/export")  # 會寫匯出紀錄，不用 GET

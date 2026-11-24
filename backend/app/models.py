@@ -463,11 +463,13 @@ class ExportRecord(Base):
     __table_args__ = (
         _tfk("draft_id", "drafts"),
         _tfk("member_id", "members"),
+        _enum("kind", ("docx", "package"), "ck_export_kind"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
     draft_id: Mapped[uuid.UUID] = _ref()
     member_id: Mapped[uuid.UUID] = _ref()
+    kind: Mapped[str] = mapped_column(String(10), default="docx", server_default="docx")  # Word 或遞狀包
     bar_number: Mapped[str | None] = mapped_column(String(50))
     sha256: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = _created()
