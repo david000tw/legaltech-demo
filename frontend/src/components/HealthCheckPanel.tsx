@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api'
-import { BUSY_TEXT, POLL_MS, useJobPolling } from '../aiJobs'
+import { busyText, POLL_MS, useJobPolling } from '../aiJobs'
+import { BTN_PRIMARY } from '../ui'
 import SourceBadge from './SourceBadge'
 
 const LEVELS: { level: api.HealthItemView['level']; label: string; className: string }[] = [
@@ -72,11 +73,11 @@ export default function HealthCheckPanel({ roundId, briefKind, pollMs = POLL_MS,
     <section className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" onClick={run} disabled={running}
-          className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+          className={BTN_PRIMARY}>
           {report ? '重新執行健檢' : '執行健檢'}
         </button>
         <h3 className="font-semibold text-slate-800">書狀健檢與爭點整理</h3>
-        {running && <span className="text-sm text-amber-700">{BUSY_TEXT}</span>}
+        {running && <span className="text-sm text-amber-700">{busyText('health')}</span>}
       </div>
       {report?.outdated && <p className="rounded bg-yellow-50 p-2 text-sm text-yellow-800">資料已變更，建議重新執行</p>}
       {job?.status === 'failed' && job.error && <p className="text-sm text-red-700">{job.error}</p>}

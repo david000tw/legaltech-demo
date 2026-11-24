@@ -38,7 +38,7 @@ describe('HealthCheckPanel', () => {
     render(<HealthCheckPanel roundId="r1" briefKind="preparatory" pollMs={20} />)
     await userEvent.click(await screen.findByRole('button', { name: '執行健檢' }))
     expect(api.runHealthCheck).toHaveBeenCalledWith('r1')
-    expect(await screen.findByText('AI 處理中，請稍候')).toBeInTheDocument()
+    expect(await screen.findByText('AI 處理中，約需 2 分鐘')).toBeInTheDocument()
     expect(await screen.findByText('與有過失可能成立')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重新執行健檢' })).toBeEnabled()
   })

@@ -1,4 +1,5 @@
 import type { Blocker } from '../api'
+import { BTN_PRIMARY } from '../ui'
 
 // 驗證與審核原因代碼的中文說明（對應後端 app/verify/citations.py 與審核規則）。
 export const REASON_LABELS: Record<string, (arg: string) => string> = {
@@ -54,7 +55,7 @@ export default function ExportButton({ blockers, onExport }: { blockers: Blocker
   return (
     <div className="space-y-2">
       <button type="button" onClick={onExport} disabled={blocked}
-        className="rounded bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+        className={`${BTN_PRIMARY} disabled:cursor-not-allowed`}>
         匯出 Word
       </button>
       {blocked && (

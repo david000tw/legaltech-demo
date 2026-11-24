@@ -497,3 +497,9 @@ def test_blockers_use_the_on_screen_number(env):
     assert {b["paragraph_no"] for b in blockers} == {1, 2}
     r = lawyer.post(f"/api/drafts/{env['draft_id']}/export")
     assert r.status_code == 409 and {b["paragraph_no"] for b in r.json()["blockers"]} == {1, 2}
+
+
+def test_draft_view_has_case_title(env):
+    """子專案丙 Task 7：草稿頁頂端列顯示案件名稱。"""
+    body = env["client_for"]("assistant@a.test").get(f"/api/drafts/{env['draft_id']}").json()
+    assert body["case_title"] == "測試案"

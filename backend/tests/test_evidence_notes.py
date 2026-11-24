@@ -287,3 +287,14 @@ def test_assistant_can_generate_and_edit(lawyer_client, db):
     assert assistant.delete(f"/api/evidence-notes/{n['id']}").status_code == 200
     jobs = assistant.get(f"/api/cases/{case_id}").json()["jobs"]
     assert jobs["evidence_notes"]["status"] == "done" and jobs["timeline"] is None
+
+
+def test_notes_no_readable_evidence_message(lawyer_client):
+    """子專案丙 Task 7：只有掃描檔時，說清楚為什麼不能產生（原本會說「所有卷證都已有說明」）。"""
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm)
+    with tenant_session(firm) as s:
+        ingest_document(s, firm, case_id, "evidence", "01_掃描.pdf", blank_pdf())
+    r = client.post(f"/api/cases/{case_id}/evidence-notes")
+    assert r.status_code == 409
+    assert r.json()["detail"] == {"code": "no_text", "message": "還沒有可讀文字的卷證：請上傳文字檔或可選取文字的 PDF；掃描檔要等辨識功能完成"}

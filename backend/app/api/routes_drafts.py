@@ -85,7 +85,7 @@ def get_draft(draft_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
         rnd = s.get(Round, draft.round_id)
         statement = statement_of(s, draft_id)
         case = s.get(Case, rnd.case_id)
-        return {"id": str(draft.id), "round_id": str(rnd.id), "case_id": str(rnd.case_id),
+        return {"id": str(draft.id), "round_id": str(rnd.id), "case_id": str(rnd.case_id), "case_title": case.title,
                 "can_review": m.role == "lawyer" and m.bar_verified,
                 # 書狀名稱依程序；程序警示在匯出前再提示一次，但不阻擋（設計 5.6）
                 "brief_title": export_brief_title(s, draft_id),

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import * as api from '../api'
-import { BUSY_TEXT, POLL_MS, useJobPolling } from '../aiJobs'
+import { busyText, POLL_MS, useJobPolling } from '../aiJobs'
+import { BTN_SECONDARY, BTN_SMALL } from '../ui'
 import SourceBadge from './SourceBadge'
 
 const money = (n: number | null) => (n == null ? '' : `新臺幣${n.toLocaleString('en-US')}元`)
@@ -74,7 +75,7 @@ function EventRow({ ev, onChanged, onError, onShowSource, compact }: {
               {editing ? (
                 <>
                   <button type="button" onClick={save} disabled={!description.trim()}
-                    className="rounded bg-indigo-600 px-2 py-0.5 text-xs text-white disabled:opacity-50">儲存</button>
+                    className={BTN_SMALL}>儲存</button>
                   <button type="button" onClick={() => setEditing(false)} className="rounded border px-2 py-0.5 text-xs">取消</button>
                 </>
               ) : (
@@ -151,12 +152,12 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
       <div className="flex flex-wrap items-center gap-3">
         {!compact && (
           <button type="button" onClick={generate} disabled={running}
-            className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+            className={BTN_SECONDARY}>
             整理大事記
           </button>
         )}
         <h2 className="text-lg font-semibold text-slate-800">大事記</h2>
-        {running && <span className="text-sm text-amber-700">{BUSY_TEXT}</span>}
+        {running && <span className="text-sm text-amber-700">{busyText('timeline')}</span>}
       </div>
       {job?.status === 'failed' && job.error && <p className="text-sm text-red-700">{job.error}</p>}
       {message && <p className="text-sm text-red-700">{message}</p>}

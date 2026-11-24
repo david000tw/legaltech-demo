@@ -1,27 +1,30 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import * as api from '../api'
 import {
   attorneyProblem, headerDraftFrom, headerInput, toDrafts, toInputs, type HeaderDraft, type PartyDraft,
 } from '../caseForms'
-import { POLL_MS } from '../aiJobs'
+import { busyText, POLL_MS } from '../aiJobs'
+import AppShell from '../components/AppShell'
 import CaseHeaderFields from '../components/CaseHeaderFields'
 import EvidenceNotesSection from '../components/EvidenceNotesSection'
-import HealthCheckPanel from '../components/HealthCheckPanel'
+import HealthTab from '../components/HealthTab'
 import PartiesEditor from '../components/PartiesEditor'
 import RequestItemsEditor from '../components/RequestItemsEditor'
+import SourcePane from '../components/SourcePane'
 import TimelineSection from '../components/TimelineSection'
+import { KIND_LABEL } from '../labels'
+import { BTN_PRIMARY, BTN_SECONDARY, BTN_SMALL, CARD } from '../ui'
 
 const STATUS_LABEL: Record<api.RoundStatus, string> = {
   created: '尚未執行', extracting: '拆解中…', extracted: '待確認', drafting: '起草中…', drafted: '草稿完成', failed: '執行失敗',
 }
 
 const partyLabel = (p: api.Party) => `${p.role} ${p.name}`
-const KIND_LABEL: Record<api.BriefKind, string> = { complaint: '起訴狀', answer: '答辯狀', preparatory: '準備書狀' }
 
-function RoundPanel({ caseId, caseType, round, parties, briefs, docCount, onChanged }: {
+function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
   caseId: string; caseType: string; round: api.RoundSummary; parties: api.Party[]; briefs: api.CaseDocument[]
-  docCount: number; onChanged: () => void
+  onChanged: () => void
 }) {
   const [detail, setDetail] = useState<api.RoundDetail | null>(null)
   // 起訴狀的案情說明與聲明設定：律師改過的值優先，否則用後端存的值
@@ -51,8 +54,6 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, docCount, onChan
   useEffect(() => { void refresh() }, [refresh])
 
   const status = detail?.status ?? round.status
-  const claimsKey = (detail?.claims ?? [])
-    .map((c) => [c.id, c.selected, c.summary, c.request_type ?? '', c.amount ?? '', c.confirmed ?? ''].join(':')).join('|')
   useEffect(() => {
     if (status !== 'extracting' && status !== 'drafting') return
     const t = setInterval(() => { void refresh() }, POLL_MS)
@@ -178,7 +179,7 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, docCount, onChan
         </button>
       )}
       {!stale && (status === 'extracting' || status === 'drafting') && (
-        <p className="mt-2 text-sm text-slate-600">AI 處理中，請稍候</p>
+        <p className="mt-2 text-sm text-slate-600">{busyText(status === 'extracting' ? 'extract' : 'draft')}</p>
       )}
       {status === 'failed' && error && <p className="mt-2 rounded bg-red-50 p-2 text-sm text-red-700">{error}</p>}
       {briefs.length > 0 && (
@@ -224,7 +225,7 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, docCount, onChan
           </div>
           {!(status === 'extracting' && stale) && (
             <button type="button" onClick={extract} disabled={busy || !narrativeText.trim()}
-              className="rounded bg-indigo-600 px-3 py-1.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+              className={BTN_SECONDARY}>
               拆解
             </button>
           )}
@@ -251,7 +252,7 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, docCount, onChan
           </label>
           {!(status === 'extracting' && stale) && (
             <button type="button" onClick={extract} disabled={busy}
-              className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+              className={BTN_SECONDARY}>
               拆解
             </button>
           )}
@@ -260,7 +261,7 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, docCount, onChan
       {(status === 'extracted' || (status === 'failed' && failedStage === 'draft')) && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button type="button" onClick={draft} disabled={busy || !!draftBlockedReason}
-            className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+            className={BTN_SECONDARY}>
             {status === 'failed' ? '重新起草' : '起草'}
           </button>
           <button type="button" onClick={reset} disabled={busy}
@@ -283,9 +284,6 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, docCount, onChan
           </button>
         </div>
       )}
-      {/* 卷證、對造書狀或主張有變時重新讀取，才會顯示「資料已變更，建議重新執行」（欄位同後端 health_fingerprint） */}
-      {status === 'drafted' && detail?.draft_id && <HealthCheckPanel key={`health-${docCount}-${claimsKey}`}
-        roundId={round.id} briefKind={kind} />}
       {claims.length > 0 && (
         <ol className="mt-3 space-y-1 text-sm text-slate-700">
           {claims.map((c) => (
@@ -355,8 +353,7 @@ function HeaderSection({ data, options, onSaved, onError }: {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-800">狀頭</h2>
         {!draft && (
-          <button type="button" onClick={() => setDraft(headerDraftFrom(data))}
-            className="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50">修改狀頭</button>
+          <button type="button" onClick={() => setDraft(headerDraftFrom(data))} className={BTN_PRIMARY}>修改狀頭</button>
         )}
       </div>
       {data.procedure_warning && (
@@ -366,7 +363,7 @@ function HeaderSection({ data, options, onSaved, onError }: {
         <form onSubmit={save} className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
           <CaseHeaderFields value={draft} onChange={setDraft} options={options} addresseeDefault={data.addressee_default} />
           <div className="flex gap-2">
-            <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-sm text-white">儲存狀頭</button>
+            <button type="submit" className={BTN_SECONDARY}>儲存狀頭</button>
             <button type="button" onClick={() => setDraft(null)} className="rounded border px-3 py-1 text-sm">取消</button>
           </div>
         </form>
@@ -410,8 +407,7 @@ function PartiesSection({ data, options, onSaved, onError }: {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-800">當事人</h2>
         {!draft && (
-          <button type="button" onClick={() => setDraft(toDrafts(data.parties))}
-            className="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50">修改當事人</button>
+          <button type="button" onClick={() => setDraft(toDrafts(data.parties))} className={BTN_SECONDARY}>修改當事人</button>
         )}
       </div>
       {draft ? (
@@ -419,7 +415,7 @@ function PartiesSection({ data, options, onSaved, onError }: {
           <PartiesEditor value={draft} onChange={setDraft} options={options} />
           <p className="text-xs text-slate-500">刪除的當事人若是某份對造書狀的遞狀人，該書狀的遞狀人會變成未指定。</p>
           <div className="flex gap-2">
-            <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-sm text-white">儲存當事人</button>
+            <button type="submit" className={BTN_SECONDARY}>儲存當事人</button>
             <button type="button" onClick={() => setDraft(null)} className="rounded border px-3 py-1 text-sm">取消</button>
           </div>
         </form>
@@ -469,7 +465,7 @@ function ExhibitRow({ exhibit, scanned, onSaved, onError }: {
             <input type="number" min={1} value={num} onChange={(e) => setNum(e.target.value)}
               aria-label={`${exhibit.label} 新號碼`} className="w-16 rounded border border-slate-300 px-1 py-0.5" />
             <button type="button" onClick={save} disabled={!(Number(num) >= 1)}
-              className="rounded bg-indigo-600 px-2 py-0.5 text-xs text-white disabled:opacity-50">儲存號碼</button>
+              className={BTN_SMALL}>儲存號碼</button>
             <button type="button" onClick={() => { setEditing(false); setNum(String(exhibit.number)) }}
               className="rounded border px-2 py-0.5 text-xs">取消</button>
           </>
@@ -482,14 +478,21 @@ function ExhibitRow({ exhibit, scanned, onSaved, onError }: {
   )
 }
 
+const TABS = [['info', '案件資料'], ['evidence', '卷證與時間軸'], ['briefs', '書狀'], ['health', '書狀健檢']] as const
+type TabKey = typeof TABS[number][0]
+
 export default function CaseDetail() {
   const { caseId = '' } = useParams()
   const navigate = useNavigate()
-  const notice = (useLocation().state as { notice?: string } | null)?.notice
+  const location = useLocation()
+  const notice = (location.state as { notice?: string } | null)?.notice
+  const [params, setParams] = useSearchParams()
+  const tab: TabKey = TABS.find(([k]) => k === params.get('tab'))?.[0] ?? 'info'
   const [data, setData] = useState<api.CaseDetail | null>(null)
   const [newKind, setNewKind] = useState<api.BriefKind | null>(null)  // 建立新一輪時選的書狀種類（沒選＝後端預設）
   const [options, setOptions] = useState<api.CaseOptions | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [source, setSource] = useState<api.CitationSource | null>(null)  // 卷證、健檢分頁右側的原文
   const evidenceRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
@@ -511,6 +514,14 @@ export default function CaseDetail() {
     await saved()
   }, [notice, navigate, caseId, saved])
   useEffect(() => { api.getCaseOptions().then(setOptions).catch((e: Error) => setError(e.message)) }, [])
+
+  // 分頁存在網址（?tab=），重新整理或分享連結都回到同一個分頁；沒選中的分頁不渲染，切回來時重新讀取
+  function selectTab(key: TabKey) {
+    const next = new URLSearchParams(params)
+    next.set('tab', key)
+    setParams(next, { replace: true, state: location.state })
+    setSource(null)
+  }
 
   async function uploadEvidence() {
     const file = evidenceRef.current?.files?.[0]
@@ -534,63 +545,113 @@ export default function CaseDetail() {
     }
   }
 
+  // 卷證說明、大事記、健檢的出處：在右側卡片顯示那一頁的原文並標出摘錄
+  async function showSource(s: api.SourceView) {
+    if (!s.page_id) return
+    try {
+      setSource(await api.getPageSource(s.page_id, s.quote))
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
   if (!data) return <p className="p-6 text-slate-600">{error ?? '載入中…'}</p>
   const docs = new Map(data.documents.map((d) => [d.id, d]))
+  const label = TABS.find(([k]) => k === tab)?.[1] ?? ''
+  const sourceCard = source && (
+    <aside className={`${CARD} h-fit lg:sticky lg:top-4 lg:max-h-[85vh] lg:overflow-auto`}>
+      <SourcePane source={source} />
+    </aside>
+  )
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-6">
-      <div>
-        <Link to="/cases" className="text-sm text-indigo-700 underline">← 案件列表</Link>
-        <h1 className="mt-2 text-2xl font-bold text-slate-900">{data.title}</h1>
-        <p className="text-sm text-slate-600">我方：{data.our_side === 'plaintiff' ? '原告' : '被告'}</p>
-        {notice && <p className="mt-2 rounded bg-yellow-50 p-2 text-sm text-yellow-800">{notice}</p>}
-      </div>
-
-      <HeaderSection data={data} options={options} onSaved={saved} onError={setError} />
-      <PartiesSection data={data} options={options} onSaved={partiesSaved} onError={setError} />
-
-      <section>
-        <h2 className="text-lg font-semibold text-slate-800">卷證</h2>
-        <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-          {data.exhibits.map((e) => (
-            <ExhibitRow key={`${e.id}-${e.number}`} exhibit={e} onSaved={load} onError={setError}
-              scanned={!!docs.get(e.document_id)?.pages.some((p) => p.needs_ocr)} />
-          ))}
-          {data.exhibits.length === 0 && <li className="px-4 py-2 text-sm text-slate-500">尚未上傳卷證</li>}
-        </ul>
-        <label className="mt-2 block text-sm text-slate-700">
-          上傳卷證（依上傳順序自動編號）
-          <input ref={evidenceRef} type="file" accept=".pdf,.docx,.txt" className="ml-2" onChange={uploadEvidence} />
-        </label>
-      </section>
-
-      {/* 卷證說明與大事記（設計 5.6、5.7）：只給律師參考，不進書狀 */}
-      <EvidenceNotesSection key={`notes-${data.exhibits.length}`} caseId={caseId} />
-      <TimelineSection key={`timeline-${data.documents.length}`} caseId={caseId} />
-
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-800">攻防輪次</h2>
-          <div className="flex items-center gap-2">
-            {(data.brief_kind_options ?? []).length > 0 && (
-              <select aria-label="書狀種類" value={newKind ?? data.default_brief_kind ?? ''}
-                onChange={(e) => setNewKind(e.target.value as api.BriefKind)}
-                className="rounded border border-slate-300 px-2 py-1.5 text-sm">
-                {(data.brief_kind_options ?? []).map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
-              </select>
-            )}
-            <button type="button" onClick={newRound} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
-              建立新一輪
-            </button>
-          </div>
+    <AppShell caseTitle={data.title} caseId={caseId}>
+      <div className="mx-auto max-w-6xl space-y-4 p-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">{data.title}</h1>
+          <p className="text-sm text-slate-600">我方：{data.our_side === 'plaintiff' ? '原告' : '被告'}</p>
+          {notice && <p className="mt-2 rounded bg-yellow-50 p-2 text-sm text-yellow-800">{notice}</p>}
         </div>
-        {data.rounds.map((r) => (
-          <RoundPanel key={r.id} caseId={caseId} caseType={data.case_type} round={r} parties={data.parties} onChanged={load}
-            docCount={data.documents.length}
-            briefs={data.documents.filter((d) => d.kind === 'opponent_brief' && d.round_id === r.id)} />
-        ))}
-      </section>
-      {error && <p className="text-sm text-red-700">{error}</p>}
-    </div>
+
+        <div role="tablist" aria-label="案件分頁" className="flex flex-wrap border-b border-slate-200 text-sm">
+          {TABS.map(([key, name]) => (
+            <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => selectTab(key)}
+              className={`px-4 py-2 ${tab === key
+                ? 'border-b-2 border-amber-500 font-medium text-slate-900' : 'text-slate-600 hover:text-slate-900'}`}>
+              {name}
+            </button>
+          ))}
+        </div>
+
+        <div role="tabpanel" aria-label={label} className="space-y-6">
+          {tab === 'info' && (
+            <>
+              <HeaderSection data={data} options={options} onSaved={saved} onError={setError} />
+              <PartiesSection data={data} options={options} onSaved={partiesSaved} onError={setError} />
+            </>
+          )}
+
+          {tab === 'evidence' && (
+            <div className={source ? 'grid gap-4 lg:grid-cols-[1fr_24rem]' : ''}>
+              <div className="space-y-6">
+                <section className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button type="button" onClick={() => evidenceRef.current?.click()} className={BTN_PRIMARY}>
+                      上傳卷證
+                    </button>
+                    <label className="sr-only">
+                      上傳卷證（依上傳順序自動編號）
+                      <input ref={evidenceRef} type="file" accept=".pdf,.docx,.txt" onChange={uploadEvidence} />
+                    </label>
+                    <span className="text-xs text-slate-500">依上傳順序自動編號</span>
+                  </div>
+                  <h2 className="text-lg font-semibold text-slate-800">卷證</h2>
+                  <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+                    {data.exhibits.map((e) => (
+                      <ExhibitRow key={`${e.id}-${e.number}`} exhibit={e} onSaved={load} onError={setError}
+                        scanned={!!docs.get(e.document_id)?.pages.some((p) => p.needs_ocr)} />
+                    ))}
+                    {data.exhibits.length === 0 && <li className="px-4 py-2 text-sm text-slate-500">尚未上傳卷證</li>}
+                  </ul>
+                </section>
+                {/* 卷證說明與大事記（設計 5.6、5.7）：只給律師參考，不進書狀 */}
+                <EvidenceNotesSection key={`notes-${data.exhibits.length}`} caseId={caseId} onShowSource={showSource} />
+                <TimelineSection key={`timeline-${data.documents.length}`} caseId={caseId} onShowSource={showSource} />
+              </div>
+              {sourceCard}
+            </div>
+          )}
+
+          {tab === 'briefs' && (
+            <section className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={newRound} className={BTN_PRIMARY}>建立新一輪</button>
+                {(data.brief_kind_options ?? []).length > 0 && (
+                  <select aria-label="書狀種類" value={newKind ?? data.default_brief_kind ?? ''}
+                    onChange={(e) => setNewKind(e.target.value as api.BriefKind)}
+                    className="rounded border border-slate-300 px-2 py-1.5 text-sm">
+                    {(data.brief_kind_options ?? []).map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+                  </select>
+                )}
+              </div>
+              <h2 className="text-lg font-semibold text-slate-800">攻防輪次</h2>
+              {data.rounds.map((r) => (
+                <RoundPanel key={r.id} caseId={caseId} caseType={data.case_type} round={r} parties={data.parties}
+                  onChanged={load}
+                  briefs={data.documents.filter((d) => d.kind === 'opponent_brief' && d.round_id === r.id)} />
+              ))}
+            </section>
+          )}
+
+          {tab === 'health' && (
+            <div className={source ? 'grid gap-4 lg:grid-cols-[1fr_24rem]' : ''}>
+              <HealthTab rounds={data.rounds} onShowSource={showSource} />
+              {sourceCard}
+            </div>
+          )}
+        </div>
+        {error && <p className="text-sm text-red-700">{error}</p>}
+      </div>
+    </AppShell>
   )
 }

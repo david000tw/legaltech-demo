@@ -14,7 +14,8 @@ vi.mock('../api', async (orig) => {
 })
 
 const draft: api.DraftView = {
-  id: 'dr1', round_id: 'r1', case_id: 'c1', can_review: true, brief_title: '民事準備書狀', procedure_warning: null,
+  id: 'dr1', round_id: 'r1', case_id: 'c1', case_title: '林大明車禍案', can_review: true, brief_title: '民事準備書狀',
+  procedure_warning: null,
   brief_kind: 'preparatory', case_type: 'traffic_tort', statement: null, statement_label: null, body_label: null,
   blockers: [{ paragraph_seq: 1, reason: 'unreviewed' }, { paragraph_seq: 1, reason: 'judgment_unconfirmed:J1' }],
   paragraphs: [{

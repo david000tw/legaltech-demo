@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import * as api from '../api'
+import AppShell from '../components/AppShell'
 import CitationTag from '../components/CitationTag'
 import EvidenceNotesSection from '../components/EvidenceNotesSection'
 import ExportButton, { reasonLabel } from '../components/ExportButton'
 import SourcePane from '../components/SourcePane'
 import StatementBlock, { AmountButtons, ClaimValueField } from '../components/StatementBlock'
 import TimelineSection from '../components/TimelineSection'
+import { BTN_SECONDARY } from '../ui'
 
 // 草稿頁左側：原文對照（引用與出處的原文）、卷證說明、大事記（設計 5.6、5.7，只看不改）
 const SIDE_TABS = [['source', '原文對照'], ['notes', '卷證說明'], ['timeline', '大事記']] as const
@@ -73,13 +75,13 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
           </label>
           <p className="text-xs text-slate-500">引用請保留 {'{{cite:代碼}}'}／{'{{quote:代碼}}'} 標記，不要直接寫字號、條號或原證號。</p>
           <div className="flex gap-2">
-            <button type="button" onClick={save} disabled={busy} className="rounded bg-indigo-600 px-3 py-1 text-sm text-white">儲存</button>
+            <button type="button" onClick={save} disabled={busy} className={BTN_SECONDARY}>儲存</button>
             <button type="button" onClick={() => { setEditing(false); setText(p.text); setHeading(p.heading_text) }}
               className="rounded border px-3 py-1 text-sm">取消</button>
           </div>
         </div>
       ) : (
-        <p className="whitespace-pre-wrap leading-7 text-slate-800">{p.rendered_text}</p>
+        <p className="font-kai whitespace-pre-wrap leading-7 text-slate-800">{p.rendered_text}</p>
       )}
       {p.verify_reasons.length > 0 && (
         <ul className="text-sm text-red-700">{p.verify_reasons.map((r) => <li key={r}>{reasonLabel(r)}</li>)}</ul>
@@ -194,6 +196,7 @@ export default function DraftEditor() {
 
   if (!draft) return <p className="p-6 text-slate-600">{error ?? '載入中…'}</p>
   return (
+    <AppShell caseTitle={draft.case_title} caseId={draft.case_id}>
     <div className="mx-auto max-w-7xl space-y-4 p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -245,5 +248,6 @@ export default function DraftEditor() {
         </div>
       </div>
     </div>
+    </AppShell>
   )
 }

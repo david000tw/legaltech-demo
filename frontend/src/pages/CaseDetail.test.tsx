@@ -12,7 +12,8 @@ vi.mock('../api', async (orig) => {
     resetRound: vi.fn(), patchClaim: vi.fn(), copyRound: vi.fn(), patchRound: vi.fn(), confirmClaim: vi.fn(),
     addRequest: vi.fn(), deleteClaim: vi.fn(), uploadDocument: vi.fn(),
     renumberExhibit: vi.fn(), getCaseOptions: vi.fn(), patchCase: vi.fn(), putParties: vi.fn(), setDocumentFiler: vi.fn(),
-    getEvidenceNotes: vi.fn(), getTimeline: vi.fn(), getHealthReport: vi.fn(), runHealthCheck: vi.fn() }
+    getEvidenceNotes: vi.fn(), getTimeline: vi.fn(), getHealthReport: vi.fn(), runHealthCheck: vi.fn(),
+    getPageSource: vi.fn() }
 })
 
 const emptyHeader: api.CaseHeader = { court: null, case_number: null, division: null, cause: null, addressee: null,
@@ -38,12 +39,17 @@ const baseCase: api.CaseDetail = {
   default_brief_kind: 'preparatory',
 }
 
-function renderAt(state?: unknown) {
+function renderAt(state?: unknown, search = '') {
   return render(
-    <MemoryRouter initialEntries={[{ pathname: '/cases/c1', state }]}>
+    <MemoryRouter initialEntries={[{ pathname: '/cases/c1', search, state }]}>
       <Routes><Route path="/cases/:caseId" element={<CaseDetail />} /></Routes>
     </MemoryRouter>,
   )
+}
+
+// 案件頁分成分頁（子專案丙）：既有測試先切到對應的分頁，斷言內容不變
+async function openTab(name: string) {
+  await userEvent.click(await screen.findByRole('tab', { name }))
 }
 
 beforeEach(() => {
@@ -62,6 +68,7 @@ describe('CaseDetail', () => {
       status: id === 'r1' ? 'drafted' : 'extracted', error: null, stale: false, brief_kind: 'preparatory',
       failed_stage: null, draft_id: id === 'r1' ? 'dr1' : null, claims: [] }))
     renderAt()
+    await openTab('書狀健檢')
     expect(await screen.findAllByRole('button', { name: '執行健檢' })).toHaveLength(1)
     expect(api.getHealthReport).toHaveBeenCalledWith('r1')
     expect(api.getHealthReport).not.toHaveBeenCalledWith('r2')
@@ -83,17 +90,21 @@ describe('CaseDetail', () => {
       job: null }))
     vi.mocked(api.uploadDocument).mockResolvedValue({ id: 'd9', page_count: 1 })
     renderAt()
+    await openTab('書狀健檢')
     expect(await screen.findByRole('button', { name: '重新執行健檢' })).toBeInTheDocument()
     expect(screen.queryByText('資料已變更，建議重新執行')).not.toBeInTheDocument()
     const file = new File(['計程車收據'], '06_收據.txt', { type: 'text/plain' })
+    await openTab('卷證與時間軸')
     await userEvent.upload(screen.getByLabelText('上傳卷證（依上傳順序自動編號）'), file)
     expect(api.uploadDocument).toHaveBeenCalledWith('c1', file, 'evidence')
+    await openTab('書狀健檢')
     expect(await screen.findByText('資料已變更，建議重新執行')).toBeInTheDocument()
   })
 
   it('shows the evidence notes and timeline sections after the exhibits', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
     renderAt()
+    await openTab('卷證與時間軸')
     expect(await screen.findByRole('button', { name: '產生卷證說明' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '整理大事記' })).toBeInTheDocument()
     const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
@@ -109,6 +120,7 @@ describe('CaseDetail', () => {
     vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'failed', stale: false, brief_kind: 'preparatory', failed_stage: null, draft_id: null,
       error: "usage_limit: You've hit your session limit", claims: [] })
     renderAt()
+    await openTab('卷證與時間軸')
     expect(await screen.findByText('原證1')).toBeInTheDocument()
     expect(screen.getByText('原證2')).toBeInTheDocument()
     expect(screen.getByText('待辨識')).toBeInTheDocument()
@@ -118,6 +130,7 @@ describe('CaseDetail', () => {
     vi.mocked(api.getCase).mockResolvedValue(baseCase)
     vi.mocked(api.renumberExhibit).mockResolvedValue({ id: 'e1', label: '原證7', number: 7 })
     renderAt()
+    await openTab('卷證與時間軸')
     await userEvent.click(await screen.findByRole('button', { name: '改號 原證1' }))
     const box = screen.getByRole('spinbutton', { name: '原證1 新號碼' })
     await userEvent.clear(box)
@@ -131,6 +144,7 @@ describe('CaseDetail', () => {
   it('shows the error of a failed round', async () => {
     vi.mocked(api.getCase).mockResolvedValue(baseCase)
     renderAt()
+    await openTab('書狀')
     expect(await screen.findByText(/usage_limit: You've hit your session limit/)).toBeInTheDocument()
   })
 
@@ -139,6 +153,7 @@ describe('CaseDetail', () => {
     vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', stale: false, brief_kind: 'preparatory', failed_stage: null, draft_id: 'dr1',
       error: null, claims: [] })
     renderAt()
+    await openTab('書狀')
     const link = await screen.findByRole('link', { name: '開啟草稿' })
     expect(link).toHaveAttribute('href', '/drafts/dr1')
   })
@@ -154,6 +169,7 @@ describe('CaseDetail references', () => {
         { text: '民法第1030條之1', status: 'unmatched', code: null },
       ] }] })
     renderAt()
+    await openTab('書狀')
     expect(await screen.findByText('系統對回：民法第184條第1項前段')).toBeInTheDocument()
     expect(screen.getByText('對到判決但無法確定段落：臺灣臺中地方法院113年度中簡字第3946號民事判決')).toBeInTheDocument()
     expect(screen.getByText('不在候選清單：民法第1030條之1')).toBeInTheDocument()
@@ -235,6 +251,7 @@ describe('CaseDetail header and parties', () => {
       error: null, claims: [] })
     vi.mocked(api.uploadDocument).mockResolvedValue({ id: 'd9', page_count: 1 })
     renderAt()
+    await openTab('書狀')
     const filer = await screen.findByLabelText('遞狀人')
     expect(filer).toHaveValue('pt2')  // 只有一位對造：預設就是他
     expect(within(filer).queryByRole('option', { name: /宋文彬/ })).not.toBeInTheDocument()  // 我方不會是對造書狀的遞狀人
@@ -258,6 +275,7 @@ describe('CaseDetail brief filer and notices', () => {
   it('leaves the filer unspecified when there are several opposing parties', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: TWO_OPPOSING, rounds: created })
     renderAt()
+    await openTab('書狀')
     expect(await screen.findByLabelText('遞狀人')).toHaveValue('')
     expect(screen.getByText(/對造有好幾位/)).toBeInTheDocument()
   })
@@ -269,6 +287,7 @@ describe('CaseDetail brief filer and notices', () => {
       documents: [...baseCase.documents, brief] })
     vi.mocked(api.setDocumentFiler).mockResolvedValue({ id: 'd3', filed_by_party_id: 'pt4' })
     renderAt()
+    await openTab('書狀')
     const select = await screen.findByLabelText('答辯狀.txt 的遞狀人')
     expect(select).toHaveValue('pt2')
     const before = vi.mocked(api.getCase).mock.calls.length
@@ -285,6 +304,7 @@ describe('CaseDetail brief filer and notices', () => {
     vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', stale: false, brief_kind: 'preparatory', failed_stage: null, draft_id: 'dr1',
       error: null, claims: [] })
     renderAt()
+    await openTab('書狀')
     expect(await screen.findByText('答辯狀.txt：遞狀人未指定')).toBeInTheDocument()
     expect(screen.queryByLabelText('答辯狀.txt 的遞狀人')).not.toBeInTheDocument()
   })
@@ -318,6 +338,7 @@ describe('CaseDetail brief filer and notices', () => {
       .mockResolvedValue({ ...extracted, claims: [extracted.claims[0], { ...extracted.claims[1], selected: false }] })
     vi.mocked(api.patchClaim).mockResolvedValue({ ...extracted.claims[1], selected: false })
     renderAt()
+    await openTab('書狀')
     const box = await screen.findByRole('checkbox', { name: '回應 主張2' })
     expect(box).toBeChecked()
     await userEvent.click(box)
@@ -330,6 +351,7 @@ describe('CaseDetail brief filer and notices', () => {
     vi.mocked(api.getRound).mockResolvedValue(extracted)
     vi.mocked(api.draftRound).mockResolvedValue({ status: 'drafting' })
     renderAt()
+    await openTab('書狀')
     await userEvent.click(await screen.findByRole('button', { name: '起草' }))
     expect(api.draftRound).toHaveBeenCalledWith('r1')
   })
@@ -341,6 +363,7 @@ describe('CaseDetail brief filer and notices', () => {
       .mockResolvedValue({ status: 'created' })
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderAt()
+    await openTab('書狀')
     await userEvent.click(await screen.findByRole('button', { name: '重新拆解' }))
     await waitFor(() => expect(api.resetRound).toHaveBeenLastCalledWith('r1', true))
     expect(confirm).toHaveBeenCalledWith('會清除勾選，確定要重新拆解嗎？')
@@ -352,6 +375,7 @@ describe('CaseDetail brief filer and notices', () => {
     vi.mocked(api.getRound).mockResolvedValue({ ...extracted, status: 'drafting', stale: true })
     vi.mocked(api.draftRound).mockResolvedValue({ status: 'drafting' })
     renderAt()
+    await openTab('書狀')
     await userEvent.click(await screen.findByRole('button', { name: '重新開始' }))
     expect(api.draftRound).toHaveBeenCalledWith('r1')
   })
@@ -361,6 +385,7 @@ describe('CaseDetail brief filer and notices', () => {
     vi.mocked(api.getRound).mockResolvedValue({ ...extracted, status: 'failed', failed_stage: 'draft', error: 'timeout: slow' })
     vi.mocked(api.draftRound).mockResolvedValue({ status: 'drafting' })
     renderAt()
+    await openTab('書狀')
     await userEvent.click(await screen.findByRole('button', { name: '重新起草' }))
     expect(api.draftRound).toHaveBeenCalledWith('r1')
   })
@@ -386,6 +411,7 @@ describe('CaseDetail brief filer and notices', () => {
     vi.mocked(api.getRound).mockResolvedValue(complaintRound)
     vi.mocked(api.confirmClaim).mockResolvedValue(complaintRound.claims[1])
     renderAt()
+    await openTab('書狀')
     expect(await screen.findByText('第1輪・起訴狀')).toBeInTheDocument()
     expect(await screen.findByText('還有 1 個請求項目尚未確認')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '起草' })).toBeDisabled()
@@ -405,6 +431,7 @@ describe('CaseDetail brief filer and notices', () => {
         copied_from_seq: null }] })
     vi.mocked(api.getRound).mockResolvedValue({ ...complaintRound, can_review: false })
     renderAt()
+    await openTab('書狀')
     expect(await screen.findByText('第1輪・起訴狀')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '確認 請求項目2' })).not.toBeInTheDocument()
   })
@@ -417,6 +444,7 @@ describe('CaseDetail brief filer and notices', () => {
     vi.mocked(api.patchRound).mockResolvedValue({})
     vi.mocked(api.extractRound).mockResolvedValue({ status: 'extracting' })
     renderAt()
+    await openTab('書狀')
     await userEvent.type(await screen.findByLabelText('案情說明'), '原告請求醫療費。')
     await userEvent.click(screen.getByRole('button', { name: '拆解' }))
     expect(api.patchRound).toHaveBeenCalledWith('r1', expect.objectContaining({ narrative: '原告請求醫療費。' }))
@@ -432,6 +460,7 @@ describe('CaseDetail brief filer and notices', () => {
     vi.mocked(api.getRound).mockResolvedValue({ ...complaintRound, status: 'created', narrative: null, claims: [] })
     vi.mocked(api.patchRound).mockResolvedValue({})
     renderAt()
+    await openTab('書狀')
     await userEvent.type(await screen.findByLabelText('案情說明'), '原告請求醫療費。')
     expect(api.patchRound).not.toHaveBeenCalled()
     await userEvent.tab()
@@ -448,6 +477,7 @@ describe('CaseDetail brief filer and notices', () => {
       ? { ...extracted, id: 'r1', status: 'drafted', draft_id: 'dr1' } : { ...extracted, id: 'r2', seq: 2 })
     vi.mocked(api.copyRound).mockResolvedValue({ id: 'r3', seq: 3 })
     renderAt()
+    await openTab('書狀')
     expect(await screen.findByText('（由第1輪複製）')).toBeInTheDocument()
     const buttons = await screen.findAllByRole('button', { name: '以這一輪為基礎重新起草' })
     expect(buttons).toHaveLength(1)
@@ -461,10 +491,93 @@ describe('CaseDetail brief filer and notices', () => {
       default_brief_kind: 'complaint' })
     vi.mocked(api.createRound).mockResolvedValue({ id: 'r1', seq: 1 })
     renderAt()
+    await openTab('書狀')
     const select = await screen.findByLabelText('書狀種類')
     expect(select).toHaveValue('complaint')
     await userEvent.selectOptions(select, 'preparatory')
     await userEvent.click(screen.getByRole('button', { name: '建立新一輪' }))
     expect(api.createRound).toHaveBeenCalledWith('c1', 'preparatory')
+  })
+})
+
+describe('CaseDetail tabs', () => {
+  const drafted = (id: string, seq: number) => ({ id, seq, status: 'drafted' as const, error: null,
+    brief_kind: 'preparatory' as const, failed_stage: null, copied_from_seq: null })
+  const roundDetail = (id: string, status: api.RoundStatus) => ({ id, seq: Number(id.slice(1)), status, error: null,
+    stale: false, brief_kind: 'preparatory' as const, failed_stage: null, draft_id: status === 'drafted' ? `d${id}` : null,
+    claims: [] })
+
+  it('opens on 案件資料 and switches tabs via ?tab=', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
+    renderAt()
+    const info = await screen.findByRole('tab', { name: '案件資料' })
+    expect(info).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('heading', { name: '狀頭' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '卷證' })).not.toBeInTheDocument()
+    await openTab('書狀')
+    expect(screen.getByRole('tab', { name: '書狀' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('heading', { name: '攻防輪次' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '狀頭' })).not.toBeInTheDocument()
+  })
+
+  it('opens the tab named in the address', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
+    renderAt(undefined, '?tab=evidence')
+    expect(await screen.findByRole('heading', { name: '卷證' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '卷證與時間軸' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('each tab has exactly one amber primary button', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [drafted('r1', 1)] })
+    vi.mocked(api.getRound).mockResolvedValue(roundDetail('r1', 'drafted'))
+    renderAt()
+    const expected: Record<string, string> = { 案件資料: '修改狀頭', 卷證與時間軸: '上傳卷證', 書狀: '建立新一輪',
+      書狀健檢: '執行健檢' }
+    for (const [tab, primary] of Object.entries(expected)) {
+      await openTab(tab)
+      const panel = screen.getByRole('tabpanel')
+      await within(panel).findByRole('button', { name: primary })
+      const buttons = within(panel).getAllByRole('button')
+      const amber = buttons.filter((b) => b.className.includes('bg-amber-500'))
+      expect(amber.map((b) => b.textContent), tab).toEqual([primary])
+      expect(buttons[0], tab).toBe(amber[0])
+    }
+  })
+
+  it('health tab shows the latest drafted round', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [drafted('r1', 1), drafted('r2', 2),
+      { ...drafted('r3', 3), status: 'extracted' }] })
+    renderAt(undefined, '?tab=health')
+    const select = await screen.findByLabelText('健檢的輪次')
+    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['第1輪・準備書狀', '第2輪・準備書狀'])
+    expect(select).toHaveValue('r2')
+    await waitFor(() => expect(api.getHealthReport).toHaveBeenCalledWith('r2'))
+    expect(api.getHealthReport).not.toHaveBeenCalledWith('r1')
+    await userEvent.selectOptions(select, 'r1')
+    await waitFor(() => expect(api.getHealthReport).toHaveBeenCalledWith('r1'))
+  })
+
+  it('shows the original page from the evidence tab', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
+    const source: api.SourceView = { page_id: 'p1', label: '原證1 第1頁', quote: '未讓幹道車先行', status: 'found',
+      reasons: [] }
+    vi.mocked(api.getEvidenceNotes).mockResolvedValue({ documents: [{ document_id: 'd1', exhibit: '原證1',
+      filename: '01_研判表.txt', needs_notes: false, pending_ocr: [],
+      notes: [{ id: 'n1', kind: 'proves', text: '可證明被告未讓幹道車先行', origin: 'ai', source }] }], job: null })
+    vi.mocked(api.getPageSource).mockResolvedValue({ kind: 'evidence', title: '原證1（01_研判表.txt）第1頁',
+      text: '研判結果：未讓幹道車先行。', span: [5, 12], annotation: null })
+    renderAt(undefined, '?tab=evidence')
+    await userEvent.click(await screen.findByRole('button', { name: '原文出處：原證1 第1頁' }))
+    expect(api.getPageSource).toHaveBeenCalledWith('p1', '未讓幹道車先行')
+    expect(await screen.findByText('原證1（01_研判表.txt）第1頁')).toBeInTheDocument()
+    expect(screen.getByTestId('source-pane')).toBeInTheDocument()
+  })
+
+  it('shows minutes while AI runs', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
+    vi.mocked(api.getEvidenceNotes).mockResolvedValue({ documents: [], job: { id: 'j1', status: 'running', error: null,
+      started_at: '2026-11-24T00:00:00Z', stale: false } })
+    renderAt(undefined, '?tab=evidence')
+    expect(await screen.findByText('AI 處理中，約需 1 分鐘')).toBeInTheDocument()
   })
 })

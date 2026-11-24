@@ -51,7 +51,12 @@ def documents_needing_notes(s: Session, case_id: UUID) -> list[Document]:
             if _has_text(pages) and doc.notes_fingerprint != document_fingerprint(s, doc.id)]
 
 
+NO_TEXT = "還沒有可讀文字的卷證：請上傳文字檔或可選取文字的 PDF；掃描檔要等辨識功能完成"
+
+
 def ready(s: Session, case_id: UUID) -> None:
+    if not any(_has_text(pages) for _, _, pages in evidence_documents(s, case_id)):
+        raise JobRule("no_text", NO_TEXT)
     if not documents_needing_notes(s, case_id):
         raise JobRule("no_pending", "所有卷證都已有說明，原文也沒有變更")
 

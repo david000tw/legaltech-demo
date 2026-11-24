@@ -4,3 +4,8 @@ body {
   @apply bg-slate-50 text-slate-900;
   font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
 }
+
+/* 書狀內文與聲明：與匯出的 Word 一樣用標楷體 */
+.font-kai {
+  font-family: "DFKai-SB", "BiauKai", "標楷體", "Kaiti TC", serif;
+}

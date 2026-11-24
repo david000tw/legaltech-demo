@@ -36,7 +36,7 @@ describe('EvidenceNotesSection', () => {
     render(<EvidenceNotesSection caseId="c1" pollMs={20} />)
     await userEvent.click(await screen.findByRole('button', { name: '產生卷證說明' }))
     expect(api.generateEvidenceNotes).toHaveBeenCalledWith('c1')
-    expect(await screen.findByText('AI 處理中，請稍候')).toBeInTheDocument()
+    expect(await screen.findByText('AI 處理中，約需 1 分鐘')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '產生卷證說明' })).toBeDisabled()
     expect(await screen.findByText('可證明原告支出醫療費用')).toBeInTheDocument()
     expect(screen.getByText('證明方向')).toBeInTheDocument()

@@ -2,6 +2,7 @@
 // 訴之聲明的金額是系統標記 {{amount}}，畫面顯示系統加總後的金額；律師要改金額得回到請求項目。
 import { useState } from 'react'
 import * as api from '../api'
+import { BTN_SECONDARY } from '../ui'
 import { reasonLabel } from './ExportButton'
 
 function amountOf(reason: string): number | null {
@@ -96,13 +97,13 @@ export default function StatementBlock({ draft, onChanged, onError }: {
           <div className="flex gap-2">
             <button type="button" disabled={busy}
               onClick={() => act(async () => { await api.patchParagraph(st.id, text, [], ''); setEditing(false) })}
-              className="rounded bg-indigo-600 px-3 py-1 text-sm text-white">儲存</button>
+              className={BTN_SECONDARY}>儲存</button>
             <button type="button" onClick={() => { setEditing(false); setText(st.text) }}
               className="rounded border px-3 py-1 text-sm">取消</button>
           </div>
         </div>
       ) : (
-        <p className="whitespace-pre-wrap leading-7 text-slate-800">{st.rendered_text}</p>
+        <p className="font-kai whitespace-pre-wrap leading-7 text-slate-800">{st.rendered_text}</p>
       )}
       {estate && draft.brief_kind === 'answer' && (
         <p className="text-xs text-amber-700">如主張其他分割方法，請改寫聲明並附附表</p>

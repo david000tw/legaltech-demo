@@ -164,7 +164,8 @@ def test_precheck_runs_under_lock(lawyer_client):
     case_id, _ = make_round(firm)  # 沒有卷證：沒有要產生說明的卷證
     r = client.post(f"/api/cases/{case_id}/evidence-notes")
     assert r.status_code == 409
-    assert r.json()["detail"] == {"code": "no_pending", "message": "所有卷證都已有說明，原文也沒有變更"}
+    # 子專案丙 Task 7：完全沒有可讀文字的卷證時改說明原因（原訊息只用在「都已有說明」）
+    assert r.json()["detail"]["code"] == "no_text"
     with tenant_session(firm) as s:
         assert s.scalar(select(func.count()).select_from(AIJob)) == 0
 

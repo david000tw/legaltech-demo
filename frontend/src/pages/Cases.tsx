@@ -2,8 +2,10 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import * as api from '../api'
 import { attorneyProblem, emptyHeaderDraft, headerInput, toInputs, type HeaderDraft, type PartyDraft } from '../caseForms'
+import AppShell from '../components/AppShell'
 import CaseHeaderFields from '../components/CaseHeaderFields'
 import PartiesEditor from '../components/PartiesEditor'
+import { BTN_PRIMARY } from '../ui'
 
 export default function Cases() {
   const navigate = useNavigate()
@@ -54,6 +56,7 @@ export default function Cases() {
   }
 
   return (
+    <AppShell>
     <div className="mx-auto max-w-4xl space-y-6 p-6">
       <h1 className="text-2xl font-bold text-slate-900">案件</h1>
       <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
@@ -87,11 +90,12 @@ export default function Cases() {
         <CaseHeaderFields value={header} onChange={setHeader} options={options} />
         <PartiesEditor value={parties} onChange={setParties} options={options} />
         <button type="submit" disabled={busy}
-          className="rounded bg-indigo-600 px-4 py-1.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+          className={BTN_PRIMARY}>
           建立案件
         </button>
       </form>
       {error && <p className="text-sm text-red-700">{error}</p>}
     </div>
+    </AppShell>
   )
 }

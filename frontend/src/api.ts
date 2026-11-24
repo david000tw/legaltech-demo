@@ -113,7 +113,8 @@ export type ParagraphView = { id: string; seq: number; kind?: 'body' | 'statemen
   version: string; status: 'unreviewed' | 'reviewed'; verify_reasons: string[]; reviewed_bar_number: string | null;
   reviewed_at: string | null; citations: CitationView[] }
 // brief_title：依程序的書狀名稱（民事／家事準備書狀）；procedure_warning：案號與案型程序不一致時的提醒（不阻擋匯出）
-export type DraftView = { id: string; round_id: string; case_id: string; can_review: boolean; brief_title: string
+export type DraftView = { id: string; round_id: string; case_id: string; case_title: string; can_review: boolean
+  brief_title: string
   procedure_warning: string | null; paragraphs: ParagraphView[]; blockers: Blocker[]
   // 起訴狀、答辯狀的聲明區塊（放在內文前、不佔段落編號）；body_label＝內文標題（事實及理由／答辯理由）
   brief_kind?: BriefKind; case_type?: string; statement?: ParagraphView | null; statement_label?: string | null

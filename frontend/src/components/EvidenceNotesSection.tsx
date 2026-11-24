@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api'
-import { BUSY_TEXT, POLL_MS, useJobPolling } from '../aiJobs'
+import { busyText, POLL_MS, useJobPolling } from '../aiJobs'
+import { BTN_SECONDARY, BTN_SMALL } from '../ui'
 import SourceBadge from './SourceBadge'
 
 const KIND_TITLE: Record<api.EvidenceNoteView['kind'], string> = { proves: '證明方向', caution: '注意事項' }
@@ -34,7 +35,7 @@ function NoteItem({ note, onChanged, onError, onShowSource, compact }: {
             className="w-full rounded border border-slate-300 p-2 text-sm" />
           <div className="flex gap-2">
             <button type="button" disabled={!text.trim()} onClick={() => act(() => api.patchEvidenceNote(note.id, text))}
-              className="rounded bg-indigo-600 px-2 py-0.5 text-xs text-white disabled:opacity-50">儲存</button>
+              className={BTN_SMALL}>儲存</button>
             <button type="button" onClick={() => { setEditing(false); setText(note.text) }}
               className="rounded border px-2 py-0.5 text-xs">取消</button>
           </div>
@@ -94,12 +95,12 @@ export default function EvidenceNotesSection({ caseId, pollMs = POLL_MS, compact
       <div className="flex flex-wrap items-center gap-3">
         {!compact && (
           <button type="button" onClick={generate} disabled={running}
-            className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+            className={BTN_SECONDARY}>
             產生卷證說明
           </button>
         )}
         <h2 className="text-lg font-semibold text-slate-800">卷證說明</h2>
-        {running && <span className="text-sm text-amber-700">{BUSY_TEXT}</span>}
+        {running && <span className="text-sm text-amber-700">{busyText('evidence_notes')}</span>}
       </div>
       {job?.status === 'failed' && job.error && <p className="text-sm text-red-700">{job.error}</p>}
       {message && <p className="text-sm text-red-700">{message}</p>}
