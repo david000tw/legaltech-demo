@@ -20,10 +20,12 @@ from app.models import RUNNING_STATUSES, Candidate, Claim, Draft, Firm, Round
 from app.pipeline.candidates import build_candidates, select_for_claims
 from app.pipeline.claims import extract_claims, opponent_pages, selected_claims
 from app.pipeline.drafting import draft_round
+from app.pipeline.requests import evidence_pages, extract_requests
 
 log = logging.getLogger(__name__)
 STALE_AFTER = timedelta(minutes=45)  # 須大於單一步驟最長時間（逾時 600 秒 × 重試）
 NO_TEXT = "no_text: 對造書狀沒有可讀文字（可能是掃描檔），請改上傳文字檔，或等計畫 2 的辨識功能"
+NO_EVIDENCE_TEXT = "no_text: 我方卷證沒有可讀文字（可能都是掃描檔），請改上傳文字檔，或等計畫 2 的辨識功能"
 Stage = Literal["extract", "draft"]
 _RUNNING = {"extract": "extracting", "draft": "drafting"}
 
@@ -65,8 +67,21 @@ def _check_transition(rnd: Round, stage: Stage) -> None:
 
 
 def _check_draft_ready(s: Session, rnd: Round) -> None:
+    if rnd.brief_kind == "complaint":  # 起訴狀：每個請求項目都要律師確認過金額（設計 5.2）
+        items = list(s.scalars(select(Claim).where(Claim.round_id == rnd.id, Claim.kind == "request")))
+        if not items:
+            raise RoundRule("no_requests", "還沒有任何請求項目")
+        unconfirmed = sum(1 for c in items if c.confirmed_by is None)
+        if unconfirmed:
+            raise RoundRule("unconfirmed_requests", f"還有 {unconfirmed} 個請求項目尚未確認")
+        return
     if not selected_claims(s, rnd.id):
         raise RoundRule("no_selection", "沒有勾選任何主張")
+
+
+def _check_extract_ready(rnd: Round) -> None:
+    if rnd.brief_kind == "complaint" and not (rnd.narrative or "").strip():
+        raise RoundRule("no_narrative", "請先填寫案情說明")
 
 
 def start_stage(s: Session, round_id: UUID, stage: Stage) -> None:
@@ -74,6 +89,8 @@ def start_stage(s: Session, round_id: UUID, stage: Stage) -> None:
     _check_transition(rnd, stage)
     if stage == "draft":
         _check_draft_ready(s, rnd)
+    else:
+        _check_extract_ready(rnd)
     models = (Draft, Claim, Candidate) if stage == "extract" else (Draft, Candidate)
     for model in models:
         s.execute(delete(model).where(model.round_id == round_id))
@@ -117,7 +134,9 @@ def _mark_failed(firm_id: UUID, round_id: UUID, error: str, token: datetime | No
 
 
 class _NoText(Exception):
-    pass
+    def __init__(self, message: str = NO_TEXT):
+        super().__init__(message)
+        self.message = message
 
 
 def _run(stage: Stage, body: Callable[[Session, AIProvider, datetime | None], None], firm_id: UUID,
@@ -132,8 +151,8 @@ def _run(stage: Stage, body: Callable[[Session, AIProvider, datetime | None], No
             body(s, provider, token)
     except _Superseded:
         log.info("round %s superseded by a newer run; discarding results", round_id)
-    except _NoText:
-        _mark_failed(firm_id, round_id, NO_TEXT, token, stage)
+    except _NoText as e:
+        _mark_failed(firm_id, round_id, e.message, token, stage)
     except AIError as e:
         _mark_failed(firm_id, round_id, f"{e.kind}: {e.message}", token, stage)
     except (ProviderNotAllowed, ProviderNotEnabled) as e:
@@ -147,9 +166,15 @@ def run_extract(firm_id: UUID, round_id: UUID, member_id: UUID | None, settings:
                 provider: AIProvider | None = None,
                 provider_factory: Callable[[Settings, Firm], AIProvider] = get_provider) -> None:
     def body(s: Session, provider: AIProvider, token) -> None:
-        if not any(op.text is not None and op.text.text.strip() for op in opponent_pages(s, round_id)):
-            raise _NoText()
-        extract_claims(s, round_id, provider, member_id)
+        rnd = s.get(Round, round_id)
+        if rnd.brief_kind == "complaint":  # 起訴狀：沒有對造書狀，從我方卷證整理請求項目
+            if not any(ep.text is not None and ep.text.text.strip() for ep in evidence_pages(s, rnd.case_id)):
+                raise _NoText(NO_EVIDENCE_TEXT)
+            extract_requests(s, round_id, provider, member_id)
+        else:
+            if not any(op.text is not None and op.text.text.strip() for op in opponent_pages(s, round_id)):
+                raise _NoText()
+            extract_claims(s, round_id, provider, member_id)
         _still_current(s, round_id, token)
         rnd = s.get(Round, round_id)
         rnd.status, rnd.error = "extracted", None

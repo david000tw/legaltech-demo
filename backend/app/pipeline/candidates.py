@@ -62,7 +62,7 @@ def _unique(items: list) -> list:
 def build_candidates(s: Session, round_id: UUID) -> list[Candidate]:
     rnd = s.get(Round, round_id)
     claims = _claims(s, round_id)
-    queries = [f"{c.summary} {c.quote}" for c in claims]
+    queries = [claim_query(c) for c in claims]
 
     all_pages = _evidence_pages(s, rnd.case_id)
     if sum(estimate_tokens(pt.text) for pt in all_pages) <= EVIDENCE_TOKEN_BUDGET:
@@ -124,8 +124,36 @@ def filer_line(filers: dict | None, claim: Claim) -> str:
     return f"\n　提出者：{filers[claim.id]}" if filers and claim.id in filers else ""
 
 
+def claim_query(c: Claim) -> str:
+    """建候選時的搜尋字串：主張＝摘要＋原文；請求項目＝名稱＋請求權基礎＋佐證原文。"""
+    if c.kind == "request":
+        return " ".join([c.summary, c.basis_text or "", *(e.get("quote", "") for e in c.evidence or [])])
+    return f"{c.summary} {c.quote}"
+
+
+def claim_title(c: Claim) -> str:
+    if c.kind == "request":
+        what = f"新臺幣{c.amount:,}元" if c.request_type == "monetary" and c.amount is not None else "非金錢請求"
+        return f"請求項目{c.seq}：{c.summary}（{what}）"
+    return f"主張{c.seq}：{c.summary}"
+
+
+def claim_source(c: Claim) -> str:
+    """主張附原文；請求項目附找得到的佐證原文（找不到的不給 AI，避免被當成事實）。"""
+    if c.kind == "request":
+        return "".join(f"\n　佐證：「{e['quote']}」（{e.get('exhibit', '')}第{e.get('page_no')}頁）"
+                       for e in c.evidence or [] if e.get("found"))
+    return f"\n　原文：「{c.quote}」"
+
+
+def claims_header(brief_kind: str, with_results: bool = False) -> str:
+    if brief_kind == "complaint":
+        return "【我方請求項目與對應結果】" if with_results else "【我方請求項目】"
+    return "【對造主張與對應結果】" if with_results else "【對造主張】"
+
+
 def format_claims(claims: list[Claim], filers: dict | None = None) -> str:
-    return "\n".join(f"主張{c.seq}：{c.summary}{filer_line(filers, c)}\n　原文：「{c.quote}」" for c in claims)
+    return "\n".join(f"{claim_title(c)}{filer_line(filers, c)}{claim_source(c)}" for c in claims)
 
 
 def _empty_selection() -> dict:
@@ -187,7 +215,8 @@ def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_i
     claims = _claims(s, round_id)
     cands = round_candidates(s, round_id)
     user = (case_context(s, case, rnd.brief_kind) + "\n\n"
-            f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張】\n{format_claims(claims, claim_filers(s, claims))}\n\n"
+            f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n{claims_header(rnd.brief_kind)}\n"
+            f"{format_claims(claims, claim_filers(s, claims))}\n\n"
             f"【候選資料】\n{format_candidates(s, list(cands.values()))}")
     if estimate_tokens(user) > SELECT_TOKEN_LIMIT:
         raise AIError("other", f"對應步驟的輸入過長（約 {estimate_tokens(user):,} token），請減少卷證或拆成多輪")

@@ -53,3 +53,9 @@ def find_quote(haystack: str, quote: str) -> tuple[int, int] | None:
             return index[pos], index[end - 1] + 1
         pos = norm.find(q, pos + 1)
     return None
+
+
+def source_found(page_text: str, quote: str, min_chars: int = 6) -> bool:
+    """新步驟（請求項目佐證、卷證說明、大事記、健檢）的原文出處：至少 min_chars 字，且逐字出現在該頁。
+    這些內容不進書狀，所以下限比書狀引用（15 字）短（設計 5.1）。"""
+    return quote_length(quote) >= min_chars and find_quote(page_text or "", quote) is not None

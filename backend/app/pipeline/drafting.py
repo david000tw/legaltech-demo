@@ -11,19 +11,22 @@ from app.ai.provider import AIProvider, record_usage
 from app.ai.schemas import DRAFT_SCHEMA, REWRITE_SCHEMA
 from app.models import Case, Citation, Claim, Draft, Paragraph, ReviewEvent, Round
 from app.numbering import strip_heading_number
-from app.pipeline.candidates import filer_line, format_candidates, round_candidates
+from app.pipeline.candidates import (
+    claim_source, claim_title, claims_header, filer_line, format_candidates, round_candidates,
+)
 from app.pipeline.case_context import case_context
 from app.pipeline.claims import SIDE_LABEL, claim_filers, selected_claims
-from app.statements import create_statement
+from app.statements import create_statement, round_total
 from app.verify.citations import MARKER_RE, attach_citations, verify_paragraph
 
 
-# 起草步驟最後一句指示，依書狀種類（設計 5.1）；起訴狀在子專案甲 Task 5 改成依請求項目撰寫
+# 起草步驟最後一句指示與系統提示詞，依書狀種類（設計 5.1、5.2）
 DRAFT_INSTRUCTION = {
     "preparatory": "請依寫作規則，逐條回應對造主張，撰寫準備書狀段落。",
     "answer": "請依寫作規則，逐條回應原告起訴狀之主張，撰寫答辯狀之答辯理由段落。",
-    "complaint": "請依寫作規則，逐條回應對造主張，撰寫準備書狀段落。",
+    "complaint": "請依寫作規則，依我方請求項目撰寫起訴狀之事實及理由段落。",
 }
+DRAFT_PROMPT = {"preparatory": "draft", "answer": "draft", "complaint": "draft_complaint"}
 
 
 def _selected_codes(claims: list[Claim]) -> list[str]:
@@ -41,7 +44,7 @@ def _claim_lines(claims: list[Claim], filers: dict | None = None) -> str:
     for c in claims:
         sel = c.selection or {}
         ev = "、".join(f"{e['code']}（摘錄：「{e['quote']}」）" for e in sel.get("evidence", [])) or "無"
-        lines.append(f"主張{c.seq}：{c.summary}{filer_line(filers, c)}\n　原文：「{c.quote}」\n　可用卷證：{ev}\n"
+        lines.append(f"{claim_title(c)}{filer_line(filers, c)}{claim_source(c)}\n　可用卷證：{ev}\n"
                      f"　可用判決：{'、'.join(sel.get('judgments', [])) or '無'}\n"
                      f"　可用法條：{'、'.join(sel.get('statutes', [])) or '無'}\n"
                      f"　說明：{sel.get('note', '')}")
@@ -55,8 +58,10 @@ def draft_context(s: Session, round_id: UUID, extra_codes: list[str] | None = No
     cands = round_candidates(s, round_id)
     codes = [c for c in _selected_codes(claims) + (extra_codes or []) if c in cands]
     codes = list(dict.fromkeys(codes))
+    total = (f"合計新臺幣{round_total(s, round_id):,}元（系統計算）\n\n" if rnd.brief_kind == "complaint" else "")
     return (case_context(s, case, rnd.brief_kind) + "\n\n"
-            f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張與對應結果】\n{_claim_lines(claims, claim_filers(s, claims)) or '（無）'}\n\n"
+            f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n{claims_header(rnd.brief_kind, with_results=True)}\n"
+            f"{_claim_lines(claims, claim_filers(s, claims)) or '（無）'}\n\n{total}"
             f"【可引用的資料原文】\n{format_candidates(s, [cands[c] for c in codes]) or '（無）'}")
 
 
@@ -67,7 +72,7 @@ def _items(data: dict) -> list[tuple[str, str]]:
 def draft_round(s: Session, round_id: UUID, provider: AIProvider, member_id: UUID | None) -> Draft:
     rnd = s.get(Round, round_id)
     user = draft_context(s, round_id) + "\n\n" + DRAFT_INSTRUCTION[rnd.brief_kind]
-    result = provider.run(step="draft", system=load_prompt("draft"), user=user, schema=DRAFT_SCHEMA,
+    result = provider.run(step="draft", system=load_prompt(DRAFT_PROMPT[rnd.brief_kind]), user=user, schema=DRAFT_SCHEMA,
                           effort="high")
     record_usage(s, rnd.firm_id, rnd.case_id, member_id, "draft", result)
     draft = Draft(firm_id=rnd.firm_id, round_id=round_id)

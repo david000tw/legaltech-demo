@@ -36,3 +36,15 @@ def select_schema(codes: dict[str, list[str]]) -> dict:
     props["other_references"] = {"type": "array", "items": _STR}
     props["note"] = _STR
     return _obj({"selections": {"type": "array", "items": _obj(props)}})
+
+
+REQUESTS_SCHEMA = _obj({
+    "items": {"type": "array", "items": _obj({
+        "label": _STR,
+        "request_type": {"type": "string", "enum": ["monetary", "non_monetary"]},
+        "amount": {"type": ["integer", "null"]},
+        "no_receipt": {"type": "boolean"},
+        "basis_text": _STR,
+        "evidence": {"type": "array", "items": _obj({"exhibit": _STR, "page_no": _INT, "quote": _STR})},
+    })},
+})
