@@ -72,6 +72,21 @@ describe('OcrStatus', () => {
     expect(api.startDocumentOcr).toHaveBeenCalledTimes(1)
   })
 
+  it('shows why OCR stopped (usage limit, not logged in, other)', () => {
+    const failed = (error: string) => doc({ job: { ...job('failed'), error }, can_resume: true },
+      [page('p1', 1, { ocr_state: 'pending' })])
+    const { rerender } = render(<OcrStatus doc={failed('usage_limit: Claude AI usage limit reached|1764000000')}
+      onChanged={vi.fn(async () => {})} onOpenPage={vi.fn()} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('辨識已停下：Claude 用量額度已用完')
+    expect(screen.getByRole('button', { name: '繼續辨識' })).toBeInTheDocument()
+    rerender(<OcrStatus doc={failed('not_logged_in: Please run /login')} onChanged={vi.fn(async () => {})}
+      onOpenPage={vi.fn()} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('辨識已停下：本機 Claude Code 尚未登入')
+    rerender(<OcrStatus doc={failed('other: 系統內部錯誤，請查看伺服器紀錄後重跑')} onChanged={vi.fn(async () => {})}
+      onOpenPage={vi.fn()} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('辨識已停下：系統內部錯誤，請查看伺服器紀錄後重跑')
+  })
+
   it('resume button when can_resume', async () => {
     render(<OcrStatus doc={doc({ can_resume: true, job: { ...job('running'), stale: true } },
       [page('p1', 1, { ocr_state: 'pending' })])} onChanged={vi.fn(async () => {})} onOpenPage={vi.fn()} />)

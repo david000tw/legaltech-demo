@@ -72,6 +72,21 @@ describe('SourcePane', () => {
     render(<SourcePane source={null} />)
     expect(screen.getByText(/點選引用/)).toBeInTheDocument()
   })
+
+  it('lists the page alerts next to 已對照原圖 for an unchecked OCR page', () => {
+    const alerts = [
+      { kind: 'mismatch', start: 0, end: 1, message: '校對員讀成「脘」，請對照原圖', proof_text: '脘', box: null, color: 'yellow' as const },
+      { kind: 'bad_date', start: 2, end: 3, message: '日期不存在：民國114年2月30日', proof_text: null, box: null, color: 'red' as const },
+    ]
+    const { rerender } = render(<SourcePane canReview onVerify={vi.fn()} source={{ kind: 'evidence', title: '原證1第2頁',
+      text: '右腕骨折', span: [0, 4], page_id: 'p2', has_image: true, needs_check: true, version: 2, alerts }} />)
+    expect(screen.getByText('這一頁有 2 則提醒，請對照原圖後再勾選：')).toBeInTheDocument()
+    expect(screen.getByText('日期不存在：民國114年2月30日')).toBeInTheDocument()
+    expect(screen.getByText('校對員讀成「脘」，請對照原圖')).toBeInTheDocument()
+    rerender(<SourcePane canReview onVerify={vi.fn()} source={{ kind: 'evidence', title: '原證1第2頁',
+      text: '右腕骨折', span: [0, 4], page_id: 'p2', has_image: true, needs_check: false, version: 2, alerts }} />)
+    expect(screen.queryByText(/則提醒/)).not.toBeInTheDocument()
+  })
 })
 
 describe('minority opinion', () => {

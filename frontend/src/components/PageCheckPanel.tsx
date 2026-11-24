@@ -61,6 +61,7 @@ export default function PageCheckPanel({ pageId, canReview, onChanged }: {
 
   if (!data) return <p className="text-sm text-slate-600">{message ?? '載入中…'}</p>
   const alerts = [...data.alerts].sort((a, b) => (a.color === 'red' ? 0 : 1) - (b.color === 'red' ? 0 : 1))
+  const dirty = text !== (data.text ?? '')
   const box = active?.box
   // 以原圖像素換算成百分比，放大縮小時框跟著圖走；圖還沒載入時先用像素
   const pos = (v: number, total: number | undefined) => (total ? `${(v / total) * 100}%` : v)
@@ -131,9 +132,12 @@ export default function PageCheckPanel({ pageId, canReview, onChanged }: {
             onClick={() => run(() => api.savePageText(pageId, text, data.version, true))}>儲存並標為已對照</button>
         )}
         {canReview && (
-          <button type="button" disabled={busy || !data.can_verify || data.version === null} className={BTN_SECONDARY}
+          // 有未儲存的修改時不能只勾已對照：那會把舊文字標成已對照，修改也會被丟掉
+          <button type="button" disabled={busy || !data.can_verify || data.version === null || dirty}
+            className={BTN_SECONDARY}
             onClick={() => run(() => api.verifyPage(pageId, data.version as number))}>已對照原圖</button>
         )}
+        {canReview && dirty && <span className="text-xs text-amber-700">有未儲存的修改：請按「儲存並標為已對照」</span>}
         {data.blank_unconfirmed && (
           <button type="button" disabled={busy} className={BTN_SECONDARY}
             onClick={() => run(() => api.confirmBlank(pageId))}>確認是空白頁</button>

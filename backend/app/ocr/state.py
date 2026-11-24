@@ -13,6 +13,7 @@ PROOF_BATCH = 5
 PROOF_POLL_S = 30
 OCR_AI_TIMEOUT_S = 120
 OCR_STALE_AFTER = timedelta(minutes=10)
+QUEUE_KEEPALIVE_S = 60  # 一次排多份文件時，排隊中的工作每隔幾秒更新心跳
 # 設計寫每頁約 10 秒；校對員實測每頁 15.5 秒，每批都要等它，所以先用 20 秒估，開始後改用實際速度
 SECONDS_PER_PAGE_ESTIMATE = 20
 

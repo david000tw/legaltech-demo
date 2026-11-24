@@ -74,6 +74,19 @@ describe('PageCheckPanel', () => {
     expect(screen.queryByRole('button', { name: '儲存並標為已對照' })).not.toBeInTheDocument()
   })
 
+  it('unsaved edits disable 已對照原圖 so the old text is not certified', async () => {
+    render(<PageCheckPanel pageId="p1" canReview onChanged={vi.fn()} />)
+    const box = await screen.findByRole('textbox', { name: '辨識文字' })
+    const verify = screen.getByRole('button', { name: '已對照原圖' })
+    expect(verify).toBeEnabled()
+    fireEvent.change(box, { target: { value: TEXT.replace('5,870', '5,780') } })
+    expect(verify).toBeDisabled()
+    expect(screen.getByText('有未儲存的修改：請按「儲存並標為已對照」')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '儲存並標為已對照' })).toBeEnabled()
+    fireEvent.change(box, { target: { value: TEXT } })
+    expect(verify).toBeEnabled()
+  })
+
   it('verify disabled when can_verify is false', async () => {
     vi.mocked(api.getPageOcr).mockResolvedValue({ ...PAGE, ocr_state: 'read', can_verify: false })
     render(<PageCheckPanel pageId="p1" canReview onChanged={vi.fn()} />)

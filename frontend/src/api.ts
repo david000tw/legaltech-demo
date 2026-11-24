@@ -151,7 +151,8 @@ export type DraftView = { id: string; round_id: string; case_id: string; case_ti
 export type CitationSource = { kind: string; title: string; text: string; span: [number, number] | null
   annotation?: string | null
   // 卷證引用（計畫 2A）：原文卡片並排原圖；needs_check＝辨識文字、律師要對照後才能標記已審
-  page_id?: string; has_image?: boolean; needs_check?: boolean; version?: number }
+  page_id?: string; has_image?: boolean; needs_check?: boolean; version?: number
+  alerts?: OcrAlert[] }  // 這一頁目前版本的提醒（卡片勾「已對照原圖」會解除整頁，要看得到）
 export type CitationInput = { code: string; quote: string }
 
 async function detail(r: Response): Promise<{ message: string; code?: string }> {

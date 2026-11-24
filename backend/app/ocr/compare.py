@@ -72,8 +72,29 @@ def _proof_chars(cells: list[dict], stamp: str) -> tuple[str, list[int], list[di
     return "".join(chars), owner, order
 
 
-def _moved(seg: str, other: str) -> bool:
-    return len(seg) >= MIN_MOVE and seg in other
+def _whole(text: str, i: int, j: int) -> bool:
+    """text[i:j] 的頭尾如果是數字，旁邊不能再接數字（不是從一串數字中間切出來的）。"""
+    if text[i].isdigit() and i > 0 and text[i - 1].isdigit():
+        return False
+    return not (text[j - 1].isdigit() and j < len(text) and text[j].isdigit())
+
+
+def _moved(text: str, i: int, j: int, other: str) -> bool:
+    """text[i:j] 在 other 別處出現＝版面讀取順序不同。含數字的片段要兩邊都是完整的數字才算：
+    「1,000」與「100,000」差的「00」、「12,800」與「17,300」換掉的「28」，別處就算也有，仍是讀錯。"""
+    seg = text[i:j]
+    if len(seg) < MIN_MOVE:
+        return False
+    if not any(c.isdigit() for c in seg):
+        return seg in other
+    if not _whole(text, i, j):
+        return False
+    at = other.find(seg)
+    while at >= 0:
+        if _whole(other, at, at + len(seg)):
+            return True
+        at = other.find(seg, at + 1)
+    return False
 
 
 def _box(cells: list[dict]) -> list[float] | None:
@@ -90,8 +111,7 @@ def compare(ai_text: str, cells: list[dict]) -> list[dict]:
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
         if tag == "equal":
             continue
-        sa, sb = a[i1:i2], b[j1:j2]
-        if (not sa or _moved(sa, b)) and (not sb or _moved(sb, a)):
+        if (i1 == i2 or _moved(a, i1, i2, b)) and (j1 == j2 or _moved(b, j1, j2, a)):
             continue  # 整段換了位置
         diffs.append([i1, i2, j1, j2])
     merged: list[list[int]] = []

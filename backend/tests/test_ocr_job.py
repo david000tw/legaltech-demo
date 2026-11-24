@@ -380,3 +380,74 @@ def test_ocr_other_firm_404(lawyer_client, db):
     assert c2.post(f"/api/cases/{case_id}/ocr", json={}).status_code == 404
     with tenant_session(firm) as s:
         assert s.scalar(select(func.count()).select_from(AIJob)) == 0
+
+
+def test_busy_proofreader_slot_waits_instead_of_skipping(db, tmp_path, monkeypatch):
+    # 另一份文件正占用校對員：這份要等名額（期間更新心跳），不能直接標「校對員未執行」
+    import threading
+
+    from app.ocr import proofreader
+    from app.pipeline.jobs import JobContext
+    firm = create_firm("甲事務所")
+    _, doc = make_doc(firm, 1)
+    use_paddle(monkeypatch, tmp_path, cells=[[cell("第一頁")]])
+    monkeypatch.setattr(proofreader, "PROOF_POLL_S", 0.05)
+    beats = []
+    real_beat = JobContext.beat
+    monkeypatch.setattr(JobContext, "beat", lambda self: (beats.append(1), real_beat(self))[1])
+    job_id, _ = queue(firm, doc)
+    assert proofreader._SLOT.acquire(blocking=False)
+    timer = threading.Timer(0.6, proofreader._SLOT.release)
+    timer.start()
+    try:
+        run(firm, job_id, fake("第一頁"))
+    finally:
+        timer.join()
+    (pt,) = texts(firm, doc)
+    assert states(firm, doc) == ["done"]
+    assert kinds(pt) == []  # 有校對、沒有「校對員未執行」
+    assert len(beats) >= 2  # 等名額時有更新心跳
+
+
+def test_case_ocr_queue_keeps_waiting_jobs_alive(db):
+    # 「開始辨識（N 頁）」一次排多份：排在後面的工作要定期更新心跳，輪到時才算開始，不能等到被判定中斷
+    import time
+
+    firm = create_firm("甲事務所")
+    case_id, doc_a = make_doc(firm, 1)
+    _, doc_b = make_doc(firm, 1, case_id)
+    job_a, _ = queue(firm, doc_a, confirm=True)
+    job_b, _ = queue(firm, doc_b, confirm=True)
+    old = datetime.now(timezone.utc) - timedelta(minutes=9)
+    with tenant_session(firm) as s:
+        s.get(AIJob, job_b).heartbeat_at = old
+        s.get(AIJob, job_b).started_at = old
+    seen = {}
+
+    def ocr(call):
+        if "b_beat" not in seen:  # 第一份文件辨識中：看第二份的狀態
+            time.sleep(0.3)
+            with tenant_session(firm) as s:
+                seen["b_beat"] = s.get(AIJob, job_b).heartbeat_at
+            seen["a_done_at"] = datetime.now(timezone.utc)
+        return {"text": "辨識文字"}
+
+    provider = FakeProvider({"ocr": ocr})
+    ocr_job.run_ocr_queue(firm, [job_a, job_b], dbmod.settings(), lambda st, f: provider, keepalive_s=0.05)
+    assert seen["b_beat"] > old + timedelta(minutes=8)  # 排隊時心跳有更新
+    with tenant_session(firm) as s:
+        b = s.get(AIJob, job_b)
+        assert b.status == "done" and b.started_at >= seen["a_done_at"]  # 輪到時才記開始
+    assert states(firm, doc_a) == ["done"] and states(firm, doc_b) == ["done"]
+
+
+def test_case_ocr_route_runs_documents_through_queue(lawyer_client, monkeypatch):
+    client, firm, _ = lawyer_client
+    case_id = new_case(client)
+    make_doc(firm, 1, case_id)
+    make_doc(firm, 1, case_id)
+    calls = []
+    monkeypatch.setattr("app.api.routes_ocr.run_ocr_queue", lambda firm_id, ids, *a, **kw: calls.append(ids))
+    r = client.post(f"/api/cases/{case_id}/ocr", json={})
+    assert r.status_code == 200, r.text
+    assert len(calls) == 1 and len(calls[0]) == 2

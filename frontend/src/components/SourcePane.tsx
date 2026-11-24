@@ -12,6 +12,8 @@ export default function SourcePane({ source, citation, canReview = false, onConf
     return <div data-testid="source-pane" className="p-4 text-sm text-slate-500">點選引用，這裡會顯示原文並標出被引用的段落。</div>
   }
   const [s, e] = source.span ?? [0, 0]
+  // 勾「已對照原圖」會解除整頁：先列出這一頁的提醒，紅色排前面
+  const alerts = [...(source.alerts ?? [])].sort((a, b) => (a.color === 'red' ? 0 : 1) - (b.color === 'red' ? 0 : 1))
   return (
     <div data-testid="source-pane" className="space-y-2 p-4">
       <h3 className="font-semibold text-slate-800">{source.title}</h3>
@@ -22,6 +24,20 @@ export default function SourcePane({ source, citation, canReview = false, onConf
             <button type="button" onClick={() => onVerify(source)}
               className="rounded border border-amber-400 bg-white px-2 py-0.5 text-amber-900">已對照原圖</button>
           )}
+        </div>
+      )}
+      {source.needs_check && alerts.length > 0 && (
+        <div className="space-y-1 text-xs">
+          <p className="text-slate-700">{`這一頁有 ${alerts.length} 則提醒，請對照原圖後再勾選：`}</p>
+          <ul className="space-y-1">
+            {alerts.map((a, i) => (
+              <li key={`${a.kind}-${a.start}-${i}`}
+                className={`rounded border px-2 py-0.5 ${a.color === 'red'
+                  ? 'border-red-300 bg-red-50 text-red-800' : 'border-amber-300 bg-amber-50 text-amber-800'}`}>
+                {a.message}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {source.has_image && source.page_id && (

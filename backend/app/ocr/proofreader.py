@@ -38,10 +38,17 @@ def _stop(proc) -> None:
         pass
 
 
-def start_proofreader(cmd: Sequence[str], image_paths: Sequence[Path | str],
-                      out_path: Path | str) -> subprocess.Popen | None:
-    if not cmd or not _SLOT.acquire(blocking=False):
+def start_proofreader(cmd: Sequence[str], image_paths: Sequence[Path | str], out_path: Path | str,
+                      wait_s: float = 0, on_wait: Callable[[], None] | None = None) -> subprocess.Popen | None:
+    """拿到名額就啟動；wait_s > 0 時名額被占用會等（每 PROOF_POLL_S 秒呼叫 on_wait），等不到才回 None。"""
+    if not cmd:
         return None
+    deadline = time.monotonic() + wait_s
+    while not _SLOT.acquire(timeout=max(0.0, min(PROOF_POLL_S, deadline - time.monotonic()))):
+        if time.monotonic() >= deadline:
+            return None
+        if on_wait is not None:
+            on_wait()
     try:
         proc = subprocess.Popen([*cmd, str(out_path), *(str(p) for p in image_paths)],
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

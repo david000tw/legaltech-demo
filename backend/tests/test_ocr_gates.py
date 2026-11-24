@@ -367,7 +367,10 @@ def test_citation_source_has_image_fields(lawyer_client):
     with tenant_session(firm) as s:
         scanned = ingest_document(s, firm, case_id, "evidence", "02_掃描.pdf", blank_pdf(1)).id
     (sp,) = doc_pages(firm, scanned)
-    as_ocr(firm, sp, text="診斷證明書：右腕骨折，宜休養四週，需專人照護兩週")
+    as_ocr(firm, sp, text="診斷證明書：右腕骨折，宜休養四週，需專人照護兩週",
+           alerts=[{"kind": "mismatch", "start": 7, "end": 8, "message": "校對員讀成「脘」，請對照原圖",
+                    "proof_text": "脘", "box": None},
+                   {"kind": "bad_date", "start": 0, "end": 3, "message": "日期不存在", "proof_text": None, "box": None}])
     txt_page = evidence_page(firm, case_id, 1)
     with tenant_session(firm) as s:
         for code, pg in (("E1", txt_page), ("E2", sp)):
@@ -386,3 +389,7 @@ def test_citation_source_has_image_fields(lawyer_client):
     e2 = client.get(f"/api/citations/{ids['E2']}/source").json()
     assert (e1["page_id"], e1["has_image"], e1["needs_check"], e1["version"]) == (str(txt_page), False, False, 1)
     assert (e2["page_id"], e2["has_image"], e2["needs_check"], e2["version"]) == (str(sp), True, True, 1)
+    # 原文卡片也要看得到這一頁的提醒（律師在這裡勾「已對照原圖」會解除整頁）
+    assert e1["alerts"] == []
+    assert [(a["message"], a["color"]) for a in e2["alerts"]] == [
+        ("校對員讀成「脘」，請對照原圖", "yellow"), ("日期不存在", "red")]

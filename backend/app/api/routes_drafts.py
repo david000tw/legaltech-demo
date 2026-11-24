@@ -28,6 +28,7 @@ from app.text_norm import find_quote
 from app.statements import BODY_LABEL, STATEMENT_LABEL, claim_value, statement_of
 from app.storage import LocalStorage
 from app.ingest.extract import file_ext
+from app.ocr.alerts import alert_color
 from app.ocr.drafts import unverified_ocr_pages
 from app.ocr.state import needs_check
 from app.verify.citations import body_paragraphs, export_blockers, is_removed, paragraph_citations
@@ -119,8 +120,10 @@ def citation_source(citation_id: UUID, m: CurrentMember = Depends(current_member
             doc = s.get(Document, page.document_id)
             title, text = f"{evidence_label(s, pt.id)}（{doc.filename}）", pt.text
             # 原文卡片並排原圖：辨識頁要律師對照後才能標記已審（設計 6.5）
+            # 提醒也一起給：在卡片勾「已對照原圖」會解除整頁，律師要看得到校對員讀成什麼
             image = {"page_id": str(page.id), "version": pt.version, "needs_check": needs_check(pt),
-                     "has_image": bool(page.image_key) or file_ext(doc.filename) == ".pdf"}
+                     "has_image": bool(page.image_key) or file_ext(doc.filename) == ".pdf",
+                     "alerts": [{**a, "color": alert_color(a.get("kind", ""))} for a in pt.alerts or []]}
         elif c.kind == "judgment" and c.judgment_passage_id:
             p = s.get(JudgmentPassage, c.judgment_passage_id)
             title = f"{s.get(Judgment, p.judgment_id).citation}（{PASSAGE_LABEL[p.passage_type]}）"

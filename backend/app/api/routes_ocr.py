@@ -8,7 +8,8 @@ from app.auth import CurrentMember, current_member
 from app.db import tenant_session
 from app.models import AIJob, Case, Document, Page
 from app.ocr.job import (
-    confirm_message, ocr_progress, pending_without_job, queue_ocr, queued_pages, retry_failed, work_pages,
+    confirm_message, ocr_progress, pending_without_job, queue_ocr, queued_pages, retry_failed, run_ocr_queue,
+    work_pages,
 )
 from app.ocr.service import (
     OcrRuleError, confirm_blank, page_ocr_json, reocr_document, save_page_text, verify_page,
@@ -29,11 +30,13 @@ class CaseOcrBody(BaseModel):
 
 
 def schedule(request: Request, background: BackgroundTasks, firm_id: UUID, jobs: list[AIJob]) -> None:
-    """只對 running 的工作排背景執行；waiting 要等確認。"""
-    for job in jobs:
-        if job is not None and job.status == "running":
-            background.add_task(run_job, firm_id, job.id, request.app.state.settings,
-                                provider_factory=request.app.state.provider_factory)
+    """只對 running 的工作排背景執行；waiting 要等確認。多份文件一份接一份跑，排隊中的工作持續更新心跳。"""
+    ids = [job.id for job in jobs if job is not None and job.status == "running"]
+    settings, factory = request.app.state.settings, request.app.state.provider_factory
+    if len(ids) == 1:
+        background.add_task(run_job, firm_id, ids[0], settings, provider_factory=factory)
+    elif ids:
+        background.add_task(run_ocr_queue, firm_id, ids, settings, factory)
 
 
 def _queue(s, document_id: UUID, member_id: UUID, *, confirm: bool) -> AIJob | None:

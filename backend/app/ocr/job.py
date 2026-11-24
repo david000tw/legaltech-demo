@@ -27,7 +27,7 @@ from app.ocr.alerts import compute_alerts
 from app.ocr.images import ensure_page_image
 from app.ocr.proofreader import ProofreaderUnavailable, finish_proofreader, kill_proofreader, start_proofreader
 from app.ocr.state import (
-    AUTO_OCR_PAGE_LIMIT, OCR_AI_TIMEOUT_S, PROOF_BATCH, estimate_minutes, needs_check,
+    AUTO_OCR_PAGE_LIMIT, OCR_AI_TIMEOUT_S, PROOF_BATCH, QUEUE_KEEPALIVE_S, estimate_minutes, needs_check,
 )
 from app.storage import LocalStorage
 
@@ -264,6 +264,10 @@ def _run_batch(job: AIJob, ctx, settings, storage: LocalStorage, batch: list[tup
             ctx.write(lambda s, pid=page_id, t=text: _save_read(s, pid, t))
             read.append(page_id)
         index = {i[0]: n for n, i in enumerate(items)}
+        if proc is None and settings.paddle_cmd and read:
+            # 開始時校對員被別份文件占用：AI 讀完後等名額（期間更新心跳），不要直接略過校對
+            proc = start_proofreader(settings.paddle_cmd, [i[4] for i in items], tmp / "proof.json",
+                                     wait_s=settings.paddle_timeout_s, on_wait=ctx.beat)
         try:
             cells = finish_proofreader(proc, tmp / "proof.json", len(items), settings.paddle_timeout_s, ctx.beat)
         except ProofreaderUnavailable:
@@ -275,6 +279,50 @@ def _run_batch(job: AIJob, ctx, settings, storage: LocalStorage, batch: list[tup
     finally:
         kill_proofreader(proc)
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _touch_waiting(firm_id: UUID, job_ids: list[UUID], *, start: bool = False) -> bool:
+    """更新還在跑（running）的工作心跳；start＝輪到它了，開始時間也改成現在。回傳是否還有工作在跑。"""
+    from app.db import tenant_session
+    now = _now()
+    with tenant_session(firm_id) as s:
+        jobs = list(s.scalars(select(AIJob).where(AIJob.id.in_(job_ids), AIJob.status == "running")))
+        for j in jobs:
+            j.heartbeat_at = now
+            if start:
+                j.started_at = now
+    return bool(jobs)
+
+
+def run_ocr_queue(firm_id: UUID, job_ids: list[UUID], settings, provider_factory,
+                  keepalive_s: float = QUEUE_KEEPALIVE_S) -> None:
+    """「開始辨識（N 頁）」一次排了多份文件：一份接一份跑。排隊中的工作定期更新心跳，
+    輪到時才記開始時間，才不會在排隊時被判定中斷（後端真的停掉時，心跳跟著停，照常可以「繼續辨識」）。"""
+    import threading
+
+    from app.pipeline.jobs import run_job
+    waiting = list(job_ids)
+    lock = threading.Lock()
+    stop = threading.Event()
+
+    def keepalive() -> None:
+        while not stop.wait(keepalive_s):
+            with lock:
+                ids = list(waiting)
+            if ids:
+                _touch_waiting(firm_id, ids)
+
+    t = threading.Thread(target=keepalive, daemon=True)
+    t.start()
+    try:
+        for job_id in job_ids:
+            with lock:
+                waiting.remove(job_id)
+            if _touch_waiting(firm_id, [job_id], start=True):  # 已被接手或取消的就略過
+                run_job(firm_id, job_id, settings, provider_factory=provider_factory)
+    finally:
+        stop.set()
+        t.join()
 
 
 def run_ocr_document(job: AIJob, provider: AIProvider, ctx) -> None:

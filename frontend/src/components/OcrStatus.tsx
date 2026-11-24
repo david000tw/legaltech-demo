@@ -13,6 +13,15 @@ const TAG: Record<string, string> = {
   gray: 'border-slate-300 bg-slate-50 text-slate-700',
 }
 
+// 辨識整份停下的原因（設計 6.2「額度用完…顯示原因」）：兩種要律師處理的給白話說明，其他照原文
+function ocrStopReason(error: string): string {
+  if (error.startsWith('usage_limit')) {
+    return '辨識已停下：Claude 用量額度已用完。額度恢復後按「繼續辨識」接著做；已辨識的頁照常可以對照。'
+  }
+  if (error.startsWith('not_logged_in')) return '辨識已停下：本機 Claude Code 尚未登入。請先登入，再按「繼續辨識」。'
+  return `辨識已停下：${error.replace(/^[a-z_]+: /, '')}`
+}
+
 function tone(page: api.DocPage): string {
   if (page.ocr_state === 'failed') return TAG.red
   if (page.ocr_state === 'done') return page.needs_check ? TAG.amber : TAG.green
@@ -90,6 +99,9 @@ export default function OcrStatus({ doc, onChanged, onOpenPage, pollMs = POLL_MS
           <span className="text-amber-700">這份看起來是掃描後加上文字的 PDF，建議改用辨識</span>
         )}
       </div>
+      {job?.status === 'failed' && job.error && !error && (
+        <p role="alert" className="text-red-700">{ocrStopReason(job.error)}</p>
+      )}
       {error && <p role="alert" className="text-red-700">{error}</p>}
     </div>
   )

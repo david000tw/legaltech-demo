@@ -69,3 +69,35 @@ def test_compare_merges_nearby_differences():
     (a,) = compare(ai, [cell("就診日期民國114年8月28日", 10, 10)])
     assert ai[a["start"]:a["end"]].startswith("3") and ai[a["start"]:a["end"]].endswith("6")
     assert a["proof_text"] == "8月28"
+
+
+def _covers(ai, alerts, part):
+    lo = ai.index(part)
+    hi = lo + len(part)
+    return any(a["start"] < hi and a["end"] > lo for a in alerts) or any(
+        a["start"] == a["end"] and lo <= a["start"] <= hi for a in alerts)
+
+
+def test_compare_flags_dropped_zeros_even_if_seen_elsewhere():
+    # AI 少讀兩個 0（100 倍）；「00」在同一頁別處也有，不能當成「換了位置」
+    ai = "掛號費  100元\n車損修復費用  1,000元"
+    cells = [cell("掛號費", 100, 100), cell("100元", 400, 100),
+             cell("車損修復費用", 100, 150), cell("100,000元", 400, 150)]
+    alerts = compare(ai, cells)
+    assert alerts and _covers(ai, alerts, "1,000元")
+    assert any("00" in a["proof_text"] for a in alerts)
+
+
+def test_compare_flags_two_digit_swap_in_table():
+    # 「28」「73」在表格別列也有：一串數字中間換掉的字仍要提醒
+    ai = "前保險桿  12,800\n工資  2,873"
+    cells = [cell("前保險桿", 100, 100), cell("17,300", 400, 100), cell("工資", 100, 150), cell("2,873", 400, 150)]
+    alerts = compare(ai, cells)
+    assert alerts and _covers(ai, alerts, "12,800")
+
+
+def test_compare_ignores_moved_whole_number_row():
+    # 整列（含完整金額）換了位置：仍不算不一致
+    ai = "掛號費  150元\n部分負擔  420元"
+    cells = [cell("部分負擔", 100, 50), cell("420元", 400, 50), cell("掛號費", 100, 100), cell("150元", 400, 100)]
+    assert compare(ai, cells) == []
