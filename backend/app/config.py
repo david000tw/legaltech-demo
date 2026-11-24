@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     claude_cmd: list[str] = ["claude"]
     ai_model: str = "opus"
     ocr_model: str = "opus"  # 辨識固定用 Opus（比較測試：Sonnet 會偷改原文）
+    # 校對員（PaddleOCR 指令工具）：JSON 陣列，例 ["...\.venv\Scripts\python.exe", "...\paddle_proofread.py"]；
+    # 空的＝沒有校對員，每頁加「校對員未執行」。dev.ps1 會在已安裝時自動設定 PADDLE_CMD。
+    paddle_cmd: list[str] = []
+    paddle_timeout_s: int = 900
     bind_host: str = "127.0.0.1"
     port: int = 8000
     session_secret: str = "dev-only-secret-change-me"

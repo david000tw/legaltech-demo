@@ -24,6 +24,7 @@ def make_settings(tmp_path: Path, **overrides) -> Settings:
         database_corpus_url=TEST_CORPUS_DB,
         storage_dir=tmp_path / "storage",
         session_secret="test-secret",
+        paddle_cmd=[],  # 測試一律不跑真的校對員，不受環境變數 PADDLE_CMD 影響
     )
     values.update(overrides)
     return Settings(**values)

@@ -18,7 +18,14 @@ def test_registry_matches_settings():
     assert all(info.name == key and info.label for key, info in REGISTRY.items())
 
 
+# 校對員（PaddleOCR 指令工具，計畫 2A）是本機免費程式、不是 AI 來源，只有它可以在 ai 套件外啟動子程序
+NON_AI_SUBPROCESS = {Path("ocr/proofreader.py")}
+
+
 def test_no_direct_vendor_calls_outside_ai_package():
     offenders = [str(p.relative_to(APP)) for p in APP.rglob("*.py")
-                 if "ai" not in p.relative_to(APP).parts[:1] and VENDOR_IMPORT.search(p.read_text(encoding="utf-8"))]
+                 if "ai" not in p.relative_to(APP).parts[:1] and p.relative_to(APP) not in NON_AI_SUBPROCESS
+                 and VENDOR_IMPORT.search(p.read_text(encoding="utf-8"))]
     assert offenders == []
+    src = (APP / "ocr/proofreader.py").read_text(encoding="utf-8")
+    assert "claude" not in src.lower() and "app.ai" not in src

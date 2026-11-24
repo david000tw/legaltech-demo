@@ -30,6 +30,14 @@ try {
     Pop-Location
 }
 
+# 校對員（PaddleOCR，計畫 2A）：已安裝就讓後端知道怎麼執行；沒裝也能辨識，只是每頁多一則「校對員未執行」
+$paddle = "$root\tools\paddle"
+if (Test-Path "$paddle\.venv\Scripts\python.exe") {
+    $env:PADDLE_CMD = ConvertTo-Json -Compress -InputObject @("$paddle\.venv\Scripts\python.exe", "$paddle\paddle_proofread.py")
+} else {
+    Write-Host '    校對員未安裝（執行 tools\paddle\setup.ps1 安裝）'
+}
+
 Write-Host '3/4 後端（127.0.0.1:8000）'
 if (Test-Listening 8000) {
     Write-Host '    已在執行，略過'
