@@ -100,8 +100,66 @@ def procedure_warning(case_type: str | None, case_number: str | None) -> str | N
             f"程序不同；書狀名稱與受文依案號（{PROCEDURES[actual][0]}），請確認案號與案型。")
 
 
-def brief_title(procedure: str) -> str:
-    return PROCEDURES[procedure][0]
+BRIEF_KINDS = {"complaint": "起訴狀", "answer": "答辯狀", "preparatory": "準備書狀"}
+MONEY_CASE_TYPES = {"traffic_tort", "spousal_rights"}
+_NUMERALS = "一二三四五六七八九十"
+
+
+def brief_title(procedure: str, brief_kind: str = "preparatory") -> str:
+    """書狀名稱＝程序（民事／家事）＋種類（起訴狀／答辯狀／準備書狀），設計 5.1。"""
+    return PROCEDURE_LABEL[procedure] + BRIEF_KINDS[brief_kind]
+
+
+def allowed_brief_kinds(our_side: str) -> list[str]:
+    return ["complaint", "preparatory"] if our_side == "plaintiff" else ["answer", "preparatory"]
+
+
+def default_brief_kind(our_side: str, has_rounds: bool) -> str:
+    if has_rounds:
+        return "preparatory"
+    return "complaint" if our_side == "plaintiff" else "answer"
+
+
+def auto_money_statement(parties, joint: bool) -> bool:
+    """金錢那一項能不能由系統自動產生：多位原告，或多位被告但不連帶時，金額怎麼分配要律師自己寫（設計 5.2）。"""
+    plaintiffs = sum(1 for p in parties if p.role == "原告" and p.alignment == "ours")
+    defendants = sum(1 for p in parties if p.role == "被告")
+    return not (plaintiffs > 1 or (defendants > 1 and not joint))
+
+
+def _numbered(lines: list[str]) -> str:
+    return "\n".join(f"{_NUMERALS[i]}、{line}" for i, line in enumerate(lines))
+
+
+def complaint_statement(case_type: str, *, has_money: bool, has_non_money: bool, joint: bool, provisional: bool,
+                        auto_money: bool, variant: str | None) -> str:
+    """訴之聲明範本（設計 5.2，待律師審定）：金額一律是系統欄位 {{amount}}，AI 不寫金額。"""
+    lines: list[str] = []
+    if has_money:
+        if auto_money:
+            lines.append(f"被告應{'連帶' if joint else ''}給付原告新臺幣{{{{amount}}}}元，"
+                         "及自起訴狀繕本送達翌日起至清償日止，按週年利率百分之五計算之利息。")
+        else:  # 多位原告或非連帶被告：留空格讓律師自己寫
+            lines.append("被告應給付原告新臺幣○○元，及自起訴狀繕本送達翌日起至清償日止，按週年利率百分之五計算之利息。")
+    non_money = has_non_money or case_type in ("estate_partition", "nominee_registration")
+    if non_money:
+        if case_type == "estate_partition":
+            lines.append("兩造公同共有被繼承人○○○所遺如附表所示之遺產，准依附表所示方法分割。")
+        elif variant == "deceased":
+            lines.append("被告應就被繼承人○○○所遺坐落○○之不動產辦理繼承登記後，將所有權移轉登記予原告。")
+        else:
+            lines.append("被告應將坐落○○之不動產（權利範圍○○）所有權移轉登記予原告。")
+    lines.append("訴訟費用由兩造按附表所示應繼分比例負擔。" if case_type == "estate_partition" else "訴訟費用由被告負擔。")
+    if has_money and provisional:  # 分割遺產（形成判決）與移轉登記（命為意思表示）不能聲請假執行
+        lines.append("就第一項聲明，原告願供擔保，請准宣告假執行。" if non_money else "原告願供擔保，請准宣告假執行。")
+    return _numbered(lines)
+
+
+def answer_statement(case_type: str) -> str:
+    """答辯聲明範本（設計 5.3，待律師審定）：對造沒有聲請假執行的案型，不寫假執行那兩句。"""
+    if case_type in MONEY_CASE_TYPES:
+        return _numbered(["原告之訴及假執行之聲請均駁回。", "訴訟費用由原告負擔。", "如受不利判決，被告願供擔保請准宣告免為假執行。"])
+    return _numbered(["原告之訴駁回。", "訴訟費用由原告負擔。"])
 
 
 def default_addressee(court: str | None, procedure: str) -> str:

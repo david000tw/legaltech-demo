@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 
 from app.auth import CurrentMember, current_member
 from app.case_types import (
+    BRIEF_KINDS, allowed_brief_kinds, default_brief_kind,
     ALIGNMENT_LABEL, ALIGNMENTS, CASE_TYPES, DEFAULT_CASE_TYPE, PARTY_ROLES, brief_title, case_type_of, default_addressee,
     procedure_for, procedure_warning,
 )
@@ -189,6 +190,7 @@ def get_case(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
                              .order_by(Exhibit.prefix, Exhibit.number)).all()
         names = {d.id: d.filename for d in docs}
         rounds = s.scalars(select(Round).where(Round.case_id == case_id).order_by(Round.seq)).all()
+        seq_of = {r.id: r.seq for r in rounds}
         procedure = procedure_for(case.case_type, case.case_number)
         return {
             **_case_summary(case),
@@ -206,17 +208,35 @@ def get_case(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
             "exhibits": [{"id": str(e.id), "label": f"{e.prefix}{e.number}", "prefix": e.prefix,
                           "number": e.number, "document_id": str(e.document_id),
                           "filename": names.get(e.document_id)} for e in exhibits],
-            "rounds": [{"id": str(r.id), "seq": r.seq, "status": r.status, "error": r.error} for r in rounds],
+            "rounds": [{"id": str(r.id), "seq": r.seq, "status": r.status, "error": r.error,
+                        "brief_kind": r.brief_kind, "failed_stage": r.failed_stage,
+                        "copied_from_seq": seq_of.get(r.copied_from_round_id)} for r in rounds],
+            # 建立輪次時可選的書狀種類：原告不能寫答辯狀，被告不能寫起訴狀（設計 5.1）
+            "brief_kind_options": [{"code": k, "label": BRIEF_KINDS[k]} for k in allowed_brief_kinds(case.our_side)],
+            "default_brief_kind": default_brief_kind(case.our_side, bool(rounds)),
         }
 
 
+class RoundBody(BaseModel):
+    brief_kind: str | None = None  # 不帶＝依我方立場與是否已有輪次給預設值
+
+
+_WRONG_KIND = {"plaintiff": "我方是原告時不能寫答辯狀", "defendant": "我方是被告時不能寫起訴狀"}
+
+
 @router.post("/cases/{case_id}/rounds")
-def create_round(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+def create_round(case_id: UUID, body: RoundBody | None = None, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
-        if s.get(Case, case_id, with_for_update=True) is None:  # 鎖住案件列，避免同時建輪次撞號
+        case = s.get(Case, case_id, with_for_update=True)  # 鎖住案件列，避免同時建輪次撞號
+        if case is None:
             raise HTTPException(404, "找不到案件")
         seq = (s.scalar(select(func.max(Round.seq)).where(Round.case_id == case_id)) or 0) + 1
-        r = Round(firm_id=m.firm_id, case_id=case_id, seq=seq, status="created")
+        kind = (body.brief_kind if body else None) or default_brief_kind(case.our_side, seq > 1)
+        if kind not in BRIEF_KINDS:
+            raise HTTPException(422, "書狀種類不正確")
+        if kind not in allowed_brief_kinds(case.our_side):
+            raise HTTPException(422, _WRONG_KIND[case.our_side])
+        r = Round(firm_id=m.firm_id, case_id=case_id, seq=seq, status="created", brief_kind=kind)
         s.add(r)
         s.flush()
         return {"id": str(r.id), "seq": r.seq}

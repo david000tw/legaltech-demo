@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.ai.provider import AIError, ProviderNotAllowed, ProviderNotEnabled
@@ -64,6 +65,29 @@ def reset(round_id: UUID, body: ResetBody, m: CurrentMember = Depends(current_me
         except RoundRule as e:
             raise _rule(e)
     return {"status": "created"}
+
+
+class RoundSettingsBody(BaseModel):
+    narrative: str | None = Field(default=None, max_length=20000)
+    joint_liability: bool | None = None
+    provisional_execution: bool | None = None
+    claim_value: int | None = Field(default=None, ge=0)
+    statement_variant: Literal["alive", "deceased"] | None = None
+
+
+@router.patch("/rounds/{round_id}")
+def patch_round(round_id: UUID, body: RoundSettingsBody, m: CurrentMember = Depends(current_member)) -> dict:
+    """輪次設定（設計 5.2）。拆解前與待確認時都能改；訴訟標的金額只影響 Word 狀頭，起草後也能補填。"""
+    fields = body.model_dump(exclude_unset=True)
+    with tenant_session(m.firm_id) as s:
+        rnd = s.get(Round, round_id, with_for_update=True)
+        if rnd is None:
+            raise HTTPException(404, "找不到輪次")
+        if set(fields) != {"claim_value"} and rnd.status not in ("created", "extracted"):
+            raise HTTPException(409, "這一輪已開始起草，不能再改設定；訴訟標的金額仍可補填")
+        for k, v in fields.items():
+            setattr(rnd, k, v)
+        return {"id": str(rnd.id), **{k: getattr(rnd, k) for k in fields}}
 
 
 class ClaimBody(BaseModel):

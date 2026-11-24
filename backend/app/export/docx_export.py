@@ -64,7 +64,8 @@ def _procedure(case: Case) -> str:
 
 def export_brief_title(s: Session, draft_id: UUID) -> str:
     """書狀名稱依程序（設計 5.1）：案號字別優先，否則用案型預設。下載檔名也用它。"""
-    return brief_title(_procedure(_case_of(s, draft_id)))
+    rnd = s.get(Round, s.get(Draft, draft_id).round_id)
+    return brief_title(_procedure(_case_of(s, draft_id)), rnd.brief_kind)
 
 
 def _attorneys(case: Case) -> list[str]:
@@ -117,7 +118,7 @@ def export_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date 
     _setup(d)
     title = d.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run(brief_title(procedure))
+    run = title.add_run(export_brief_title(s, draft_id))
     run.bold, run.font.size = True, Pt(18)
     d.add_paragraph(f"案號：{_clean(case.case_number)}　股別：{_clean(case.division)}")
     for line in _party_lines(case, parties):

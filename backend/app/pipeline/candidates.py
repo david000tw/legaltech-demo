@@ -186,7 +186,7 @@ def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_i
     case = s.get(Case, rnd.case_id)
     claims = _claims(s, round_id)
     cands = round_candidates(s, round_id)
-    user = (case_context(s, case) + "\n\n"
+    user = (case_context(s, case, rnd.brief_kind) + "\n\n"
             f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張】\n{format_claims(claims, claim_filers(s, claims))}\n\n"
             f"【候選資料】\n{format_candidates(s, list(cands.values()))}")
     if estimate_tokens(user) > SELECT_TOKEN_LIMIT:

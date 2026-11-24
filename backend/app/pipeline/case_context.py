@@ -14,12 +14,12 @@ from app.case_types import (
 from app.models import Case, CaseParty
 
 
-def case_context(s: Session, case: Case) -> str:
+def case_context(s: Session, case: Case, brief_kind: str = "preparatory") -> str:
     ct = case_type_of(case.case_type)
     procedure = procedure_for(case.case_type, case.case_number)
     lines = [
         f"案型：{ct.label}",
-        f"程序：{PROCEDURE_LABEL[procedure]}事件；書狀名稱：{brief_title(procedure)}",
+        f"程序：{PROCEDURE_LABEL[procedure]}事件；書狀名稱：{brief_title(procedure, brief_kind)}",
         f"我方立場：{SIDE_LABEL[case.our_side]}",
         *([f"{ct.reference_date_label}：{case.reference_date.isoformat()}"] if case.reference_date else []),
         "本類案件常見爭點（僅供參考，不限制拆主張或論述）：",

@@ -17,6 +17,14 @@ from app.pipeline.claims import SIDE_LABEL, claim_filers, selected_claims
 from app.verify.citations import MARKER_RE, attach_citations, verify_paragraph
 
 
+# 起草步驟最後一句指示，依書狀種類（設計 5.1）；起訴狀在子專案甲 Task 5 改成依請求項目撰寫
+DRAFT_INSTRUCTION = {
+    "preparatory": "請依寫作規則，逐條回應對造主張，撰寫準備書狀段落。",
+    "answer": "請依寫作規則，逐條回應原告起訴狀之主張，撰寫答辯狀之答辯理由段落。",
+    "complaint": "請依寫作規則，逐條回應對造主張，撰寫準備書狀段落。",
+}
+
+
 def _selected_codes(claims: list[Claim]) -> list[str]:
     out: list[str] = []
     for c in claims:
@@ -46,7 +54,7 @@ def draft_context(s: Session, round_id: UUID, extra_codes: list[str] | None = No
     cands = round_candidates(s, round_id)
     codes = [c for c in _selected_codes(claims) + (extra_codes or []) if c in cands]
     codes = list(dict.fromkeys(codes))
-    return (case_context(s, case) + "\n\n"
+    return (case_context(s, case, rnd.brief_kind) + "\n\n"
             f"我方立場：{SIDE_LABEL[case.our_side]}。\n\n【對造主張與對應結果】\n{_claim_lines(claims, claim_filers(s, claims)) or '（無）'}\n\n"
             f"【可引用的資料原文】\n{format_candidates(s, [cands[c] for c in codes]) or '（無）'}")
 
@@ -57,7 +65,7 @@ def _items(data: dict) -> list[tuple[str, str]]:
 
 def draft_round(s: Session, round_id: UUID, provider: AIProvider, member_id: UUID | None) -> Draft:
     rnd = s.get(Round, round_id)
-    user = draft_context(s, round_id) + "\n\n請依寫作規則，逐條回應對造主張，撰寫準備書狀段落。"
+    user = draft_context(s, round_id) + "\n\n" + DRAFT_INSTRUCTION[rnd.brief_kind]
     result = provider.run(step="draft", system=load_prompt("draft"), user=user, schema=DRAFT_SCHEMA,
                           effort="high")
     record_usage(s, rnd.firm_id, rnd.case_id, member_id, "draft", result)

@@ -100,7 +100,7 @@ def extract_claims(s: Session, round_id: UUID, provider: AIProvider, member_id: 
     case = s.get(Case, rnd.case_id)
     pages = [op for op in opponent_pages(s, round_id) if op.text is not None]
     filers = _filers(s, round_id)
-    user = (case_context(s, case) + "\n\n"
+    user = (case_context(s, case, rnd.brief_kind) + "\n\n"
             f"我方立場：{SIDE_LABEL[case.our_side]}。以下是對造書狀全文，請拆成主張清單。\n\n"
             + format_pages([(op.page_no, filers.get(op.page.document_id, "") + op.text.text) for op in pages]))
     result = provider.run(step="claims", system=load_prompt("claims"), user=user, schema=CLAIMS_SCHEMA,
