@@ -2,9 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import * as api from '../api'
 import CitationTag from '../components/CitationTag'
+import EvidenceNotesSection from '../components/EvidenceNotesSection'
 import ExportButton, { reasonLabel } from '../components/ExportButton'
 import SourcePane from '../components/SourcePane'
 import StatementBlock, { AmountButtons, ClaimValueField } from '../components/StatementBlock'
+import TimelineSection from '../components/TimelineSection'
+
+// 草稿頁左側：原文對照（引用與出處的原文）、卷證說明、大事記（設計 5.6、5.7，只看不改）
+const SIDE_TABS = [['source', '原文對照'], ['notes', '卷證說明'], ['timeline', '大事記']] as const
+type SideTab = typeof SIDE_TABS[number][0]
 
 function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
   p: api.ParagraphView
@@ -123,6 +129,7 @@ export default function DraftEditor() {
   const [draft, setDraft] = useState<api.DraftView | null>(null)
   const [source, setSource] = useState<api.CitationSource | null>(null)
   const [sourceCitationId, setSourceCitationId] = useState<string | null>(null)
+  const [tab, setTab] = useState<SideTab>('source')
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -139,6 +146,19 @@ export default function DraftEditor() {
     try {
       setSource(await api.getCitationSource(c.id))
       setSourceCitationId(c.id)
+      setTab('source')
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  // 卷證說明、大事記的出處：顯示那一頁的原文並標出摘錄，切回「原文對照」
+  async function showPageSource(s: api.SourceView) {
+    if (!s.page_id) return
+    try {
+      setSource(await api.getPageSource(s.page_id, s.quote))
+      setSourceCitationId(null)
+      setTab('source')
     } catch (e) {
       setError((e as Error).message)
     }
@@ -191,7 +211,23 @@ export default function DraftEditor() {
       {error && <p className="text-sm text-red-700">{error}</p>}
       <div className="grid gap-4 lg:grid-cols-2">
         <aside className="rounded-lg border border-slate-200 bg-white lg:sticky lg:top-4 lg:max-h-[85vh] lg:overflow-auto">
-          <SourcePane source={source} citation={sourceCitation} canReview={draft.can_review} onConfirmCourt={confirmCourt} />
+          <div role="tablist" aria-label="左側內容" className="flex border-b border-slate-200 text-sm">
+            {SIDE_TABS.map(([key, label]) => (
+              <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
+                className={`px-3 py-2 ${tab === key ? 'border-b-2 border-indigo-600 font-medium text-indigo-700' : 'text-slate-600'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {tab === 'source' && (
+            <SourcePane source={source} citation={sourceCitation} canReview={draft.can_review} onConfirmCourt={confirmCourt} />
+          )}
+          {tab === 'notes' && (
+            <div className="p-3"><EvidenceNotesSection caseId={draft.case_id} compact onShowSource={showPageSource} /></div>
+          )}
+          {tab === 'timeline' && (
+            <div className="p-3"><TimelineSection caseId={draft.case_id} compact onShowSource={showPageSource} /></div>
+          )}
         </aside>
         <div className="space-y-4">
           {draft.claim_value && (

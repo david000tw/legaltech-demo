@@ -70,6 +70,15 @@ export type EvidenceDocView = { document_id: string; exhibit: string; filename: 
 // date：2025-03-09 或只到月 2025-03；date_label：民國年；source_kind＝opponent 的事件標「對造主張」
 export type TimelineEventView = { id: string; date: string | null; date_label: string | null; description: string
   amount: number | null; source_kind: 'evidence' | 'opponent' | null; origin: 'ai' | 'lawyer'; source: SourceView | null }
+// 書狀健檢（設計 5.8）：level high＝高風險、suggest＝補強建議、gap＝證據缺口；absence＝缺漏類（缺少某證據）
+// references：本輪候選判決法條（label 讀取時才算）；not_in_list：AI 想引用但不在候選清單的
+export type HealthItemView = { level: 'high' | 'suggest' | 'gap'; title: string; explanation: string
+  claim_seqs: number[]; absence: boolean; basis: SourceView[]; references: { code: string; label: string }[]
+  not_in_list: string[] }
+// undisputed：兩造不爭執事項（只來自本輪對造書狀；起訴狀是 null）；outdated＝卷證、對造書狀或主張已變更
+export type HealthReportView = { created_at: string; outdated: boolean; items: HealthItemView[]
+  undisputed: { fact: string; basis: SourceView }[] | null; issues: string[]; issues_label: string
+  pending_ocr: string[] }
 export type TimelineEventInput = { date?: string | null; description?: string; amount?: number | null
   page_id?: string | null; quote?: string }
 // 建立／修改案件：狀頭欄位傳 null 代表清空；attorneys 建立時不傳＝預設帶入建立者（律師）
@@ -90,7 +99,8 @@ export type RoundDetail = { id: string; seq: number; status: RoundStatus; error:
   brief_kind: BriefKind; failed_stage: 'extract' | 'draft' | null; draft_id: string | null; claims: ClaimView[]
   can_review?: boolean; narrative?: string | null; joint_liability?: boolean; provisional_execution?: boolean
   claim_value?: number | null; statement_variant?: 'alive' | 'deceased' | null; total_amount?: number
-  statement_preview?: string | null; pending_ocr_pages?: string[] }
+  statement_preview?: string | null; pending_ocr_pages?: string[]
+  health_job?: JobView | null }  // 書狀健檢的 AI 工作（設計 5.8）
 export type RoundSettings = { narrative?: string | null; joint_liability?: boolean; provisional_execution?: boolean
   claim_value?: number | null; statement_variant?: 'alive' | 'deceased' | null }
 export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgment' | 'statute'; quote: string;
@@ -239,3 +249,7 @@ export const deleteTimelineEvent = (id: string) =>
 // 看原文：卷證說明、大事記、健檢的出處（形狀與引用的原文對照相同）
 export const getPageSource = (pageId: string, quote: string) =>
   req<CitationSource>(`/pages/${pageId}/source?quote=${encodeURIComponent(quote)}`)
+// 書狀健檢與爭點整理表（設計 5.8）：起草完成後才能執行；律師與助理都可以
+export const runHealthCheck = (roundId: string) => req<{ job: JobView }>(`/rounds/${roundId}/health`, json('POST'))
+export const getHealthReport = (roundId: string) =>
+  req<{ report: HealthReportView | null; job: JobView | null }>(`/rounds/${roundId}/health`)

@@ -7,6 +7,7 @@ import {
 import { POLL_MS } from '../aiJobs'
 import CaseHeaderFields from '../components/CaseHeaderFields'
 import EvidenceNotesSection from '../components/EvidenceNotesSection'
+import HealthCheckPanel from '../components/HealthCheckPanel'
 import PartiesEditor from '../components/PartiesEditor'
 import RequestItemsEditor from '../components/RequestItemsEditor'
 import TimelineSection from '../components/TimelineSection'
@@ -280,6 +281,7 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
           </button>
         </div>
       )}
+      {status === 'drafted' && detail?.draft_id && <HealthCheckPanel roundId={round.id} briefKind={kind} />}
       {claims.length > 0 && (
         <ol className="mt-3 space-y-1 text-sm text-slate-700">
           {claims.map((c) => (

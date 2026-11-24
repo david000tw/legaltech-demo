@@ -12,7 +12,7 @@ vi.mock('../api', async (orig) => {
     resetRound: vi.fn(), patchClaim: vi.fn(), copyRound: vi.fn(), patchRound: vi.fn(), confirmClaim: vi.fn(),
     addRequest: vi.fn(), deleteClaim: vi.fn(), uploadDocument: vi.fn(),
     renumberExhibit: vi.fn(), getCaseOptions: vi.fn(), patchCase: vi.fn(), putParties: vi.fn(), setDocumentFiler: vi.fn(),
-    getEvidenceNotes: vi.fn(), getTimeline: vi.fn() }
+    getEvidenceNotes: vi.fn(), getTimeline: vi.fn(), getHealthReport: vi.fn(), runHealthCheck: vi.fn() }
 })
 
 const emptyHeader: api.CaseHeader = { court: null, case_number: null, division: null, cause: null, addressee: null,
@@ -51,9 +51,22 @@ beforeEach(() => {
   vi.mocked(api.getCaseOptions).mockResolvedValue(OPTIONS)
   vi.mocked(api.getEvidenceNotes).mockResolvedValue({ documents: [], job: null })
   vi.mocked(api.getTimeline).mockResolvedValue({ events: [], pending_ocr: [], job: null })
+  vi.mocked(api.getHealthReport).mockResolvedValue({ report: null, job: null })
 })
 
 describe('CaseDetail', () => {
+  it('runs the health check only after drafting', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'drafted', error: null },
+      { id: 'r2', seq: 2, status: 'extracted', error: null }] })
+    vi.mocked(api.getRound).mockImplementation(async (id: string) => ({ id, seq: id === 'r1' ? 1 : 2,
+      status: id === 'r1' ? 'drafted' : 'extracted', error: null, stale: false, brief_kind: 'preparatory',
+      failed_stage: null, draft_id: id === 'r1' ? 'dr1' : null, claims: [] }))
+    renderAt()
+    expect(await screen.findAllByRole('button', { name: '執行健檢' })).toHaveLength(1)
+    expect(api.getHealthReport).toHaveBeenCalledWith('r1')
+    expect(api.getHealthReport).not.toHaveBeenCalledWith('r2')
+  })
+
   it('shows the evidence notes and timeline sections after the exhibits', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
     renderAt()

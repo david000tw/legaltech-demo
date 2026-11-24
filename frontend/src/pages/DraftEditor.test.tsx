@@ -10,7 +10,7 @@ vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
   return { ...real, getDraft: vi.fn(), getCitationSource: vi.fn(), confirmCitation: vi.fn(), confirmCourt: vi.fn(), reviewParagraph: vi.fn(),
     patchParagraph: vi.fn(), rewriteParagraph: vi.fn(), exportDraft: vi.fn(), confirmAmount: vi.fn(),
-    ackAmounts: vi.fn(), patchRound: vi.fn() }
+    ackAmounts: vi.fn(), patchRound: vi.fn(), getEvidenceNotes: vi.fn(), getTimeline: vi.fn(), getPageSource: vi.fn() }
 })
 
 const draft: api.DraftView = {
@@ -340,5 +340,33 @@ describe('DraftEditor procedure', () => {
     expect(within(block).getByText('多位原告或非連帶被告：請律師核對金額')).toBeInTheDocument()
     await userEvent.click(within(block).getByRole('button', { name: '金額已自行核對' }))
     expect(api.ackAmounts).toHaveBeenCalledWith('r1')
+  })
+})
+
+describe('DraftEditor side tabs', () => {
+  const event: api.TimelineEventView = { id: 'e1', date: '2025-03-09', date_label: '民國114年3月9日',
+    description: '原告支付醫療費用', amount: 45000, source_kind: 'evidence', origin: 'ai',
+    source: { page_id: 'p1', label: '原證1 第1頁', quote: '支付醫療費用', status: 'found', reasons: [] } }
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.getDraft).mockResolvedValue(draft)
+    vi.mocked(api.getEvidenceNotes).mockResolvedValue({ documents: [], job: null })
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [event], pending_ocr: [], job: null })
+    vi.mocked(api.getPageSource).mockResolvedValue({ kind: 'evidence', title: '原證1 第1頁',
+      text: '收據：支付醫療費用新臺幣45,000元', span: [3, 9] })
+  })
+
+  it('left side tabs show notes and timeline and open page source', async () => {
+    renderEditor()
+    expect(await screen.findByRole('tab', { name: '原文對照' })).toHaveAttribute('aria-selected', 'true')
+    await userEvent.click(screen.getByRole('tab', { name: '大事記' }))
+    expect(screen.queryByRole('button', { name: '整理大事記' })).not.toBeInTheDocument()  // 草稿頁只看不改
+    await userEvent.click(await screen.findByRole('button', { name: '原文出處：原證1 第1頁' }))
+    expect(api.getPageSource).toHaveBeenCalledWith('p1', '支付醫療費用')
+    expect(screen.getByRole('tab', { name: '原文對照' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('source-pane').querySelector('mark')?.textContent).toBe('支付醫療費用')
+    await userEvent.click(screen.getByRole('tab', { name: '卷證說明' }))
+    expect(api.getEvidenceNotes).toHaveBeenCalledWith('c1')
+    expect(screen.queryByRole('button', { name: '產生卷證說明' })).not.toBeInTheDocument()
   })
 })
