@@ -244,6 +244,22 @@ describe('CaseDetail header and parties', () => {
     ])
   })
 
+  it('keeps unsaved header and party edits across tab switches', async () => {
+    // 最終審查 #2：改到一半切去別的分頁再切回來，沒存的狀頭、當事人編輯還在
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: PARTIES.slice(0, 1), rounds: [] })
+    renderAt()
+    await userEvent.click(await screen.findByRole('button', { name: '修改狀頭' }))
+    await userEvent.type(screen.getByLabelText('案號'), '113年度訴字第1號')
+    await userEvent.click(screen.getByRole('button', { name: '修改當事人' }))
+    await userEvent.type(screen.getByLabelText('當事人1 姓名'), '甲')
+    await openTab('卷證與時間軸')
+    await openTab('案件資料')
+    expect(screen.getByLabelText('案號')).toHaveValue('113年度訴字第1號')
+    expect(screen.getByLabelText('當事人1 姓名')).toHaveValue('宋文彬甲')
+    expect(api.patchCase).not.toHaveBeenCalled()
+    expect(api.putParties).not.toHaveBeenCalled()
+  })
+
   it('uploads an opponent brief with its filer', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: PARTIES,
       rounds: [{ id: 'r1', seq: 1, status: 'created', error: null }] })
@@ -466,6 +482,29 @@ describe('CaseDetail brief filer and notices', () => {
     await userEvent.tab()
     await waitFor(() => expect(api.patchRound).toHaveBeenCalledTimes(1))
     expect(api.patchRound).toHaveBeenCalledWith('r1', { narrative: '原告請求醫療費。' })
+  })
+
+  it('saves the complaint options when ticked, so switching tabs keeps them', async () => {
+    // 最終審查 #2：勾了「被告連帶給付」切去別的分頁再回來，不能悄悄變回沒勾（拆解時聲明會少一項）
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase,
+      rounds: [{ id: 'r1', seq: 1, status: 'created', error: null, brief_kind: 'complaint', failed_stage: null,
+        copied_from_seq: null }] })
+    let stored: api.RoundDetail = { ...complaintRound, status: 'created', narrative: null, claims: [] }
+    vi.mocked(api.getRound).mockImplementation(async () => stored)
+    vi.mocked(api.patchRound).mockImplementation(async (_id, body) => {
+      stored = { ...stored, ...body } as api.RoundDetail
+      return {}
+    })
+    renderAt()
+    await openTab('書狀')
+    await userEvent.click(await screen.findByLabelText('被告連帶給付'))
+    await waitFor(() => expect(api.patchRound).toHaveBeenCalledWith('r1', { joint_liability: true }))
+    await userEvent.click(screen.getByLabelText('聲請假執行（只適用金錢請求）'))
+    await waitFor(() => expect(api.patchRound).toHaveBeenCalledWith('r1', { provisional_execution: false }))
+    await openTab('案件資料')
+    await openTab('書狀')
+    await waitFor(() => expect(screen.getByLabelText('被告連帶給付')).toBeChecked())
+    expect(screen.getByLabelText('聲請假執行（只適用金錢請求）')).not.toBeChecked()
   })
 
   it('copy button only on drafted rounds', async () => {

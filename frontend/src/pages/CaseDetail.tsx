@@ -128,6 +128,16 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
       setMessage((e as Error).message)
     }
   }
+  // 起訴狀聲明設定一勾就存：切到別的分頁（分頁會重新載入）或重新整理，都不會悄悄變回預設值
+  async function saveOption(body: api.RoundSettings) {
+    setMessage(null)
+    try {
+      await api.patchRound(round.id, body)
+      await refresh()
+    } catch (e) {
+      setMessage((e as Error).message)
+    }
+  }
   const copy = () => act(async () => { await api.copyRound(round.id); onChanged() })
   const draft = () => act(() => api.draftRound(round.id))
   // 重新拆解：律師改過勾選時後端要求確認，確認後再送一次
@@ -215,13 +225,19 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
               className="mt-1 w-full rounded border border-slate-300 p-2" />
           </label>
           <div className="flex flex-wrap gap-4 text-slate-700">
-            <label><input type="checkbox" checked={jointValue} onChange={(e) => setJoint(e.target.checked)} className="mr-1" />
-              被告連帶給付</label>
-            <label><input type="checkbox" checked={provisionalValue} onChange={(e) => setProvisional(e.target.checked)}
-              className="mr-1" />聲請假執行（只適用金錢請求）</label>
+            <label><input type="checkbox" checked={jointValue} className="mr-1" onChange={(e) => {
+              setJoint(e.target.checked)
+              void saveOption({ joint_liability: e.target.checked })
+            }} />被告連帶給付</label>
+            <label><input type="checkbox" checked={provisionalValue} className="mr-1" onChange={(e) => {
+              setProvisional(e.target.checked)
+              void saveOption({ provisional_execution: e.target.checked })
+            }} />聲請假執行（只適用金錢請求）</label>
             {caseType === 'nominee_registration' && (
-              <label><input type="checkbox" checked={deceasedValue} onChange={(e) => setDeceased(e.target.checked)}
-                className="mr-1" />出名人已死亡（起訴繼承人）</label>
+              <label><input type="checkbox" checked={deceasedValue} className="mr-1" onChange={(e) => {
+                setDeceased(e.target.checked)
+                void saveOption({ statement_variant: e.target.checked ? 'deceased' : 'alive' })
+              }} />出名人已死亡（起訴繼承人）</label>
             )}
           </div>
           {!(status === 'extracting' && stale) && (
@@ -321,10 +337,12 @@ const REFERENCE_LABEL: Record<api.ReferenceView['status'], string> = {
 
 const dash = (v: string | null) => v || '（未填）'
 
-function HeaderSection({ data, options, onSaved, onError }: {
-  data: api.CaseDetail; options: api.CaseOptions | null; onSaved: () => Promise<void>; onError: (m: string) => void
+// 狀頭、當事人改到一半的內容由案件頁保管（draft、setDraft）：切到別的分頁再回來，表單和沒存的修改都還在
+function HeaderSection({ data, options, draft, setDraft, onSaved, onError }: {
+  data: api.CaseDetail; options: api.CaseOptions | null
+  draft: HeaderDraft | null; setDraft: (d: HeaderDraft | null) => void
+  onSaved: () => Promise<void>; onError: (m: string) => void
 }) {
-  const [draft, setDraft] = useState<HeaderDraft | null>(null)
   const h = data.header
   const typeLabel = options?.case_types.find((t) => t.code === data.case_type)?.label ?? data.case_type
   // 案件層只決定民事／家事；起訴狀、答辯狀或準備書狀依各輪種類
@@ -385,10 +403,11 @@ function HeaderSection({ data, options, onSaved, onError }: {
   )
 }
 
-function PartiesSection({ data, options, onSaved, onError }: {
-  data: api.CaseDetail; options: api.CaseOptions | null; onSaved: () => Promise<void>; onError: (m: string) => void
+function PartiesSection({ data, options, draft, setDraft, onSaved, onError }: {
+  data: api.CaseDetail; options: api.CaseOptions | null
+  draft: PartyDraft[] | null; setDraft: (d: PartyDraft[] | null) => void
+  onSaved: () => Promise<void>; onError: (m: string) => void
 }) {
-  const [draft, setDraft] = useState<PartyDraft[] | null>(null)
   const alignLabel = (a: api.Alignment) => options?.alignments.find((x) => x.code === a)?.label ?? a
 
   async function save(e: FormEvent) {
@@ -496,6 +515,8 @@ export default function CaseDetail() {
   const [options, setOptions] = useState<api.CaseOptions | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [source, setSource] = useState<api.CitationSource | null>(null)  // 卷證、健檢分頁右側的原文
+  const [headerDraft, setHeaderDraft] = useState<HeaderDraft | null>(null)  // 修改中的狀頭（null＝沒在改）
+  const [partyDraft, setPartyDraft] = useState<PartyDraft[] | null>(null)  // 修改中的當事人
   const evidenceRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
@@ -589,8 +610,10 @@ export default function CaseDetail() {
         <div role="tabpanel" aria-label={label} className="space-y-6">
           {tab === 'info' && (
             <>
-              <HeaderSection data={data} options={options} onSaved={saved} onError={setError} />
-              <PartiesSection data={data} options={options} onSaved={partiesSaved} onError={setError} />
+              <HeaderSection data={data} options={options} draft={headerDraft} setDraft={setHeaderDraft}
+                onSaved={saved} onError={setError} />
+              <PartiesSection data={data} options={options} draft={partyDraft} setDraft={setPartyDraft}
+                onSaved={partiesSaved} onError={setError} />
             </>
           )}
 

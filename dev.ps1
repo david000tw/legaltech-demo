@@ -19,6 +19,11 @@ try {
     $env:PYTHONPATH = '.'
     uv run alembic upgrade head
     if ($LASTEXITCODE -ne 0) { throw '資料表更新失敗' }
+    # 舊的資料庫磁碟區升級時，判決庫寫入帳號 corpus_writer 由 migration 建成不能登入（migration 不放密碼）；
+    # 開發環境補上 init.sql 裡那組開發用密碼，「貼網址加入判決」才能寫入。可重跑
+    docker compose -f "$root\docker-compose.yml" exec -T db psql -U postgres -v ON_ERROR_STOP=1 -q `
+        -c "ALTER ROLE corpus_writer LOGIN PASSWORD 'corpuspass'"
+    if ($LASTEXITCODE -ne 0) { throw '判決庫寫入帳號設定失敗' }
     uv run python -m app.cli load-calendar  # 行政機關辦公日曆（期限試算用），可重跑
     if ($LASTEXITCODE -ne 0) { throw '辦公日曆匯入失敗' }
 } finally {

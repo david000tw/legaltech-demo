@@ -1,11 +1,12 @@
 """判決檢索與釘選（設計 5.9）。律師與助理都可以用（設計第 9 節）。"""
+import logging
 from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, StringConstraints
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.auth import CurrentMember, current_member
 from app.corpus.importer import ImportRejected, import_judgment, parse_judgment_url, pdf_text, pdf_url
@@ -15,8 +16,10 @@ from app.db import corpus_session, tenant_session
 from app.models import Case, Judgment, JudgmentImport, JudgmentPassage, PinnedPassage
 
 router = APIRouter(prefix="/api")
+log = logging.getLogger(__name__)
 
 SEARCH_K = 20
+CORPUS_UNAVAILABLE = "判決庫目前無法加入新判決，請聯絡系統管理員"
 Note = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
 
 
@@ -110,9 +113,14 @@ def import_from_url(case_id: UUID, body: ImportBody, request: Request,
         created = False
         if judgment_id is None:
             text = pdf_text(request.app.state.judgment_fetcher(pdf_url(ref)))
-            with corpus_session() as cs:
-                judgment, created = import_judgment(cs, ref, text, case_type)
-                judgment_id = judgment.id
+            try:
+                with corpus_session() as cs:
+                    judgment, created = import_judgment(cs, ref, text, case_type)
+                    judgment_id = judgment.id
+            except OperationalError:
+                # 常見原因：舊資料庫升級後 corpus_writer 是不能登入的帳號（見 docs/deploy-notes.md）
+                log.exception("corpus_writer 無法寫入判決庫")
+                raise HTTPException(503, {"code": "corpus_unavailable", "message": CORPUS_UNAVAILABLE})
     except ImportRejected as e:
         raise HTTPException(422, {"code": "import_rejected", "message": e.message})
     with tenant_session(m.firm_id) as s:

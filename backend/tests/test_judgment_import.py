@@ -262,6 +262,26 @@ def test_import_non_pdf_or_unsplittable_writes_nothing(lawyer_client, monkeypatc
     assert _count(Judgment) == 0 and _count(JudgmentImport) == 0
 
 
+CORPUS_DOWN = "判決庫目前無法加入新判決，請聯絡系統管理員"
+
+
+def test_import_corpus_login_failure_is_503_in_chinese(lawyer_client, monkeypatch):
+    """最終審查 #1：舊資料庫升級後 corpus_writer 是不能登入的帳號 → 回中文 503，不是 500，也不留下紀錄。"""
+    from app import db as app_db
+    from app.api import routes_judgments
+    from tests.conftest import TEST_CORPUS_DB
+
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm)
+    _fetcher(client, [])
+    bad_url = TEST_CORPUS_DB.replace("corpuspass", "not-the-password")
+    monkeypatch.setattr(routes_judgments, "corpus_session", lambda: app_db._session(bad_url))
+    r = client.post(f"/api/cases/{case_id}/judgments/import", json={"url": URL_DATA})
+    assert r.status_code == 503, r.text
+    assert r.json()["detail"] == {"code": "corpus_unavailable", "message": CORPUS_DOWN}
+    assert _count(Judgment) == 0 and _count(JudgmentImport) == 0
+
+
 def test_import_bad_url_422_without_download(lawyer_client):
     client, firm, _ = lawyer_client
     case_id, _ = make_round(firm)
