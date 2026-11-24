@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.ai.provider import AIError, AIProvider, ProviderNotAllowed, ProviderNotEnabled, get_provider
 from app.config import Settings
 from app.db import tenant_session
-from app.models import Candidate, Claim, Draft, Firm, Round
+from app.models import RUNNING_STATUSES, Candidate, Claim, Draft, Firm, Round
 from app.pipeline.candidates import build_candidates, select_for_claims
 from app.pipeline.claims import extract_claims, opponent_pages
 from app.pipeline.drafting import draft_round
@@ -32,14 +32,14 @@ def _now() -> datetime:
 
 def start_round(s: Session, round_id: UUID) -> None:
     rnd = s.get(Round, round_id, with_for_update=True)  # 鎖住輪次列：同時按兩次只會有一個開始
-    stale = rnd.status == "running" and (rnd.started_at is None or _now() - rnd.started_at > STALE_AFTER)
+    stale = rnd.status in RUNNING_STATUSES and (rnd.started_at is None or _now() - rnd.started_at > STALE_AFTER)
     if rnd.status == "drafted":
         raise RoundBusy("這一輪已完成起草，請開新的一輪")
-    if rnd.status == "running" and not stale:
+    if rnd.status in RUNNING_STATUSES and not stale:
         raise RoundBusy("這一輪正在執行中")
     for model in (Draft, Claim, Candidate):
         s.execute(delete(model).where(model.round_id == round_id))
-    rnd.status, rnd.started_at, rnd.error = "running", _now(), None
+    rnd.status, rnd.started_at, rnd.error, rnd.failed_stage = "extracting", _now(), None, None
     s.commit()
 
 
@@ -58,7 +58,7 @@ def _mark_failed(firm_id: UUID, round_id: UUID, error: str, token: datetime | No
         rnd = s.get(Round, round_id, with_for_update=True)
         if rnd.started_at != token:
             return
-        rnd.status, rnd.error = "failed", error[:1000]
+        rnd.status, rnd.error, rnd.failed_stage = "failed", error[:1000], "extract"
 
 
 class _NoText(Exception):

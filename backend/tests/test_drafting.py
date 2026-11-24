@@ -131,7 +131,7 @@ def test_stale_running_can_restart(db):
         s.get(Round, round_id).started_at = datetime.now(timezone.utc) - timedelta(minutes=46)
     with tenant_session(firm) as s:
         start_round(s, round_id)
-        assert s.get(Round, round_id).status == "running"
+        assert s.get(Round, round_id).status == "extracting"
 
 
 def test_scanned_opponent_brief_fails_no_text(db):
@@ -278,7 +278,7 @@ def test_superseded_run_does_not_overwrite(db):
             s2.get(Round, round_id).started_at = datetime.now(timezone.utc) + timedelta(seconds=5)
         return DRAFT_OK
     run_round(firm, round_id, None, db, provider=fake_all(draft=takeover))
-    assert status_of(firm, round_id)[0] == "running"
+    assert status_of(firm, round_id)[0] == "extracting"
 
 
 def test_provider_not_allowed_marks_failed(db):

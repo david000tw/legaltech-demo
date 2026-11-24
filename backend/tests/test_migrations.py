@@ -75,3 +75,61 @@ def test_0004_fills_attorneys_of_existing_cases(db):
         got = dict(c.execute(text("SELECT title, attorneys FROM cases WHERE title LIKE '舊案%'")).all())
     eng.dispose()
     assert got == {"舊案a": ["王大明律師"], "舊案b": ["李小華律師"], "舊案c": [], "舊案無建立者": []}
+
+
+def _cfg():
+    from alembic.config import Config
+    cfg = Config(str(BACKEND / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", TEST_ADMIN_DB)
+    return cfg
+
+
+def test_0005_keeps_old_rounds_usable(db):
+    """子專案甲：升級後舊輪次照常可用；執行中、失敗的輪次都能重新拆解；降級可回復（新狀態對回舊狀態）。"""
+    from alembic import command
+    cfg = _cfg()
+    eng = create_engine(TEST_ADMIN_DB, isolation_level="AUTOCOMMIT")
+    command.downgrade(cfg, "0004")
+    try:
+        with eng.connect() as c:
+            firm = c.execute(text("INSERT INTO firms (id, name, is_internal_test) VALUES (gen_random_uuid(), '舊所', true) "
+                                  "RETURNING id")).scalar()
+            case = c.execute(text("INSERT INTO cases (id, firm_id, title, our_side, case_type) "
+                                  "VALUES (gen_random_uuid(), :f, '舊案', 'plaintiff', 'traffic_tort') RETURNING id"),
+                             {"f": firm}).scalar()
+            for seq, status, error in ((1, "drafted", None), (2, "running", None), (3, "failed", "usage_limit: x")):
+                c.execute(text("INSERT INTO rounds (id, firm_id, case_id, seq, status, error) "
+                               "VALUES (gen_random_uuid(), :f, :c, :s, :st, :e)"),
+                          {"f": firm, "c": case, "s": seq, "st": status, "e": error})
+    finally:
+        command.upgrade(cfg, "head")
+    with eng.connect() as c:
+        rows = {r[0]: tuple(r[1:]) for r in c.execute(text(
+            "SELECT seq, status, failed_stage, error, brief_kind FROM rounds WHERE case_id = :c"), {"c": case})}
+    assert rows[1] == ("drafted", None, None, "preparatory")
+    assert rows[2] == ("failed", "extract", "系統升級時中斷，請重新執行", "preparatory")
+    assert rows[3] == ("failed", "extract", "usage_limit: x", "preparatory")
+
+    with eng.connect() as c:
+        for seq, status in ((4, "extracted"), (5, "drafting"), (6, "extracting")):
+            c.execute(text("INSERT INTO rounds (id, firm_id, case_id, seq, status) VALUES (gen_random_uuid(), :f, :c, :s, :st)"),
+                      {"f": firm, "c": case, "s": seq, "st": status})
+        r1 = c.execute(text("SELECT id FROM rounds WHERE case_id = :c AND seq = 1"), {"c": case}).scalar()
+        draft = c.execute(text("INSERT INTO drafts (id, firm_id, round_id) VALUES (gen_random_uuid(), :f, :r) RETURNING id"),
+                          {"f": firm, "r": r1}).scalar()
+        para = c.execute(text("INSERT INTO paragraphs (id, firm_id, draft_id, seq, heading, text, status, verify_reasons) "
+                              "VALUES (gen_random_uuid(), :f, :d, 1, '', '內文', 'unreviewed', '[]'::jsonb) RETURNING id"),
+                         {"f": firm, "d": draft}).scalar()
+        c.execute(text("INSERT INTO review_events (id, firm_id, paragraph_id, action, after_text) "
+                       "VALUES (gen_random_uuid(), :f, :p, 'confirm_amount', '406000')"), {"f": firm, "p": para})
+    command.downgrade(cfg, "0004")
+    try:
+        with eng.connect() as c:
+            got = dict(c.execute(text("SELECT seq, status FROM rounds WHERE case_id = :c"), {"c": case}).all())
+            events = c.execute(text("SELECT count(*) FROM review_events")).scalar()
+    finally:
+        command.upgrade(cfg, "head")
+        eng.dispose()
+    assert got[4] == "created" and got[5] == "failed" and got[6] == "failed"
+    assert events == 0

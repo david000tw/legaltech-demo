@@ -10,6 +10,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String,
     Text, UniqueConstraint, func, text,
 )
@@ -17,6 +18,10 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.case_types import ALIGNMENTS, CASE_TYPES, PARTY_ROLES
+
+ROUND_STATUSES = ("created", "extracting", "extracted", "drafting", "drafted", "failed")
+RUNNING_STATUSES = ("extracting", "drafting")
+BRIEF_KIND_CODES = ("complaint", "answer", "preparatory")
 
 
 class Base(DeclarativeBase):
@@ -137,19 +142,36 @@ class CaseParty(Base):
 class Round(Base):
     __tablename__ = "rounds"
     __table_args__ = (
-        _enum("status", ("created", "running", "drafted", "failed"), "ck_round_status"),
+        _enum("status", ROUND_STATUSES, "ck_round_status"),
+        _enum("brief_kind", BRIEF_KIND_CODES, "ck_round_brief_kind"),
+        _enum("failed_stage", ("extract", "draft"), "ck_round_failed_stage"),
+        _enum("statement_variant", ("alive", "deceased"), "ck_round_statement_variant"),
         UniqueConstraint("case_id", "seq", name="uq_round_case_seq"),
         _tenant_key("rounds"),
         _tfk("case_id", "cases", "CASCADE"),
+        _tfk("copied_from_round_id", "rounds", "SET NULL (copied_from_round_id)"),
+        _tfk("amounts_checked_by", "members"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
     case_id: Mapped[uuid.UUID] = _ref()
     seq: Mapped[int] = mapped_column(Integer)
+    # 兩段式：已建立 → 拆解中 → 待確認 → 起草中 → 已起草；任一段失敗為 failed，failed_stage 記是哪一段
     status: Mapped[str] = mapped_column(String(20), default="created")
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created()
+    brief_kind: Mapped[str] = mapped_column(String(20), default="preparatory", server_default="preparatory")
+    failed_stage: Mapped[str | None] = mapped_column(String(10))
+    copied_from_round_id: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    narrative: Mapped[str | None] = mapped_column(Text)  # 起訴狀的案情說明
+    statement_text: Mapped[str | None] = mapped_column(Text)  # 複製輪次時帶過來的聲明文字
+    statement_variant: Mapped[str | None] = mapped_column(String(20))  # 借名登記：出名人在世或已死亡
+    joint_liability: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    provisional_execution: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    claim_value: Mapped[int | None] = mapped_column(BigInteger)  # 訴訟標的金額或價額（律師填寫）
+    amounts_checked_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    amounts_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Document(Base):
@@ -224,10 +246,15 @@ class Exhibit(Base):
 
 
 class Claim(Base):
+    """對造主張（kind=opponent_claim），或起訴狀的我方請求項目（kind=request）。"""
     __tablename__ = "claims"
     __table_args__ = (
         _tfk("round_id", "rounds", "CASCADE"),
         _tfk("page_id", "pages"),
+        _tfk("confirmed_by", "members"),
+        _enum("kind", ("opponent_claim", "request"), "ck_claim_kind"),
+        _enum("request_type", ("monetary", "non_monetary"), "ck_claim_request_type"),
+        CheckConstraint("amount >= 0", name="ck_claim_amount"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
@@ -238,6 +265,15 @@ class Claim(Base):
     page_id: Mapped[uuid.UUID | None] = _ref(nullable=True)
     quote_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     selection: Mapped[dict | None] = mapped_column(JSONB)
+    selected: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))  # 律師勾選「回應」
+    kind: Mapped[str] = mapped_column(String(20), default="opponent_claim", server_default="opponent_claim")
+    request_type: Mapped[str | None] = mapped_column(String(20))
+    amount: Mapped[int | None] = mapped_column(BigInteger)
+    amount_note: Mapped[str | None] = mapped_column(String(30))
+    basis_text: Mapped[str | None] = mapped_column(Text)
+    evidence: Mapped[list | None] = mapped_column(JSONB)  # [{page_id, quote, found}]
+    confirmed_by: Mapped[uuid.UUID | None] = _ref(nullable=True)  # 只有律師能確認請求項目
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Judgment(Base):
@@ -328,6 +364,7 @@ class Paragraph(Base):
     __tablename__ = "paragraphs"
     __table_args__ = (
         _enum("status", ("unreviewed", "reviewed"), "ck_paragraph_status"),
+        _enum("kind", ("body", "statement"), "ck_paragraph_kind"),
         _tenant_key("paragraphs"),
         _tfk("draft_id", "drafts", "CASCADE"),
         _tfk("reviewed_by", "members"),
@@ -343,6 +380,8 @@ class Paragraph(Base):
     reviewed_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
     reviewed_bar_number: Mapped[str | None] = mapped_column(String(50))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    kind: Mapped[str] = mapped_column(String(20), default="body", server_default="body")  # statement＝訴之聲明、答辯聲明
+    amounts_confirmed: Mapped[list] = _tags()  # 律師按「已核對金額」放行的金額（欄位名 text 遮蔽了 sqlalchemy.text，借用 _tags）
 
 
 class Citation(Base):
@@ -377,8 +416,8 @@ class Citation(Base):
 class ReviewEvent(Base):
     __tablename__ = "review_events"
     __table_args__ = (
-        _enum("action", ("edit", "rewrite", "confirm_citation", "confirm_court_reasoning", "mark_reviewed", "revert"),
-              "ck_review_action"),
+        _enum("action", ("edit", "rewrite", "confirm_citation", "confirm_court_reasoning", "mark_reviewed", "revert",
+                         "confirm_amount"), "ck_review_action"),
         _tfk("paragraph_id", "paragraphs", "CASCADE"),
         _tfk("member_id", "members"),
     )

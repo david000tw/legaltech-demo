@@ -49,7 +49,7 @@ export type CaseDetail = CaseSummary & { header: CaseHeader; parties: Party[]; p
 // 建立／修改案件：狀頭欄位傳 null 代表清空；attorneys 建立時不傳＝預設帶入建立者（律師）
 export type CaseInput = Partial<Omit<CaseHeader, 'attorneys'>> & { title: string; our_side: 'plaintiff' | 'defendant'
   case_type: string; attorneys?: string[] }
-export type RoundStatus = 'created' | 'running' | 'drafted' | 'failed'
+export type RoundStatus = 'created' | 'extracting' | 'extracted' | 'drafting' | 'drafted' | 'failed'
 // AI 想引用、但沒用候選代碼填的項目（設計 5.7）：mapped＝系統對回；ambiguous_passage＝對到判決但段落不確定；unmatched＝不在候選清單
 export type ReferenceView = { text: string; status: 'mapped' | 'ambiguous_passage' | 'unmatched'; code: string | null }
 export type ClaimView = { seq: number; summary: string; quote: string; quote_verified: boolean; page_no: number | null

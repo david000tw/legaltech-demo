@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.ai.provider import AIError, ProviderNotAllowed, ProviderNotEnabled
 from app.auth import CurrentMember, current_member
 from app.db import tenant_session
-from app.models import Claim, Draft, Firm, Page, Paragraph, Round
+from app.models import RUNNING_STATUSES, Claim, Draft, Firm, Page, Paragraph, Round
 from app.pipeline.drafting import ParagraphChanged, rewrite_paragraph
 from app.pipeline.run import STALE_AFTER, RoundBusy, run_round, start_round
 
@@ -27,7 +27,7 @@ def run(round_id: UUID, request: Request, background: BackgroundTasks,
             raise HTTPException(409, str(e))
     background.add_task(run_round, m.firm_id, round_id, m.id, request.app.state.settings,
                         provider_factory=request.app.state.provider_factory)
-    return {"status": "running"}
+    return {"status": "extracting"}
 
 
 @router.get("/rounds/{round_id}")
@@ -38,7 +38,7 @@ def get_round(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
             raise HTTPException(404, "找不到輪次")
         claims = s.scalars(select(Claim).where(Claim.round_id == round_id).order_by(Claim.seq)).all()
         draft = s.scalars(select(Draft).where(Draft.round_id == round_id).order_by(Draft.created_at.desc())).first()
-        stale = rnd.status == "running" and rnd.started_at is not None and (
+        stale = rnd.status in RUNNING_STATUSES and rnd.started_at is not None and (
             datetime.now(timezone.utc) - rnd.started_at > STALE_AFTER)
         return {
             "id": str(rnd.id), "seq": rnd.seq, "status": rnd.status, "error": rnd.error, "stale": stale,

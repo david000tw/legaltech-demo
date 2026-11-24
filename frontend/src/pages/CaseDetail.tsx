@@ -9,7 +9,7 @@ import PartiesEditor from '../components/PartiesEditor'
 
 const POLL_MS = 3000
 const STATUS_LABEL: Record<api.RoundStatus, string> = {
-  created: '尚未執行', running: '分析與起草中…', drafted: '草稿完成', failed: '執行失敗',
+  created: '尚未執行', extracting: '拆解中…', extracted: '待確認', drafting: '起草中…', drafted: '草稿完成', failed: '執行失敗',
 }
 
 const partyLabel = (p: api.Party) => `${p.role} ${p.name}`
@@ -41,7 +41,7 @@ function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
 
   const status = detail?.status ?? round.status
   useEffect(() => {
-    if (status !== 'running') return
+    if (status !== 'extracting' && status !== 'drafting') return
     const t = setInterval(() => { void refresh() }, POLL_MS)
     return () => clearInterval(t)
   }, [status, refresh])
