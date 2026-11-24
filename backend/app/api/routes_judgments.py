@@ -2,15 +2,17 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, StringConstraints
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import CurrentMember, current_member
+from app.corpus.importer import ImportRejected, import_judgment, parse_judgment_url, pdf_text, pdf_url
 from app.corpus.pins import case_pins, is_pinned, passage_json, pins_by_passage
 from app.corpus.search import search_passages
-from app.db import tenant_session
-from app.models import Case, JudgmentPassage, PinnedPassage
+from app.db import corpus_session, tenant_session
+from app.models import Case, Judgment, JudgmentImport, JudgmentPassage, PinnedPassage
 
 router = APIRouter(prefix="/api")
 
@@ -89,6 +91,36 @@ def patch_pin(pin_id: UUID, body: PinNoteBody, m: CurrentMember = Depends(curren
         pin.note = body.note
         s.flush()
         return passage_json(s, s.get(JudgmentPassage, pin.judgment_passage_id), pin)
+
+
+class ImportBody(BaseModel):
+    url: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+
+@router.post("/cases/{case_id}/judgments/import")
+def import_from_url(case_id: UUID, body: ImportBody, request: Request,
+                    m: CurrentMember = Depends(current_member)) -> dict:
+    """貼司法院判決網址加入判決庫：先下載（不佔資料庫連線），再用 corpus_writer 寫入，最後記下是誰加的。"""
+    with tenant_session(m.firm_id) as s:
+        case_type = _case_or_404(s, case_id).case_type
+    try:
+        ref = parse_judgment_url(body.url)
+        text = pdf_text(request.app.state.judgment_fetcher(pdf_url(ref)))
+        with corpus_session() as cs:
+            judgment, created = import_judgment(cs, ref, text, case_type)
+            judgment_id = judgment.id
+    except ImportRejected as e:
+        raise HTTPException(422, {"code": "import_rejected", "message": e.message})
+    with tenant_session(m.firm_id) as s:
+        s.add(JudgmentImport(firm_id=m.firm_id, member_id=m.id, case_id=case_id, judgment_id=judgment_id,
+                             url=body.url))
+        j = s.get(Judgment, judgment_id)
+        pins = pins_by_passage(s, case_id)
+        passages = s.scalars(select(JudgmentPassage).where(
+            JudgmentPassage.judgment_id == judgment_id, JudgmentPassage.passage_type == "court_reasoning",
+            JudgmentPassage.status == "active").order_by(JudgmentPassage.seq)).all()
+        return {"judgment": {"citation": j.citation, "court": j.court, "decided_on": j.decided_on.isoformat()},
+                "created": created, "passages": [passage_json(s, p, pins.get(p.id)) for p in passages]}
 
 
 @router.delete("/pins/{pin_id}", status_code=204)

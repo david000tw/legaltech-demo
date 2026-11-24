@@ -283,9 +283,12 @@ class Judgment(Base):
     __table_args__ = (
         _enum("court_level", ("supreme", "high", "district", "summary"), "ck_judgment_level"),
         _enum("status", ("active", "withdrawn", "corrected"), "ck_judgment_status"),
+        UniqueConstraint("source_key", name="uq_judgment_source_key"),
     )
     id: Mapped[uuid.UUID] = _pk()
     citation: Mapped[str] = mapped_column(String(300), unique=True)
+    # 司法院網址裡的案件代碼「法院代碼,年,字別,號,日期,序號」：同一件判決只加一次；高院與分院不會混在一起
+    source_key: Mapped[str | None] = mapped_column(String(100))
     court: Mapped[str] = mapped_column(String(100))
     court_level: Mapped[str] = mapped_column(String(20))
     decided_on: Mapped[date] = mapped_column(Date)
@@ -514,6 +517,22 @@ class PinnedPassage(Base):
     judgment_passage_id: Mapped[uuid.UUID] = _public_fk("judgment_passages.id", nullable=False)
     note: Mapped[str] = mapped_column(Text, default="")
     pinned_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    created_at: Mapped[datetime] = _created()
+
+
+class JudgmentImport(Base):
+    """律師貼司法院網址加入判決的紀錄：哪個事務所、哪位使用者、哪個案件、加了哪一件。"""
+    __tablename__ = "judgment_imports"
+    __table_args__ = (
+        _tfk("case_id", "cases", "CASCADE"),
+        _tfk("member_id", "members"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    firm_id: Mapped[uuid.UUID] = _firm()
+    member_id: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    case_id: Mapped[uuid.UUID] = _ref()
+    judgment_id: Mapped[uuid.UUID] = _public_fk("judgments.id", nullable=False)
+    url: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = _created()
 
 

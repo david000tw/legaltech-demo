@@ -146,3 +146,29 @@ def test_auth_lookup_returns_only_auth_fields(db):
         assert list(res.keys()) == ["member_id", "firm_id", "password_hash"]
         assert len(res.all()) == 1
         assert s.execute(text("select * from members")).all() == []
+
+
+def test_corpus_writer_only_writes_corpus(db):
+    """加入判決用的帳號只能讀、新增判決與段落：不能改判決、不能寫事務所資料、不能繞過 RLS。"""
+    from tests.conftest import TEST_CORPUS_DB
+    eng = create_engine(TEST_CORPUS_DB)
+    try:
+        with eng.begin() as c:
+            role = c.execute(text("select rolsuper, rolbypassrls from pg_roles where rolname = current_user")).one()
+            assert tuple(role) == (False, False)
+            jid = c.execute(text(
+                "insert into judgments (id, citation, court, court_level, decided_on, source_url, full_text, status,"
+                " curated) values (gen_random_uuid(), 'x', 'y', 'district', '2025-01-01', 'u', 't', 'active', false)"
+                " returning id")).scalar_one()
+            c.execute(text("insert into judgment_passages (id, judgment_id, seq, passage_type, text, status) "
+                           "values (gen_random_uuid(), :j, 1, 'court_reasoning', 't', 'active')"), {"j": jid})
+        for stmt in ("insert into cases (id, firm_id, title, our_side) "
+                     "values (gen_random_uuid(), gen_random_uuid(), 't', 'plaintiff')",
+                     "update judgments set court = 'z'",
+                     "delete from judgment_passages",
+                     "insert into statutes (id, name) values (gen_random_uuid(), 'x')"):
+            with pytest.raises(DBAPIError):
+                with eng.begin() as c:
+                    c.execute(text(stmt))
+    finally:
+        eng.dispose()

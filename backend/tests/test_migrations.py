@@ -208,3 +208,43 @@ def test_0008_round_trip(db):
         command.upgrade(cfg, "head")
     tables, cols = schema()
     assert "pinned_passages" in tables and "pinned" in cols
+
+
+def test_0009_round_trip(db):
+    """子專案丙：判決來源代碼回填、加入紀錄表；降級只撤 corpus_writer 的權限、不刪帳號。"""
+    from alembic import command
+
+    from app.corpus.seed_loader import load_seed
+    from app.db import admin_session
+    cfg = _cfg()
+    with admin_session() as s:
+        load_seed(s, BACKEND / "seed")
+
+    def state():
+        eng = create_engine(TEST_ADMIN_DB)
+        try:
+            with eng.connect() as c:
+                tables = set(c.execute(text("select tablename from pg_tables where schemaname='public'")).scalars())
+                role = c.execute(text("select count(*) from pg_roles where rolname='corpus_writer'")).scalar_one()
+                can = c.execute(text("select has_table_privilege('corpus_writer', 'judgments', 'INSERT')")).scalar()
+                return tables, role, can
+        finally:
+            eng.dispose()
+
+    command.downgrade(cfg, "0008")
+    try:
+        tables, role, can = state()
+        assert "judgment_imports" not in tables and role == 1 and can is False
+    finally:
+        command.upgrade(cfg, "head")
+    tables, role, can = state()
+    assert "judgment_imports" in tables and can is True
+    eng = create_engine(TEST_ADMIN_DB)
+    try:
+        with eng.connect() as c:
+            keys = dict(c.execute(text("select citation, source_key from judgments")).all())
+    finally:
+        eng.dispose()
+    assert keys and all(keys.values())
+    assert keys["臺灣臺南地方法院114年度訴字第1347號民事判決"] == "TNDV,114,訴,1347,20260113,1"
+    assert keys["臺灣新竹地方法院114年度簡上字第17號民事判決"] == "SCDV,114,簡上,17,20251023,1"

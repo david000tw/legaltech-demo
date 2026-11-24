@@ -4,6 +4,7 @@
   app.firm_id（交易層級），中途 commit 後仍在同一事務所範圍。
 - app_session()：以 app_user 連線、不設事務所，只用於登入查詢 auth_lookup。
 - admin_session()：超級使用者連線，只給遷移、種子、CLI、測試準備資料。
+- corpus_session()：corpus_writer 連線，只給律師貼網址加入判決用。
 """
 from __future__ import annotations
 
@@ -70,3 +71,8 @@ def app_session() -> Iterator[Session]:
 
 def admin_session() -> Iterator[Session]:
     return _session(settings().database_admin_url)
+
+
+def corpus_session() -> Iterator[Session]:
+    """corpus_writer 帳號：只能讀、新增判決與段落，給 app/corpus/importer.py 加入判決用。"""
+    return _session(settings().database_corpus_url)

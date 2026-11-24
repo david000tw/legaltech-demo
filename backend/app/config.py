@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "pilot", "prod"] = "dev"
     database_url: str = "postgresql+psycopg://app_user:apppass@127.0.0.1:55432/legaltech"
     database_admin_url: str = "postgresql+psycopg://postgres:devpass@127.0.0.1:55432/legaltech"
+    # 只能讀、新增判決與段落的帳號：律師貼司法院網址加入判決時用（網頁伺服器不持有最高權限帳號）
+    database_corpus_url: str = "postgresql+psycopg://corpus_writer:corpuspass@127.0.0.1:55432/legaltech"
     storage_dir: Path = Path("storage")
     ai_provider: Literal["claude_code_local", "bedrock"] = "claude_code_local"
     claude_cmd: list[str] = ["claude"]

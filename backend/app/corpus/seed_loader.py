@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.corpus.importer import ImportRejected, parse_judgment_url
 from app.corpus.splitter import split_judgment
 from app.models import Candidate, Citation, Judgment, JudgmentPassage, PinnedPassage, Statute, StatuteArticle
 
@@ -26,6 +27,13 @@ def _referenced(admin_s: Session, judgment_id) -> bool:
                 or admin_s.scalar(select(PinnedPassage.id).where(PinnedPassage.judgment_passage_id.in_(ids)).limit(1)))
 
 
+def _source_key(url: str) -> str | None:
+    try:
+        return parse_judgment_url(url).key
+    except ImportRejected:
+        return None
+
+
 def _insert_passages(admin_s: Session, j: Judgment) -> None:
     for seq, (kind, text) in enumerate(split_judgment(j.full_text), start=1):
         admin_s.add(JudgmentPassage(judgment_id=j.id, seq=seq, passage_type=kind, text=text, status="active"))
@@ -40,6 +48,7 @@ def load_seed(admin_s: Session, seed_dir: Path, resplit: bool = False) -> tuple[
         if existing is not None:
             existing.case_types = list(d.get("case_types", []))  # 標籤與註記可隨種子更新；全文不動
             existing.annotation = d.get("annotation")
+            existing.source_key = existing.source_key or _source_key(existing.source_url)
             if resplit:
                 if _referenced(admin_s, existing.id):
                     log.warning("判決 %s 已被引用，不重切", existing.citation)
@@ -49,6 +58,7 @@ def load_seed(admin_s: Session, seed_dir: Path, resplit: bool = False) -> tuple[
             continue
         j = Judgment(citation=d["citation"], court=d["court"], court_level=d["court_level"],
                      decided_on=date.fromisoformat(d["decided_on"]), source_url=d["source_url"],
+                     source_key=_source_key(d["source_url"]),
                      full_text=d["full_text"], status="active", curated=bool(d.get("curated")),
                      case_types=list(d.get("case_types", [])), annotation=d.get("annotation"))
         admin_s.add(j)

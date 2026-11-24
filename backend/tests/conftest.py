@@ -11,7 +11,8 @@ BACKEND = Path(__file__).resolve().parent.parent
 TEST_DB_NAME = os.environ.get("LEGALTECH_TEST_DB", "legaltech_test")
 TEST_DB = f"postgresql+psycopg://app_user:apppass@127.0.0.1:55432/{TEST_DB_NAME}"
 TEST_ADMIN_DB = f"postgresql+psycopg://postgres:devpass@127.0.0.1:55432/{TEST_DB_NAME}"
-SERVER_ADMIN_DB = "postgresql+psycopg://postgres:devpass@127.0.0.1:55432/postgres"
+TEST_CORPUS_DB = f"postgresql+psycopg://corpus_writer:corpuspass@127.0.0.1:55432/{TEST_DB_NAME}"
+SERVER_ADMIN_DB ="postgresql+psycopg://postgres:devpass@127.0.0.1:55432/postgres"
 
 
 def make_settings(tmp_path: Path, **overrides) -> Settings:
@@ -20,6 +21,7 @@ def make_settings(tmp_path: Path, **overrides) -> Settings:
         app_env="dev",
         database_url=TEST_DB,
         database_admin_url=TEST_ADMIN_DB,
+        database_corpus_url=TEST_CORPUS_DB,
         storage_dir=tmp_path / "storage",
         session_secret="test-secret",
     )

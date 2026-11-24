@@ -9,6 +9,7 @@ from app.api import (
     routes_sources,
 )
 from app.config import Settings
+from app.corpus.importer import fetch_pdf
 
 # "testclient" 是 Starlette TestClient 的預設來源；真實連線的來源一定是 IP。
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "testclient"}
@@ -24,6 +25,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="legaltech")
     app.state.settings = settings
     app.state.provider_factory = get_provider  # 測試可換成假的供應來源
+    app.state.judgment_fetcher = fetch_pdf  # 向司法院下載判決 PDF；測試換成假的，不連網
     app.include_router(routes_auth.router)
     app.include_router(routes_cases.router)
     app.include_router(routes_rounds.router)
