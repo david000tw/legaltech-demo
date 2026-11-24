@@ -10,6 +10,7 @@ from app.ai.provider import AIError, ProviderNotAllowed, ProviderNotEnabled
 from app.auth import CurrentMember, current_member, require_lawyer
 from app.db import tenant_session
 from app.models import RUNNING_STATUSES, Claim, Draft, Firm, Page, Paragraph, Round
+from app.pipeline.copy_round import copy_round
 from app.pipeline.drafting import ParagraphChanged, rewrite_paragraph
 from app.pipeline.requests import amount_note, pending_ocr_pages
 from app.statements import AMOUNT_MARKER, round_total, statement_template
@@ -90,6 +91,19 @@ def patch_round(round_id: UUID, body: RoundSettingsBody, m: CurrentMember = Depe
         for k, v in fields.items():
             setattr(rnd, k, v)
         return {"id": str(rnd.id), **{k: getattr(rnd, k) for k in fields}}
+
+
+@router.post("/rounds/{round_id}/copy")
+def copy(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    """以這一輪為基礎重新起草：開新的一輪，舊的一輪原封不動（設計 5.1）。"""
+    with tenant_session(m.firm_id) as s:
+        if s.get(Round, round_id) is None:
+            raise HTTPException(404, "找不到輪次")
+        try:
+            target = copy_round(s, round_id)
+        except RoundRule as e:
+            raise _rule(e)
+        return {"id": str(target.id), "seq": target.seq}
 
 
 @router.post("/rounds/{round_id}/amounts-checked")
