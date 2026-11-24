@@ -480,6 +480,8 @@ def paragraph_blockers(s: Session, p: Paragraph, cache: dict | None = None) -> l
             out.append(f"party_claim_unconfirmed:{c.code}")
         elif c.kind == "judgment" and not c.lawyer_confirmed:
             out.append(f"judgment_unconfirmed:{c.code}")
+    from app.support import service as support  # 支持度（設計 7.3）；函式內 import 避免循環
+    out.extend(support.support_blockers(s, p, cache))
     return out
 
 

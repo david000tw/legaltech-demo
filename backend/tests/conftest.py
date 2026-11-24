@@ -39,6 +39,15 @@ def _argv0(args) -> str:
 
 
 @pytest.fixture(autouse=True)
+def _support_off(request, monkeypatch):
+    """一般測試不跑支持度檢查（沒有輸入就不排入、不阻擋）。標 support_real 的測試跑真的流程。"""
+    if request.node.get_closest_marker("support_real"):
+        return
+    from app.support import fingerprint
+    monkeypatch.setattr(fingerprint, "support_inputs", lambda s, p: {})
+
+
+@pytest.fixture(autouse=True)
 def _no_real_claude(request, monkeypatch):
     """一般測試不能呼叫真的 Claude Code（會用掉訂閱額度）；標 real_ai 的測試不套用。"""
     if request.node.get_closest_marker("real_ai"):
