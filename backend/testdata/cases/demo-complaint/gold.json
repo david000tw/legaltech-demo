@@ -1,0 +1,25 @@
+{
+ "items": [
+  {
+   "label": "醫療費用",
+   "request_type": "monetary",
+   "amount": 45000
+  },
+  {
+   "label": "車輛修復費用",
+   "request_type": "monetary",
+   "amount": 160000
+  },
+  {
+   "label": "薪資損失",
+   "request_type": "monetary",
+   "amount": 50000
+  },
+  {
+   "label": "精神慰撫金",
+   "request_type": "monetary",
+   "amount": 150000
+  }
+ ],
+ "must_not_cite": []
+}

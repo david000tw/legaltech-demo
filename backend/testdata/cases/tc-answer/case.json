@@ -1,0 +1,34 @@
+{
+ "title": "王建宏 請求損害賠償事件（答辯狀，合成案件，事實改寫自公開判決，我方為被告）",
+ "our_side": "defendant",
+ "case_type": "traffic_tort",
+ "brief_kind": "answer",
+ "source": {
+  "citation": "臺灣臺中地方法院113年度中簡字第3946號民事判決",
+  "url": "https://judgment.judicial.gov.tw/FILES/TCEV/113,%E4%B8%AD%E7%B0%A1,3946,20250217,1.pdf"
+ },
+ "court": "臺灣臺中地方法院",
+ "case_number": "114年度中簡字第1208號",
+ "division": "仁",
+ "cause": "損害賠償",
+ "attorneys": [
+  "許志遠律師"
+ ],
+ "parties": [
+  {
+   "name": "王建宏",
+   "role": "原告",
+   "alignment": "opposing",
+   "legal_rep": null,
+   "position_note": null
+  },
+  {
+   "name": "張美玲",
+   "role": "被告",
+   "alignment": "ours",
+   "legal_rep": null,
+   "position_note": null
+  }
+ ],
+ "opponent_filed_by": 1
+}

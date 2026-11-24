@@ -138,3 +138,39 @@ def test_spike_case_imports_and_is_synthetic(db, name):
         assert 3 <= len(ex) <= 5 and {e.prefix for e in ex} == {"原證"}
         assert len(opponent_pages(s, round_id)) == 3
         assert {g["page"] for g in gold["claims"]} == {1, 2, 3}
+
+
+# ---- 子專案甲 Task 9：起訴狀 2 件、答辯狀 1 件（設計 6.1） ----
+from app.models import Document, Round  # noqa: E402
+
+KIND_CASES = {"demo-complaint": ("complaint", "plaintiff"), "estate-complaint": ("complaint", "plaintiff"),
+              "tc-answer": ("answer", "defendant")}
+REAL_NAMES = SPIKE_REAL_NAMES["spike-estate-159"] + ["楊家豪", "廖祥麟"]
+
+
+@pytest.mark.parametrize("name", list(KIND_CASES))
+def test_new_testcases_import_and_are_synthetic(db, name):
+    kind, side = KIND_CASES[name]
+    folder = CASES / name
+    meta = json.loads((folder / "case.json").read_text(encoding="utf-8"))
+    gold = json.loads((folder / "gold.json").read_text(encoding="utf-8"))
+    assert (meta["brief_kind"], meta["our_side"]) == (kind, side) and meta["case_type"] in CASE_TYPES
+    texts = "".join(p.read_text(encoding="utf-8") for p in folder.rglob("*") if p.is_file())
+    assert [n for n in REAL_NAMES if n in texts] == []
+    if kind == "complaint":
+        assert meta["narrative"].strip() and not (folder / "opponent").exists()
+        assert gold["items"] and all({"label", "request_type"} <= set(i) for i in gold["items"])
+    else:
+        assert gold["claims"] and list((folder / "opponent").glob("*.txt"))
+    create_firm("內部測試所")
+    case_id, round_id = import_testcase(folder, "內部測試所")
+    with admin_session() as s:
+        rnd = s.get(Round, round_id)
+        assert rnd.brief_kind == kind and (rnd.narrative or "") == meta.get("narrative", "")
+        briefs = s.scalars(select(Document).where(Document.round_id == round_id)).all()
+        assert (len(briefs) == 0) == (kind == "complaint")
+
+
+def test_demo_complaint_gold_total():
+    gold = json.loads((CASES / "demo-complaint" / "gold.json").read_text(encoding="utf-8"))
+    assert sum(i["amount"] for i in gold["items"]) == 405000

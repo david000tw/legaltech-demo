@@ -1,0 +1,49 @@
+{
+ "title": "宋文彬等 請求分割遺產事件（起訴狀，家事訴訟，合成案件，事實改寫自公開判決，我方為原告）",
+ "our_side": "plaintiff",
+ "case_type": "estate_partition",
+ "brief_kind": "complaint",
+ "source": {
+  "citation": "臺灣高雄少年及家事法院112年度家繼訴字第159號民事判決",
+  "url": "https://judgment.judicial.gov.tw/FILES/KSYV/112,%E5%AE%B6%E7%B9%BC%E8%A8%B4,159,20250214,1.pdf"
+ },
+ "court": "臺灣臺南地方法院",
+ "case_number": null,
+ "division": null,
+ "cause": "分割遺產",
+ "attorneys": [
+  "周佳蓉律師"
+ ],
+ "reference_date": "2024-04-02",
+ "parties": [
+  {
+   "name": "宋文彬",
+   "role": "原告",
+   "alignment": "ours",
+   "legal_rep": null,
+   "position_note": null
+  },
+  {
+   "name": "宋文娟",
+   "role": "原告",
+   "alignment": "ours",
+   "legal_rep": null,
+   "position_note": null
+  },
+  {
+   "name": "宋文德",
+   "role": "被告",
+   "alignment": "opposing",
+   "legal_rep": null,
+   "position_note": null
+  },
+  {
+   "name": "宋文琪",
+   "role": "被告",
+   "alignment": "aligned",
+   "legal_rep": null,
+   "position_note": "同意分割遺產，對分割方法未表示意見"
+  }
+ ],
+ "narrative": "原告宋文彬、宋文娟與被告宋文德、宋文琪均為被繼承人宋金枝之子女，被繼承人於民國113年4月2日死亡，遺有臺南市東區房地及銀行存款。被繼承人之公證遺囑及自書遺囑將房地指定由被告宋文德繼承，侵害原告之特留分（各八分之一），原告已以存證信函向被告宋文德行使扣減權。原告請求分割被繼承人之遺產：房地依特留分扣減後，按原告各八分之一、被告宋文德其餘比例分割為分別共有；存款扣除喪葬費用後之餘額，由繼承人四人平均分配。"
+}

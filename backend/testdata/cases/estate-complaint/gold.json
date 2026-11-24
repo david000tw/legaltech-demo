@@ -1,0 +1,16 @@
+{
+ "items": [
+  {
+   "label": "分割遺產",
+   "request_type": "non_monetary"
+  }
+ ],
+ "claim_value": 2255150,
+ "statement_fill": [
+  [
+   "○○○",
+   "宋金枝"
+  ]
+ ],
+ "must_not_cite": []
+}

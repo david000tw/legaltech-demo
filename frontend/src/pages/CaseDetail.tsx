@@ -308,6 +308,10 @@ function HeaderSection({ data, options, onSaved, onError }: {
   const [draft, setDraft] = useState<HeaderDraft | null>(null)
   const h = data.header
   const typeLabel = options?.case_types.find((t) => t.code === data.case_type)?.label ?? data.case_type
+  // 案件層只決定民事／家事；起訴狀、答辯狀或準備書狀依各輪種類
+  const procedureLabel = data.procedure === 'family' ? '家事' : '民事'
+  const kindTitles = (data.brief_kind_options ?? []).map((o) => procedureLabel + o.label).join('／')
+  const briefTitles = kindTitles ? `${kindTitles}（依各輪種類）` : data.brief_title
 
   async function save(e: FormEvent) {
     e.preventDefault()
@@ -348,7 +352,7 @@ function HeaderSection({ data, options, onSaved, onError }: {
         </form>
       ) : (
         <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 rounded-lg border border-slate-200 bg-white p-4 text-sm">
-          <dt className="text-slate-500">書狀名稱</dt><dd>{data.brief_title}</dd>
+          <dt className="text-slate-500">書狀名稱</dt><dd>{briefTitles}</dd>
           <dt className="text-slate-500">案型</dt><dd>{typeLabel}</dd>
           <dt className="text-slate-500">法院</dt><dd>{dash(h.court)}</dd>
           <dt className="text-slate-500">案號</dt><dd>{dash(h.case_number)}</dd>

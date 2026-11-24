@@ -123,7 +123,7 @@ describe('CaseDetail header and parties', () => {
       header: { ...emptyHeader, court: '臺灣臺北地方法院', case_number: '113年度家訴字第5號' }, rounds: [] })
     renderAt()
     expect(await screen.findByText(WARNING)).toHaveClass('bg-yellow-50')
-    expect(screen.getByText('家事準備書狀')).toBeInTheDocument()
+    expect(screen.getByText('家事起訴狀／家事準備書狀（依各輪種類）')).toBeInTheDocument()
     expect(screen.getByText('113年度家訴字第5號')).toBeInTheDocument()
     expect(screen.getByText(/預設：臺灣臺北地方法院家事法庭/)).toBeInTheDocument()  // 受文沒填時顯示系統預設
   })
@@ -131,7 +131,8 @@ describe('CaseDetail header and parties', () => {
   it('has no warning when the procedure matches', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
     renderAt()
-    expect(await screen.findByText('民事準備書狀')).toBeInTheDocument()
+    // 案件層不寫死「準備書狀」：第一輪可能是起訴狀，名稱依各輪種類
+    expect(await screen.findByText('民事起訴狀／民事準備書狀（依各輪種類）')).toBeInTheDocument()
     expect(screen.queryByText(/案號字別/)).not.toBeInTheDocument()
   })
 

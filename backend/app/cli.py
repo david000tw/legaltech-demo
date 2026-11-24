@@ -72,7 +72,11 @@ def import_testcase(folder: Path, firm_name: str) -> tuple[UUID, UUID]:
             parties.append(party)
         s.flush()
         filer = parties[meta["opponent_filed_by"] - 1].id if meta.get("opponent_filed_by") else None
-        rnd = Round(firm_id=firm.id, case_id=case.id, seq=1, status="created")
+        # 子專案甲：書狀種類、起訴狀的案情說明與聲明設定（起訴狀沒有 opponent 資料夾）
+        rnd = Round(firm_id=firm.id, case_id=case.id, seq=1, status="created",
+                    brief_kind=meta.get("brief_kind", "preparatory"), narrative=meta.get("narrative"),
+                    joint_liability=meta.get("joint_liability", False),
+                    statement_variant=meta.get("statement_variant"))
         s.add(rnd)
         s.flush()
         for kind, sub, round_id in (("evidence", "evidence", None), ("opponent_brief", "opponent", rnd.id)):

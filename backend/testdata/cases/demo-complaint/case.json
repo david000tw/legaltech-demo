@@ -1,0 +1,32 @@
+{
+ "title": "林大明 請求損害賠償等事件（起訴狀，合成案件，改寫自 demo，我方為原告）",
+ "our_side": "plaintiff",
+ "case_type": "traffic_tort",
+ "brief_kind": "complaint",
+ "source": null,
+ "court": "臺灣桃園地方法院",
+ "case_number": null,
+ "division": null,
+ "cause": "損害賠償",
+ "attorneys": [
+  "黃明哲律師"
+ ],
+ "reference_date": "2026-09-18",
+ "parties": [
+  {
+   "name": "林大明",
+   "role": "原告",
+   "alignment": "ours",
+   "legal_rep": null,
+   "position_note": null
+  },
+  {
+   "name": "陳志豪",
+   "role": "被告",
+   "alignment": "opposing",
+   "legal_rep": null,
+   "position_note": null
+  }
+ ],
+ "narrative": "原告林大明於民國115年9月18日駕駛自小客車行經桃園市平鎮區民族路與和平路無號誌交岔路口時，被告陳志豪駕駛自小客車自支線道駛出，未暫停讓幹線道車先行，撞擊原告車輛，致原告受有左側鎖骨閉鎖性骨折等傷害，車輛亦受損。原告依民法侵權行為規定，請求被告賠償醫療費用、車輛修復費用、休養期間之薪資損失，以及精神慰撫金新臺幣15萬元。"
+}
