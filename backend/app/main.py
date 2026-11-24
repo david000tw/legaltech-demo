@@ -4,7 +4,9 @@ from fastapi.responses import JSONResponse
 
 from app import db
 from app.ai.provider import check_startup, get_provider
-from app.api import routes_auth, routes_cases, routes_drafts, routes_evidence, routes_rounds, routes_sources
+from app.api import (
+    routes_auth, routes_cases, routes_drafts, routes_evidence, routes_health, routes_rounds, routes_sources,
+)
 from app.config import Settings
 
 # "testclient" 是 Starlette TestClient 的預設來源；真實連線的來源一定是 IP。
@@ -27,6 +29,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(routes_drafts.router)
     app.include_router(routes_sources.router)
     app.include_router(routes_evidence.router)
+    app.include_router(routes_health.router)
 
     @app.middleware("http")
     async def loopback_only(request: Request, call_next):

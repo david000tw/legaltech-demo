@@ -76,3 +76,29 @@ TIMELINE_SCHEMA = _obj({
         "quote": _STR,
     })},
 })
+
+
+HEALTH_LEVELS = ["high", "suggest", "gap"]
+
+
+def health_schema(codes: list[str], with_undisputed: bool) -> dict:
+    """書狀健檢（設計 5.8）：判決法條只能填本輪候選代碼（沒有候選就拿掉 references）；
+    清單外的寫在 other_references。起訴狀沒有對造陳述，拿掉 undisputed。"""
+    source = _obj({"source": _STR, "page_no": _INT, "quote": _STR})
+    item: dict = {
+        "level": {"type": "string", "enum": HEALTH_LEVELS},
+        "title": _STR,
+        "explanation": _STR,
+        "claim_seqs": {"type": "array", "items": _INT},
+        "absence": {"type": "boolean"},
+        "evidence": {"type": "array", "items": source},
+    }
+    if codes:
+        item["references"] = {"type": "array", "items": {"type": "string", "enum": list(codes)}}
+    item["other_references"] = {"type": "array", "items": _STR}
+    props: dict = {"items": {"type": "array", "items": _obj(item)}}
+    if with_undisputed:
+        props["undisputed"] = {"type": "array", "items": _obj(
+            {"fact": _STR, "source": _STR, "page_no": _INT, "quote": _STR})}
+    props["issues"] = {"type": "array", "items": _STR}
+    return _obj(props)

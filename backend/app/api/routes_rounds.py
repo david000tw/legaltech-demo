@@ -12,6 +12,7 @@ from app.db import tenant_session
 from app.models import RUNNING_STATUSES, Claim, Draft, Firm, Page, Paragraph, Round
 from app.pipeline.copy_round import copy_round
 from app.pipeline.drafting import ParagraphChanged, rewrite_paragraph
+from app.pipeline.jobs import job_json, latest_job
 from app.pipeline.requests import amount_note, pending_ocr_pages
 from app.statements import AMOUNT_MARKER, round_total, statement_template
 from app.pipeline.run import (STALE_AFTER, RoundBusy, RoundRule, reset_round, run_draft, run_extract,
@@ -243,6 +244,7 @@ def get_round(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
             "id": str(rnd.id), "seq": rnd.seq, "status": rnd.status, "error": rnd.error, "stale": stale,
             "brief_kind": rnd.brief_kind, "failed_stage": rnd.failed_stage,
             "draft_id": str(draft.id) if draft else None,
+            "health_job": job_json(latest_job(s, rnd.case_id, rnd.id, "health")),  # 書狀健檢（設計 5.8）
             "can_review": m.role == "lawyer" and m.bar_verified,  # 只有律師能確認請求項目與金額
             "claims": [claim_json(s, c) for c in claims],
             # 起訴狀：案情說明、設定、確認金額的加總、訴之聲明預覽、沒送給 AI 的掃描頁

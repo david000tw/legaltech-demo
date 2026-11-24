@@ -74,6 +74,9 @@ def _precheck(s: Session, step: str, case_id: UUID, round_id: UUID | None) -> No
     elif step == "timeline":
         from app.pipeline.timeline import ready as timeline_ready
         timeline_ready(s, case_id)
+    elif step == "health":
+        from app.pipeline.health import ready as health_ready
+        health_ready(s, round_id)
 
 
 def _body_for(step: str) -> Callable[[AIJob, AIProvider, "JobContext"], None]:
@@ -83,6 +86,9 @@ def _body_for(step: str) -> Callable[[AIJob, AIProvider, "JobContext"], None]:
     if step == "timeline":
         from app.pipeline.timeline import generate_timeline
         return generate_timeline
+    if step == "health":
+        from app.pipeline.health import run_health_check
+        return run_health_check
     raise ValueError(f"unknown AI job step {step}")
 
 
