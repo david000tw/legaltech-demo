@@ -22,6 +22,7 @@ from app.review.service import (
     CitationInput, ReviewRuleError, confirm_amount, confirm_citation, confirm_court_reasoning, edit_paragraph, mark_reviewed,
     renumber_exhibit,
 )
+from app.review.insert import InsertRejected, insert_pin
 from app.text_norm import find_quote
 from app.statements import BODY_LABEL, STATEMENT_LABEL, claim_value, statement_of
 from app.verify.citations import body_paragraphs, export_blockers, is_removed, paragraph_citations
@@ -139,6 +140,22 @@ def patch_paragraph(paragraph_id: UUID, body: ParagraphBody, m: CurrentMember = 
         p = edit_paragraph(s, paragraph_id, body.text, [CitationInput(c.code, c.quote) for c in body.citations], m,
                            heading=body.heading)
         return paragraph_json(s, p)
+
+
+class InsertPinBody(BaseModel):
+    pin_id: UUID
+    quote: str = ""
+
+
+@router.post("/paragraphs/{paragraph_id}/insert-pin")
+def insert_pinned(paragraph_id: UUID, body: InsertPinBody, m: CurrentMember = Depends(current_member)) -> dict:
+    """把案件釘選的判決插到段落結尾（律師與助理都可以）；段落退回未審，判決要重新確認。"""
+    with tenant_session(m.firm_id) as s:
+        try:
+            p, code = insert_pin(s, paragraph_id, body.pin_id, body.quote, m)
+        except InsertRejected as e:
+            raise HTTPException(e.status, e.message)
+        return {"paragraph_id": str(p.id), "code": code}
 
 
 @router.post("/citations/{citation_id}/confirm")
