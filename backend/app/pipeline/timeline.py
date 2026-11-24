@@ -21,8 +21,10 @@ from app.db import tenant_session
 from app.models import AIJob, Case, TimelineEvent
 from app.pipeline.case_context import case_context
 from app.pipeline.jobs import JobContext, JobRule
+from app.text_norm import normalize_text
 from app.sources import (
-    MAX_AMOUNT, OPPONENT_PREFIX, SourcePage, check_source, code_key, soften, source_pages, source_view,
+    MAX_AMOUNT, OPPONENT_PREFIX, SourcePage, check_source, code_key, page_chars, soften, source_pages, source_view,
+    split_pages,
 )
 
 TIMELINE_BATCH_CHARS = 60_000
@@ -34,19 +36,22 @@ def ready(s: Session, case_id: UUID) -> None:
 
 
 def _batches(pages: list[SourcePage]) -> list[list[SourcePage]]:
-    """同一份文件的頁放同一批；累加超過上限就切下一批，單份超過上限時自成一批。"""
+    """同一份文件的頁放同一批；累加超過上限就切下一批，單份超過上限時依頁切成幾段（結果最後才一起寫入）。"""
     docs: dict[UUID, list[SourcePage]] = {}
     for p in pages:
         docs.setdefault(p.document_id, []).append(p)
     out: list[list[SourcePage]] = []
     size = 0
     for doc_pages in docs.values():
-        n = sum(len(p.text or "") for p in doc_pages)
-        if not out or size + n > TIMELINE_BATCH_CHARS:
-            out.append([])
-            size = 0
-        out[-1].extend(doc_pages)
-        size += n
+        parts = ([doc_pages] if page_chars(doc_pages) <= TIMELINE_BATCH_CHARS
+                 else split_pages(doc_pages, TIMELINE_BATCH_CHARS))
+        for part in parts:
+            n = page_chars(part)
+            if not out or (out[-1] and size + n > TIMELINE_BATCH_CHARS):
+                out.append([])
+                size = 0
+            out[-1].extend(part)
+            size += n
     return out
 
 
@@ -65,9 +70,18 @@ def _next_seq(s: Session, case_id: UUID) -> int:
     return (s.scalar(select(func.max(TimelineEvent.seq)).where(TimelineEvent.case_id == case_id)) or 0) + 1
 
 
+def _same_quote(a: str, b: str) -> bool:
+    """同一句原文：正規化後一方包含另一方（AI 每次取的摘錄長短可能不同），太短的不算。"""
+    a, b = normalize_text(a or ""), normalize_text(b or "")
+    return len(a) >= 6 and len(b) >= 6 and (a in b or b in a)
+
+
 def _save(s: Session, job: AIJob, events: list[dict], pages: dict[tuple[str, int], SourcePage]) -> None:
     s.execute(delete(TimelineEvent).where(TimelineEvent.case_id == job.case_id, TimelineEvent.origin == "ai"))
     s.flush()
+    # 律師改過、新增或刪掉（dismissed）的事件：同一頁同一句原文的 AI 事件不再寫入，避免刪掉的又回來、改過的多一筆原版
+    handled = [(e.page_id, e.quote) for e in s.scalars(select(TimelineEvent).where(
+        TimelineEvent.case_id == job.case_id, TimelineEvent.origin != "ai", TimelineEvent.page_id.is_not(None)))]
     seq = _next_seq(s, job.case_id)
     evidence_codes = {k[0] for k, p in pages.items() if p.kind == "evidence"}
     for e in events:
@@ -78,6 +92,8 @@ def _save(s: Session, job: AIJob, events: list[dict], pages: dict[tuple[str, int
         page_no = e.get("page_no")
         page = pages.get((code_key(code), page_no)) if isinstance(page_no, int) else None
         quote = str(e.get("quote", ""))
+        if page is not None and any(pid == page.page_id and _same_quote(q, quote) for pid, q in handled):
+            continue
         raw_date = str(e.get("date") or "").strip()
         pd = parse_iso(raw_date) if raw_date else None
         raw_amount = e.get("amount")
@@ -126,7 +142,8 @@ def _label(e: TimelineEvent) -> str | None:
 
 
 def event_json(s: Session, e: TimelineEvent) -> dict:
-    has_source = e.page_id is not None or bool((e.quote or "").strip())
+    # AI 事件一律有出處標示：沒有頁碼也沒有摘錄就是「未找到原文」（設計 5.7 任何一項沒過就標紅）；律師事件可以沒有出處
+    has_source = e.origin == "ai" or e.page_id is not None or bool((e.quote or "").strip())
     return {"id": str(e.id), "date": _iso(e), "date_label": _label(e), "description": e.description,
             "amount": e.amount, "source_kind": e.source_kind, "origin": e.origin,
             "source": source_view(s, e.page_id, e.quote, e.status, e.reasons or []) if has_source else None}
@@ -134,7 +151,8 @@ def event_json(s: Session, e: TimelineEvent) -> dict:
 
 def timeline_view(s: Session, case_id: UUID) -> list[dict]:
     """有日期的依日期升冪、同日依建立順序；沒有日期的放最後。"""
-    events = s.scalars(select(TimelineEvent).where(TimelineEvent.case_id == case_id)).all()
+    events = s.scalars(select(TimelineEvent).where(TimelineEvent.case_id == case_id,
+                                                   TimelineEvent.origin != "dismissed")).all()
     events = sorted(events, key=lambda e: (e.event_date is None, e.event_date or date.min, e.seq))
     return [event_json(s, e) for e in events]
 

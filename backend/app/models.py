@@ -530,7 +530,7 @@ class TimelineEvent(Base):
     __table_args__ = (
         _enum("date_precision", ("day", "month"), "ck_timeline_date_precision"),
         _enum("source_kind", ("evidence", "opponent"), "ck_timeline_source_kind"),
-        _enum("origin", ("ai", "lawyer"), "ck_timeline_origin"),
+        _enum("origin", ("ai", "lawyer", "dismissed"), "ck_timeline_origin"),  # dismissed：律師刪掉的 AI 事件
         _enum("status", ("found", "not_found", "unchecked"), "ck_timeline_status"),
         _tfk("case_id", "cases", "CASCADE"),
         _tfk("page_id", "pages", "SET NULL (page_id)"),

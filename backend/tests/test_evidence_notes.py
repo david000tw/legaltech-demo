@@ -233,6 +233,27 @@ def test_notes_batches_by_chars(db, firm, monkeypatch):
                         .where(UsageRecord.step == "evidence_notes")) == 2
 
 
+LONG_P1 = "收據第一頁：民國114年3月9日 林大明 支付醫療費用新臺幣45,000元。"
+LONG_P2 = "收據第二頁：民國114年3月20日 林大明 支付復健費用新臺幣3,000元。"
+
+
+def test_long_document_split_by_page_and_saved_together(db, firm, monkeypatch):
+    # 最終審查：單份卷證超過一批的上限時原本整份一次送出；改成依頁切開，各段的說明合在一起存（後一段不會蓋掉前一段）
+    monkeypatch.setattr(evidence_notes, "NOTES_BATCH_CHARS", 60)
+    case_id, _ = make_round(firm, evidence={"01_收據.txt": f"{LONG_P1}\f{LONG_P2}"})
+
+    def respond(call):
+        page_no = int(re.findall(r"【原證1 第(\d+)頁】", call["user"])[0])
+        text = LONG_P1 if page_no == 1 else LONG_P2
+        return reply(("原證1", [note(f"第{page_no}頁的說明", text[6:30], page_no=page_no)]))
+
+    fake = FakeProvider({"evidence_notes": respond})
+    doc = by_exhibit(generate(firm, case_id, fake, db))["原證1"]
+    assert [re.findall(r"【原證1 第(\d+)頁】", c["user"]) for c in fake.calls] == [["1"], ["2"]]
+    assert sorted(n["text"] for n in doc["notes"]) == ["第1頁的說明", "第2頁的說明"]
+    assert all(n["source"]["status"] == "found" for n in doc["notes"]) and doc["needs_notes"] is False
+
+
 def test_defendant_case_uses_bei_zheng(db, firm):
     case_id, _ = make_round(firm, our_side="defendant", evidence={"01_收據.txt": RECEIPT})
     fake = FakeProvider({"evidence_notes": reply(("被證1", [FOUND]))})

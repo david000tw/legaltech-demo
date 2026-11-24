@@ -118,6 +118,24 @@ def page_label(s: Session, page_id: UUID | None) -> str | None:
     return f"{OPPONENT_PREFIX}「{doc.filename}」第{page.page_no}頁"
 
 
+def page_chars(pages: Iterable[SourcePage]) -> int:
+    return sum(len(p.text or "") for p in pages)
+
+
+def split_pages(pages: list[SourcePage], limit: int) -> list[list[SourcePage]]:
+    """把一份太長的文件依頁切成幾段，每段文字不超過 limit（單頁本身超過時自成一段）。"""
+    parts: list[list[SourcePage]] = [[]]
+    size = 0
+    for p in pages:
+        n = len(p.text or "")
+        if parts[-1] and size + n > limit:
+            parts.append([])
+            size = 0
+        parts[-1].append(p)
+        size += n
+    return parts
+
+
 def pending_ocr(pages: Iterable[SourcePage]) -> list[str]:
     """還沒有文字層的頁，不送 AI，畫面列「待辨識」。"""
     return [f"{p.code} 第{p.page_no}頁" for p in pages if p.text is None]

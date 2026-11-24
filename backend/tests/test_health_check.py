@@ -103,6 +103,17 @@ def test_health_codes_in_text_show_names(db):
         assert stored.items[0]["explanation"] == item["explanation"]
 
 
+def test_undisputed_fact_date_amount_must_be_in_quote(db):
+    # 最終審查：不爭執事項是事實陳述（設計 5.1），句子裡的日期、金額也要在摘錄裡
+    ctx = drafted()
+    undisputed = [{"fact": "被告承認原告未減速，損失50萬元", "source": "對造書狀A", "page_no": 1, "quote": OPP_QUOTE},
+                  {"fact": "被告承認原告3月10日未減速", "source": "對造書狀A", "page_no": 1, "quote": OPP_QUOTE},
+                  {"fact": "被告承認原告未減速", "source": "對造書狀A", "page_no": 1, "quote": OPP_QUOTE}]
+    report, _, _ = run(ctx, report_data(undisputed=undisputed), db)
+    assert [basis(u["basis"]) for u in report["undisputed"]] == [
+        ("not_found", ["amount_not_in_quote"]), ("not_found", ["date_not_in_quote"]), ("found", [])]
+
+
 def test_health_basis_can_cite_opponent(db):
     ctx = drafted()
     item = {**HIGH, "evidence": [{"source": "對造書狀A", "page_no": 1, "quote": OPP_QUOTE}]}

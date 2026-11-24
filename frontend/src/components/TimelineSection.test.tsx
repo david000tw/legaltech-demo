@@ -32,6 +32,22 @@ describe('TimelineSection', () => {
     expect(within(row).getByText('出處：對造書狀「答辯狀.txt」第1頁')).toBeInTheDocument()
   })
 
+  it('accepts amounts written with 元 and commas, and rejects other text', async () => {
+    // 最終審查：「45,000元」原本變成 NaN，送出時金額默默不見
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [], pending_ocr: [], job: null })
+    vi.mocked(api.addTimelineEvent).mockResolvedValue(ev({ id: 'e3', origin: 'lawyer' }))
+    render(<TimelineSection caseId="c1" />)
+    await userEvent.type(await screen.findByLabelText('新增事件內容'), '原告支付車損')
+    await userEvent.type(screen.getByLabelText('新增事件金額'), '新臺幣45,000元')
+    await userEvent.click(screen.getByRole('button', { name: '新增事件' }))
+    expect(api.addTimelineEvent).toHaveBeenCalledWith('c1', { date: null, description: '原告支付車損', amount: 45000 })
+    await userEvent.type(screen.getByLabelText('新增事件內容'), '原告支付醫療費')
+    await userEvent.type(screen.getByLabelText('新增事件金額'), '約四萬')
+    await userEvent.click(screen.getByRole('button', { name: '新增事件' }))
+    expect(await screen.findByText('金額請填數字，例如 45000 或 45,000元')).toBeInTheDocument()
+    expect(api.addTimelineEvent).toHaveBeenCalledTimes(1)
+  })
+
   it('adds, edits and deletes events', async () => {
     vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], job: null })
     vi.mocked(api.addTimelineEvent).mockResolvedValue(ev({ id: 'e3', origin: 'lawyer' }))

@@ -148,7 +148,7 @@ def add_event(case_id: UUID, body: EventBody, m: CurrentMember = Depends(current
 
 def _event_or_404(s, event_id: UUID) -> TimelineEvent:
     e = s.get(TimelineEvent, event_id)
-    if e is None:
+    if e is None or e.origin == "dismissed":
         raise HTTPException(404, "找不到事件")
     return e
 
@@ -175,5 +175,9 @@ def patch_event(event_id: UUID, body: EventPatch, m: CurrentMember = Depends(cur
 @router.delete("/timeline-events/{event_id}")
 def delete_event(event_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
-        s.delete(_event_or_404(s, event_id))
+        e = _event_or_404(s, event_id)
+        if e.origin == "ai" and e.page_id is not None:
+            e.origin = "dismissed"  # 留著當記號：重新整理時同一句原文的 AI 事件不再寫入（畫面上看不到）
+        else:
+            s.delete(e)
         return {"id": str(event_id), "deleted": True}

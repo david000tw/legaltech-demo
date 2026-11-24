@@ -85,6 +85,28 @@ def _cfg():
     return cfg
 
 
+def test_0007_round_trip(db):
+    """最終審查：律師刪掉的 AI 事件改成隱藏（origin='dismissed'），重新整理才不會找回來。"""
+    from alembic import command
+    cfg = _cfg()
+
+    def origin_check():
+        eng = create_engine(TEST_ADMIN_DB)
+        try:
+            with eng.connect() as c:
+                return c.execute(text("select pg_get_constraintdef(oid) from pg_constraint "
+                                      "where conname = 'ck_timeline_origin'")).scalar_one()
+        finally:
+            eng.dispose()
+
+    command.downgrade(cfg, "0006")
+    try:
+        assert "dismissed" not in origin_check()
+    finally:
+        command.upgrade(cfg, "head")
+    assert "dismissed" in origin_check()
+
+
 def test_0006_round_trip(db):
     """子專案乙：AI 工作、卷證說明、大事記、健檢四張表可以降級再升級（RLS 由 test_rls 的通用檢查涵蓋）。"""
     from alembic import command

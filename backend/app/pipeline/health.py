@@ -20,8 +20,10 @@ from app.ai.prompts import load_prompt
 from app.ai.provider import AIProvider
 from app.ai.schemas import HEALTH_LEVELS, health_schema
 from app.ai.tokens import estimate_tokens
+from app.amounts import parse_amounts
 from app.case_types import SIDE_LABEL
 from app.corpus.search import article_display
+from app.dates import parse_dates, parse_month_days
 from app.db import tenant_session
 from app.models import (
     AIJob, Candidate, Case, Claim, Document, HealthReport, Judgment, JudgmentPassage, Round, StatuteArticle,
@@ -75,11 +77,14 @@ def _user(s: Session, rnd: Round, case: Case, pages: dict[tuple[str, int], Sourc
     return "\n\n".join(parts)
 
 
-def _basis(pages: dict[tuple[str, int], SourcePage], ev: dict) -> tuple[dict, SourcePage | None]:
+def _basis(pages: dict[tuple[str, int], SourcePage], ev: dict, fact: str | None = None) -> tuple[dict, SourcePage | None]:
+    """fact 是不爭執事項的事實陳述：句子裡的日期、金額也要在摘錄裡（設計 5.1）。健檢項目是評估，只比對摘錄。"""
     page_no = ev.get("page_no")
     page = pages.get((code_key(str(ev.get("source", ""))), page_no)) if isinstance(page_no, int) else None
     quote = str(ev.get("quote", ""))
-    reasons = check_source(page, quote)
+    checks = {} if fact is None else {"dates": parse_dates(fact), "amounts": parse_amounts(fact),
+                                      "month_days": parse_month_days(fact)}
+    reasons = check_source(page, quote, **checks)
     return ({"page_id": str(page.page_id) if page else None, "quote": quote,
              "status": "not_found" if reasons else "found", "reasons": reasons}, page)
 
@@ -128,7 +133,7 @@ def _save(s: Session, job: AIJob, data: dict, pages: dict[tuple[str, int], Sourc
             fact = soften(str(u.get("fact", "")).strip())
             if not fact:
                 continue
-            b, page = _basis(pages, u)
+            b, page = _basis(pages, u, fact)
             if page is not None and page.kind != "opponent":  # 不爭執事項只能來自本輪對造書狀
                 b.update(status="not_found", reasons=["not_opponent"])
             undisputed.append({"fact": fact, "basis": b})

@@ -86,6 +86,50 @@ def test_timeline_yearless_date_in_description(db, firm, case_id):
     assert check(view["原告3月9日支付醫療費用"]) == ("found", [])
 
 
+def test_ai_event_without_source_is_red(db, firm, case_id):
+    # 最終審查：AI 事件沒有頁碼也沒有摘錄時，原本不顯示任何標示（設計 5.7：任何一項沒過就標紅）
+    fake = FakeProvider({"timeline": {"events": [ev("沒有出處的事件", source="", page_no=None, quote="")]}})
+    e = by_desc(generate(firm, case_id, fake, db))["沒有出處的事件"]
+    assert e["source"] is not None and check(e) == ("not_found", ["quote_not_found"])
+
+
+LONG_P1 = "收據第一頁：民國114年3月9日 林大明 支付醫療費用新臺幣45,000元。"
+LONG_P2 = "收據第二頁：民國114年3月20日 林大明 支付復健費用新臺幣3,000元。"
+
+
+def test_timeline_splits_long_document_by_page(db, firm, monkeypatch):
+    # 最終審查：單份卷證超過一批的上限時原本整份一次送出，太長會失敗；改成依頁切開
+    monkeypatch.setattr(timeline, "TIMELINE_BATCH_CHARS", 60)
+    case_id = make_round(firm, opponent_pages=(), evidence={"01_收據.txt": f"{LONG_P1}\f{LONG_P2}"})[0]
+
+    def respond(call):
+        page_no = int(re.findall(r"【原證1 第(\d+)頁】", call["user"])[0])
+        text = LONG_P1 if page_no == 1 else LONG_P2
+        return {"events": [ev(f"第{page_no}頁的事件", date=None, page_no=page_no, quote=text[6:30])]}
+
+    fake = FakeProvider({"timeline": respond})
+    view = by_desc(generate(firm, case_id, fake, db))
+    assert [re.findall(r"【原證1 第(\d+)頁】", c["user"]) for c in fake.calls] == [["1"], ["2"]]
+    assert check(view["第1頁的事件"]) == ("found", []) and check(view["第2頁的事件"]) == ("found", [])
+
+
+def test_regenerate_skips_events_the_lawyer_deleted_or_edited(lawyer_client, db):
+    # 最終審查：重新整理會把律師刪掉的 AI 事件找回來，律師改過的事件也會多出一筆 AI 原版
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm, opponent_pages=BRIEF, evidence=EVIDENCE)
+    estimate = ev("車輛修復估價", date="2025-03-12", source="原證2", quote="114年3月12日 車輛修復：零件費110,000元")
+    client.app.state.provider_factory = lambda settings, f: FakeProvider({"timeline": {"events": [PAID, estimate]}})
+    assert client.post(f"/api/cases/{case_id}/timeline").status_code == 202
+    events = by_desc(client.get(f"/api/cases/{case_id}/timeline").json()["events"])
+    assert client.delete(f"/api/timeline-events/{events['車輛修復估價']['id']}").status_code == 200
+    assert client.patch(f"/api/timeline-events/{events['車輛修復估價']['id']}",
+                        json={"description": "x"}).status_code == 404  # 刪掉的事件不能再改
+    client.patch(f"/api/timeline-events/{events['原告支付醫療費用']['id']}", json={"description": "原告支付醫療費（律師修正）"})
+    assert client.post(f"/api/cases/{case_id}/timeline").status_code == 202
+    events = client.get(f"/api/cases/{case_id}/timeline").json()["events"]
+    assert [(e["description"], e["origin"]) for e in events] == [("原告支付醫療費（律師修正）", "lawyer")]
+
+
 def test_timeline_invalid_date(db, firm, case_id):
     fake = FakeProvider({"timeline": {"events": [ev("原告支付醫療費用", date="114-03-09")]}})
     e = generate(firm, case_id, fake, db)[0]
@@ -163,7 +207,8 @@ def test_timeline_regenerate_keeps_lawyer_events(lawyer_client, db):
     lawyer = {e["description"]: e for e in events if e["origin"] == "lawyer"}
     assert set(lawyer) == {"原告支付醫療費（律師修正）", "原告寄發存證信函"}
     assert lawyer["原告寄發存證信函"]["source"] is None and lawyer["原告寄發存證信函"]["source_kind"] is None
-    assert [e["description"] for e in events if e["origin"] == "ai"].count("原告支付醫療費用") == 1
+    # 律師改過的事件，AI 原版不再重複出現（最終審查）
+    assert [e["description"] for e in events if e["origin"] == "ai"] == ["車禍發生"]
 
 
 def test_patch_keeps_opponent_tag(lawyer_client, db):

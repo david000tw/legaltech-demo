@@ -23,7 +23,9 @@ from app.ingest.service import current_page_text
 from app.models import AIJob, Case, Document, EvidenceNote, Page
 from app.pipeline.case_context import case_context
 from app.pipeline.jobs import JobContext, JobRule
-from app.sources import SourcePage, check_source, code_key, evidence_documents, pending_ocr, soften, source_view
+from app.sources import (
+    SourcePage, check_source, code_key, evidence_documents, page_chars, pending_ocr, soften, source_view, split_pages,
+)
 
 log = logging.getLogger(__name__)
 NOTES_BATCH_CHARS = 60_000
@@ -55,17 +57,30 @@ def ready(s: Session, case_id: UUID) -> None:
 
 
 def _batches(docs: list[tuple[str, UUID, list[SourcePage]]]) -> list[list[tuple[str, UUID, list[SourcePage]]]]:
-    """依卷證順序累加文字長度，超過上限就切下一批；單份超過上限時自成一批。"""
+    """依卷證順序累加文字長度，超過上限就切下一批；單份超過上限時依頁切成幾段，各段的說明最後合在一起存。"""
     out: list[list] = []
     size = 0
-    for item in docs:
-        n = sum(len(p.text or "") for p in item[2])
-        if not out or (out[-1] and size + n > NOTES_BATCH_CHARS):
-            out.append([])
-            size = 0
-        out[-1].append(item)
-        size += n
+    for code, doc_id, pages in docs:
+        parts = [pages] if page_chars(pages) <= NOTES_BATCH_CHARS else split_pages(pages, NOTES_BATCH_CHARS)
+        for part in parts:
+            n = page_chars(part)
+            if not out or (out[-1] and size + n > NOTES_BATCH_CHARS):
+                out.append([])
+                size = 0
+            out[-1].append((code, doc_id, part))
+            size += n
     return out
+
+
+def _merge(items: list[tuple[str, UUID, list[SourcePage]]]) -> list[tuple[str, UUID, list[SourcePage]]]:
+    """同一份卷證被切成幾段時，合回一筆（頁依原順序）。"""
+    merged: dict[UUID, tuple[str, UUID, list[SourcePage]]] = {}
+    for code, doc_id, pages in items:
+        if doc_id in merged:
+            merged[doc_id][2].extend(pages)
+        else:
+            merged[doc_id] = (code, doc_id, list(pages))
+    return list(merged.values())
 
 
 def _user(context: str, batch) -> str:
@@ -121,9 +136,17 @@ def generate_evidence_notes(job: AIJob, provider: AIProvider, ctx: JobContext) -
         docs = [(code, doc.id, pages) for code, doc, pages in evidence_documents(s, case.id) if doc.id in pending]
         fingerprints = {doc_id: document_fingerprint(s, doc_id) for _, doc_id, _ in docs}
     system = load_prompt("evidence_notes")
-    for batch in _batches(docs):
+    batches = _batches(docs)
+    items: list = []
+    groups: list = []
+    for i, batch in enumerate(batches):
         result = ctx.call("evidence_notes", system, _user(context, batch), EVIDENCE_NOTES_SCHEMA, "medium")
-        ctx.write(lambda s, batch=batch, data=result.data: _save(s, job, batch, data, fingerprints))
+        items.extend(batch)
+        groups.extend(result.data.get("documents", []) or [])
+        if i + 1 < len(batches) and batches[i + 1][0][1] == batch[-1][1]:
+            continue  # 同一份卷證的下一段還沒處理：先不寫，存檔時會先刪掉該份的 AI 說明，後一段會蓋掉前一段
+        ctx.write(lambda s, items=_merge(items), data={"documents": groups}: _save(s, job, items, data, fingerprints))
+        items, groups = [], []
 
 
 def note_json(s: Session, n: EvidenceNote) -> dict:

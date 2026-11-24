@@ -4,7 +4,14 @@ import { BUSY_TEXT, POLL_MS, useJobPolling } from '../aiJobs'
 import SourceBadge from './SourceBadge'
 
 const money = (n: number | null) => (n == null ? '' : `新臺幣${n.toLocaleString('en-US')}元`)
-const toAmount = (s: string) => (s.trim() === '' ? null : Number(s.replace(/,/g, '')))
+export const AMOUNT_HINT = '金額請填數字，例如 45000 或 45,000元'
+// 律師常照書狀寫「新臺幣45,000元」：去掉幣別、元、逗號與空白後要是整數；讀不懂就擋下，不默默變成沒有金額
+const toAmount = (s: string): number | null => {
+  const plain = s.replace(/新臺幣|新台幣|NT\$|元|[,，\s]/g, '')
+  if (plain === '') return null
+  if (!/^\d+$/.test(plain)) throw new Error(AMOUNT_HINT)
+  return Number(plain)
+}
 
 function EventRow({ ev, onChanged, onError, onShowSource, compact }: {
   ev: api.TimelineEventView
