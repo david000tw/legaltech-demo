@@ -411,6 +411,53 @@ def test_copy_round_rechecks_request_evidence(db):
         assert c.evidence[0]["found"] is False and c.confirmed_by is None
 
 
+def _drafted_while_correcting(firm, rid, page):
+    """起草工作照舊版本寫好聲明與一段引用這一頁的內文（模擬起草期間頁被修正）。"""
+    from app.models import Citation
+    with tenant_session(firm) as s:
+        v1 = s.scalars(select(PageText.id).where(PageText.page_id == page, PageText.version == 1)).one()
+        draft = Draft(firm_id=firm, round_id=rid)
+        s.add(draft)
+        s.flush()
+        st = Paragraph(firm_id=firm, draft_id=draft.id, seq=0, kind="statement",
+                       text="一、被告應給付原告新臺幣{{amount}}元。\n二、訴訟費用由被告負擔。")
+        body = Paragraph(firm_id=firm, draft_id=draft.id, seq=1, kind="body", text="原告支出醫療費用{{cite:E1}}。")
+        s.add_all([st, body])
+        s.flush()
+        s.add(Citation(firm_id=firm, paragraph_id=body.id, code="E1", kind="evidence", quote="醫療費用合計",
+                       page_text_id=v1))
+        return st.id, body.id
+
+
+def test_correction_during_drafting_flags_statement_and_citing_paragraphs(db):
+    # 起草進行中修正了金額：起草完成時，聲明與引用這頁的段落都要加「依據頁已修正」，不能悄悄沿用舊金額
+    firm = create_firm("甲事務所")
+    rid, page, claim_id, lawyer = _request_round(firm, "drafting")
+    with tenant_session(firm) as s:
+        save_page_text(s, page, "醫療費用合計新臺幣4,500元，已繳清。", lawyer, base_version=1, verify=False)
+    st_id, body_id = _drafted_while_correcting(firm, rid, page)
+    with tenant_session(firm) as s:
+        refresh_round_sources(s, rid)
+    with tenant_session(firm) as s:
+        assert s.get(Claim, claim_id).confirmed_by is not None  # 不悄悄改金額
+        assert s.get(Claim, claim_id).evidence[0]["found"] is False
+    assert para(firm, st_id).source_notice == NOTICE
+    assert para(firm, body_id).source_notice == NOTICE
+
+
+def test_correction_during_drafting_elsewhere_on_page_keeps_statement_quiet(db):
+    # 修正的是頁上別處、請求依據仍找得到：聲明不加註（引用這頁的段落照樣加註）
+    firm = create_firm("甲事務所")
+    rid, page, claim_id, lawyer = _request_round(firm, "drafting")
+    with tenant_session(firm) as s:
+        save_page_text(s, page, "醫療費用合計新臺幣45,000元，已繳清。經辦人王小美", lawyer, base_version=1, verify=False)
+    st_id, body_id = _drafted_while_correcting(firm, rid, page)
+    with tenant_session(firm) as s:
+        refresh_round_sources(s, rid)
+    assert para(firm, st_id).source_notice is None
+    assert para(firm, body_id).source_notice == NOTICE
+
+
 def test_refresh_round_sources_after_stage(db, monkeypatch):
     ctx = setup_verify_round()
     firm, page = ctx["firm"], current_page_id(ctx)

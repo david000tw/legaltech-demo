@@ -156,15 +156,15 @@ def _texts(s: Session) -> Callable[[object], PageText | None]:
     return get
 
 
-def recheck_claim(c: Claim, text_of: Callable[[object], PageText | None], *, unconfirm: bool = True) -> None:
+def recheck_claim(c: Claim, text_of: Callable[[object], PageText | None], *, unconfirm: bool = True) -> bool:
     """用目前文字重算主張的 quote_verified、請求項目依據的 found；原本找得到的依據找不到了 → 取消確認
-    （unconfirm=False 時不動確認：起草中的輪次，金額不能被悄悄改掉）。"""
+    （unconfirm=False 時不動確認：起草中的輪次，金額不能被悄悄改掉）。回傳是否有依據從找得到變成找不到。"""
     from app.pipeline.claims import MIN_QUOTE
     if c.kind != "request":
         pt = text_of(c.page_id)
         c.quote_verified = (pt is not None and quote_length(c.quote or "") >= MIN_QUOTE
                             and find_quote(pt.text, c.quote or "") is not None)
-        return
+        return False
     from app.pipeline.requests import amount_note
     lost, evidence = False, []
     for e in c.evidence or []:
@@ -184,6 +184,7 @@ def recheck_claim(c: Claim, text_of: Callable[[object], PageText | None], *, unc
         c.amount_note = amount_note(c.request_type, c.amount, False, evidence)
     if unconfirm and lost and c.confirmed_by is not None:
         c.confirmed_by, c.confirmed_at = None, None
+    return lost
 
 
 def _evidence_on(c: Claim, page_id: UUID) -> bool:
@@ -239,17 +240,38 @@ def after_text_change(s: Session, page: Page, new_pt: PageText, member_id: UUID 
 
 
 def refresh_round_sources(s: Session, round_id: UUID) -> None:
-    """拆解、起草寫入結果時：本輪候選與引用若指向辨識頁的舊版本，改指目前版本；主張與請求項目依據重算。"""
+    """拆解、起草寫入結果時：本輪候選與引用若指向辨識頁的舊版本，改指目前版本；主張與請求項目依據重算。
+    期間有頁被修正時比照已起草輪次（設計 6.5「一律以當時的目前版本重新驗證」）：
+    - 引用改指新版本的段落（照舊文字寫的）加「依據頁已修正」；
+    - 已確認的請求項目依據找不到了：不悄悄改金額，最新草稿的聲明段落加「依據頁已修正」，讓律師重新審核。"""
+    from app.statements import statement_of
     text_of = _texts(s)
     cand = list(s.scalars(select(Candidate).where(Candidate.round_id == round_id, Candidate.page_text_id.is_not(None))))
-    drafts = list(s.scalars(select(Draft.id).where(Draft.round_id == round_id)))
+    drafts = list(s.scalars(select(Draft).where(Draft.round_id == round_id).order_by(Draft.created_at)))
+    draft_ids = [d.id for d in drafts]
     cites = list(s.scalars(select(Citation).join(Paragraph, Paragraph.id == Citation.paragraph_id)
-                           .where(Paragraph.draft_id.in_(drafts), Citation.page_text_id.is_not(None)))) if drafts else []
+                           .where(Paragraph.draft_id.in_(draft_ids), Citation.page_text_id.is_not(None)))) if drafts else []
+    stale: set[UUID] = set()
     for row in cand + cites:
         pt = s.get(PageText, row.page_text_id)
         cur = text_of(pt.page_id)
         if cur is not None and cur.id != pt.id and cur.needs_image_check:
             row.page_text_id = cur.id
+            if isinstance(row, Citation):
+                stale.add(row.paragraph_id)
+    lost_confirmed = False
     for c in s.scalars(select(Claim).where(Claim.round_id == round_id)):
-        recheck_claim(c, text_of, unconfirm=False)
+        lost = recheck_claim(c, text_of, unconfirm=False)
+        lost_confirmed = lost_confirmed or (lost and c.kind == "request" and c.confirmed_by is not None)
+    if lost_confirmed and drafts:
+        st = statement_of(s, drafts[-1].id)
+        if st is not None:
+            stale.add(st.id)
+    for p in s.scalars(select(Paragraph).where(Paragraph.id.in_(sorted(stale))).order_by(Paragraph.id)
+                       .with_for_update()) if stale else []:
+        if p.status == "reviewed":
+            from app.pipeline.drafting import reset_review
+            reset_review(p)
+            s.add(ReviewEvent(firm_id=p.firm_id, paragraph_id=p.id, member_id=None, action="revert"))
+        p.source_notice = SOURCE_NOTICE
     s.flush()
