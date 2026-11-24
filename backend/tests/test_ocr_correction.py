@@ -118,6 +118,8 @@ def test_save_text_creates_manual_version_with_alerts(lawyer_client):
         assert pt.created_by == member_id and pt.verified_against_image is False
     got = client.get(f"/api/pages/{pid}/ocr").json()
     assert got["version"] == 2 and got["can_edit"] is True and got["can_verify"] is True and got["has_image"] is True
+    with tenant_session(firm) as s:
+        assert got["document_id"] == str(s.get(Page, pid).document_id)
 
 
 def test_save_text_rules(lawyer_client, db):

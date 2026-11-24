@@ -10,11 +10,15 @@ import CaseHeaderFields from '../components/CaseHeaderFields'
 import EvidenceNotesSection from '../components/EvidenceNotesSection'
 import HealthTab from '../components/HealthTab'
 import JudgmentSearchTab from '../components/JudgmentSearchTab'
+import OcrStatus from '../components/OcrStatus'
+import PageCheckPanel from '../components/PageCheckPanel'
 import PartiesEditor from '../components/PartiesEditor'
 import RequestItemsEditor from '../components/RequestItemsEditor'
 import SourcePane from '../components/SourcePane'
 import TimelineSection from '../components/TimelineSection'
-import { KIND_LABEL } from '../labels'
+import { KIND_LABEL, UPLOAD_ACCEPT, UPLOAD_HINT } from '../labels'
+import { useMe } from '../MeContext'
+import { confirmOcr } from '../ocrConfirm'
 import { BTN_PRIMARY, BTN_SECONDARY, BTN_SMALL, CARD } from '../ui'
 
 const STATUS_LABEL: Record<api.RoundStatus, string> = {
@@ -455,11 +459,12 @@ function PartiesSection({ data, options, draft, setDraft, onSaved, onError }: {
   )
 }
 
-function ExhibitRow({ exhibit, scanned, onSaved, onError }: {
+function ExhibitRow({ exhibit, doc, onSaved, onError, onOpenPage }: {
   exhibit: api.Exhibit
-  scanned: boolean
+  doc: api.CaseDocument | undefined
   onSaved: () => Promise<void>
   onError: (m: string) => void
+  onOpenPage: (pageId: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [num, setNum] = useState(String(exhibit.number))
@@ -475,10 +480,10 @@ function ExhibitRow({ exhibit, scanned, onSaved, onError }: {
   }
 
   return (
-    <li className="flex items-center gap-3 px-4 py-2 text-sm">
+    <li className="px-4 py-2 text-sm">
+     <div className="flex items-center gap-3">
       <span className="font-medium text-slate-900">{exhibit.label}</span>
       <span className="text-slate-600">{exhibit.filename}</span>
-      {scanned && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">待辨識</span>}
       <span className="ml-auto flex items-center gap-2">
         {editing ? (
           <>
@@ -494,6 +499,8 @@ function ExhibitRow({ exhibit, scanned, onSaved, onError }: {
             className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-700">改號</button>
         )}
       </span>
+     </div>
+      {doc && <OcrStatus doc={doc} onChanged={onSaved} onOpenPage={onOpenPage} />}
     </li>
   )
 }
@@ -515,6 +522,9 @@ export default function CaseDetail() {
   const [options, setOptions] = useState<api.CaseOptions | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [source, setSource] = useState<api.CitationSource | null>(null)  // 卷證、健檢分頁右側的原文
+  const [checkPage, setCheckPage] = useState<string | null>(null)  // 右側的對照原圖面板（計畫 2A）
+  const me = useMe()
+  const canReview = me?.role === 'lawyer' && me.bar_verified
   const [headerDraft, setHeaderDraft] = useState<HeaderDraft | null>(null)  // 修改中的狀頭（null＝沒在改）
   const [partyDraft, setPartyDraft] = useState<PartyDraft[] | null>(null)  // 修改中的當事人
   const evidenceRef = useRef<HTMLInputElement>(null)
@@ -545,13 +555,14 @@ export default function CaseDetail() {
     next.set('tab', key)
     setParams(next, { replace: true, state: location.state })
     setSource(null)
+    setCheckPage(null)
   }
 
   async function uploadEvidence() {
-    const file = evidenceRef.current?.files?.[0]
-    if (!file) return
+    const files = Array.from(evidenceRef.current?.files ?? [])
+    if (files.length === 0) return
     try {
-      await api.uploadDocument(caseId, file, 'evidence')
+      await api.uploadDocuments(caseId, files, 'evidence')  // 多張照片合成一份卷證、一個證物號
       await load()
     } catch (e) {
       setError((e as Error).message)
@@ -569,9 +580,24 @@ export default function CaseDetail() {
     }
   }
 
+  // 還沒有進行中工作的待辨識頁：「開始辨識（N 頁）」
+  async function startCaseOcr() {
+    try {
+      if ((await confirmOcr((c) => api.startCaseOcr(caseId, c))) !== null) await load()
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  function openPage(pageId: string) {
+    setSource(null)
+    setCheckPage(pageId)
+  }
+
   // 卷證說明、大事記、健檢的出處：在右側卡片顯示那一頁的原文並標出摘錄
   async function showSource(s: api.SourceView) {
     if (!s.page_id) return
+    setCheckPage(null)
     try {
       setSource(await api.getPageSource(s.page_id, s.quote))
     } catch (e) {
@@ -582,11 +608,19 @@ export default function CaseDetail() {
   if (!data) return <p className="p-6 text-slate-600">{error ?? '載入中…'}</p>
   const docs = new Map(data.documents.map((d) => [d.id, d]))
   const label = TABS.find(([k]) => k === tab)?.[1] ?? ''
-  const sourceCard = source && (
+  const sourceCard = checkPage ? (
+    <aside className={`${CARD} h-fit space-y-2 lg:sticky lg:top-4 lg:max-h-[90vh] lg:overflow-auto`}>
+      <div className="flex justify-end">
+        <button type="button" className={BTN_SMALL} onClick={() => setCheckPage(null)}>關閉</button>
+      </div>
+      <PageCheckPanel key={checkPage} pageId={checkPage} canReview={canReview} onChanged={load} />
+    </aside>
+  ) : source && (
     <aside className={`${CARD} h-fit lg:sticky lg:top-4 lg:max-h-[85vh] lg:overflow-auto`}>
       <SourcePane source={source} />
     </aside>
   )
+  const pendingOcr = data.pending_ocr_pages ?? 0
 
   return (
     <AppShell caseTitle={data.title} caseId={caseId}>
@@ -618,7 +652,8 @@ export default function CaseDetail() {
           )}
 
           {tab === 'evidence' && (
-            <div className={source ? 'grid gap-4 lg:grid-cols-[1fr_24rem]' : ''}>
+            <div className={checkPage ? 'grid gap-4 lg:grid-cols-[1fr_40rem]'
+              : source ? 'grid gap-4 lg:grid-cols-[1fr_24rem]' : ''}>
               <div className="space-y-6">
                 <section className="space-y-2">
                   <div className="flex flex-wrap items-center gap-3">
@@ -627,15 +662,21 @@ export default function CaseDetail() {
                     </button>
                     <label className="sr-only">
                       上傳卷證（依上傳順序自動編號）
-                      <input ref={evidenceRef} type="file" accept=".pdf,.docx,.txt" onChange={uploadEvidence} />
+                      <input ref={evidenceRef} type="file" accept={UPLOAD_ACCEPT} multiple onChange={uploadEvidence} />
                     </label>
-                    <span className="text-xs text-slate-500">依上傳順序自動編號</span>
+                    <span className="text-xs text-slate-500">依上傳順序自動編號；多張照片會合成一份卷證</span>
+                    {pendingOcr > 0 && (
+                      <button type="button" onClick={startCaseOcr} className={BTN_SECONDARY}>
+                        {`開始辨識（${pendingOcr} 頁）`}
+                      </button>
+                    )}
                   </div>
+                  <p className="text-xs text-slate-500">{UPLOAD_HINT}</p>
                   <h2 className="text-lg font-semibold text-slate-800">卷證</h2>
                   <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
                     {data.exhibits.map((e) => (
                       <ExhibitRow key={`${e.id}-${e.number}`} exhibit={e} onSaved={load} onError={setError}
-                        scanned={!!docs.get(e.document_id)?.pages.some((p) => p.needs_ocr)} />
+                        doc={docs.get(e.document_id)} onOpenPage={openPage} />
                     ))}
                     {data.exhibits.length === 0 && <li className="px-4 py-2 text-sm text-slate-500">尚未上傳卷證</li>}
                   </ul>

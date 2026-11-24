@@ -10,7 +10,8 @@ vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
   return { ...real, getCase: vi.fn(), getRound: vi.fn(), createRound: vi.fn(), extractRound: vi.fn(), draftRound: vi.fn(),
     resetRound: vi.fn(), patchClaim: vi.fn(), copyRound: vi.fn(), patchRound: vi.fn(), confirmClaim: vi.fn(),
-    addRequest: vi.fn(), deleteClaim: vi.fn(), uploadDocument: vi.fn(),
+    addRequest: vi.fn(), deleteClaim: vi.fn(), uploadDocument: vi.fn(), uploadDocuments: vi.fn(),
+    startCaseOcr: vi.fn(), startDocumentOcr: vi.fn(), reocrDocument: vi.fn(), getPageOcr: vi.fn(),
     renumberExhibit: vi.fn(), getCaseOptions: vi.fn(), patchCase: vi.fn(), putParties: vi.fn(), setDocumentFiler: vi.fn(),
     getEvidenceNotes: vi.fn(), getTimeline: vi.fn(), getHealthReport: vi.fn(), runHealthCheck: vi.fn(),
     getPageSource: vi.fn(), listPins: vi.fn(), searchJudgments: vi.fn() }
@@ -25,9 +26,12 @@ const baseCase: api.CaseDetail = {
   procedure_warning: null, reference_date_label: '事故發生日',
   documents: [
     { id: 'd1', kind: 'evidence', filename: '01_研判表.txt', round_id: null, filed_by_party_id: null, page_count: 1,
-      pages: [{ id: 'p1', page_no: 1, needs_ocr: false }] },
+      pages: [{ id: 'p1', page_no: 1, needs_ocr: false, ocr_state: 'none' }] },
     { id: 'd2', kind: 'evidence', filename: '02_掃描收據.pdf', round_id: null, filed_by_party_id: null, page_count: 1,
-      pages: [{ id: 'p2', page_no: 1, needs_ocr: true }] },
+      pages: [{ id: 'p2', page_no: 1, needs_ocr: true, ocr_state: 'pending', needs_check: false, alert_count: 0,
+        verified: false }],
+      ocr: { job: null, progress: { total: 1, done: 0, failed: 0, proofing: 0, minutes_left: 1 }, can_reocr: false,
+        scan_hint: false, can_resume: true } },
   ],
   exhibits: [
     { id: 'e1', label: '原證1', prefix: '原證', number: 1, document_id: 'd1', filename: '01_研判表.txt' },
@@ -79,7 +83,7 @@ describe('CaseDetail', () => {
     const drafted = [{ id: 'r1', seq: 1, status: 'drafted' as const, error: null }]
     const added: api.CaseDocument = { id: 'd9', kind: 'evidence', filename: '06_收據.txt', round_id: null,
       filed_by_party_id: null, page_count: 1, pages: [{ id: 'p9', page_no: 1, needs_ocr: false }] }
-    const uploaded = () => vi.mocked(api.uploadDocument).mock.calls.length > 0
+    const uploaded = () => vi.mocked(api.uploadDocuments).mock.calls.length > 0
     vi.mocked(api.getCase).mockImplementation(async () => ({ ...baseCase, rounds: drafted,
       documents: uploaded() ? [...baseCase.documents, added] : baseCase.documents }))
     vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', error: null, stale: false,
@@ -88,7 +92,7 @@ describe('CaseDetail', () => {
       undisputed: [], issues: [], issues_label: '本件爭點', pending_ocr: [] }
     vi.mocked(api.getHealthReport).mockImplementation(async () => ({ report: { ...report, outdated: uploaded() },
       job: null }))
-    vi.mocked(api.uploadDocument).mockResolvedValue({ id: 'd9', page_count: 1 })
+    vi.mocked(api.uploadDocuments).mockResolvedValue({ id: 'd9', page_count: 1 })
     renderAt()
     await openTab('書狀健檢')
     expect(await screen.findByRole('button', { name: '重新執行健檢' })).toBeInTheDocument()
@@ -96,7 +100,7 @@ describe('CaseDetail', () => {
     const file = new File(['計程車收據'], '06_收據.txt', { type: 'text/plain' })
     await openTab('卷證與時間軸')
     await userEvent.upload(screen.getByLabelText('上傳卷證（依上傳順序自動編號）'), file)
-    expect(api.uploadDocument).toHaveBeenCalledWith('c1', file, 'evidence')
+    expect(api.uploadDocuments).toHaveBeenCalledWith('c1', [file], 'evidence')
     await openTab('書狀健檢')
     expect(await screen.findByText('資料已變更，建議重新執行')).toBeInTheDocument()
   })
@@ -124,6 +128,44 @@ describe('CaseDetail', () => {
     expect(await screen.findByText('原證1')).toBeInTheDocument()
     expect(screen.getByText('原證2')).toBeInTheDocument()
     expect(screen.getByText('待辨識')).toBeInTheDocument()
+  })
+
+  it('shows the start button for old pending pages and the upload hint', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, pending_ocr_pages: 1 })
+    vi.mocked(api.startCaseOcr).mockResolvedValue({ jobs: [], pages: 1 })
+    renderAt()
+    await openTab('卷證與時間軸')
+    expect(await screen.findByText('可上傳 PDF、Word、純文字、JPG、PNG；iPhone 的 HEIC 照片請先轉成 JPG')).toBeInTheDocument()
+    const before = vi.mocked(api.getCase).mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: '開始辨識（1 頁）' }))
+    expect(api.startCaseOcr).toHaveBeenCalledWith('c1', false)
+    await waitFor(() => expect(vi.mocked(api.getCase).mock.calls.length).toBe(before + 1))
+    expect(screen.getAllByRole('button', { name: /上傳卷證/ }).length).toBe(1)  // 主要按鈕仍只有一個
+  })
+
+  it('uploads several photos as one document', async () => {
+    vi.mocked(api.getCase).mockResolvedValue(baseCase)
+    vi.mocked(api.uploadDocuments).mockResolvedValue({ id: 'd9', page_count: 2, ocr: null })
+    renderAt()
+    await openTab('卷證與時間軸')
+    const a = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    const b = new File(['b'], 'b.png', { type: 'image/png' })
+    const input = await screen.findByLabelText(/上傳卷證（依上傳順序自動編號）/)
+    expect(input).toHaveAttribute('accept', '.pdf,.docx,.txt,.jpg,.jpeg,.png')
+    await userEvent.upload(input, [a, b])
+    expect(api.uploadDocuments).toHaveBeenCalledWith('c1', [a, b], 'evidence')
+  })
+
+  it('opens the page check panel from an OCR page tag', async () => {
+    vi.mocked(api.getCase).mockResolvedValue(baseCase)
+    vi.mocked(api.getPageOcr).mockResolvedValue({ page_id: 'p2', document_id: 'd2', label: '原證2 第1頁',
+      ocr_state: 'pending', ocr_error: null, text: null, version: null, source: null, needs_check: false, verified: null,
+      alerts: [], has_image: true, can_edit: true, can_verify: false, blank_unconfirmed: false })
+    renderAt()
+    await openTab('卷證與時間軸')
+    await userEvent.click(await screen.findByRole('button', { name: '第1頁：待辨識' }))
+    expect(await screen.findByRole('img', { name: '原證2 第1頁 原圖' })).toBeInTheDocument()
+    expect(api.getPageOcr).toHaveBeenCalledWith('p2')
   })
 
   it('renumbers an exhibit and reloads the case', async () => {

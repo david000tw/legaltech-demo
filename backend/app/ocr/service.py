@@ -67,7 +67,8 @@ def page_ocr_json(s: Session, page: Page, member: CurrentMember) -> dict:
                     "at": pt.verified_at.isoformat() if pt.verified_at else None}
     alerts = [{**a, "color": alert_color(a.get("kind", ""))} for a in (pt.alerts if pt is not None else []) or []]
     proofing = page.ocr_state == "read" and active_job(s, page.document_id) is not None
-    return {"page_id": str(page.id), "label": page_label(s, page.id), "ocr_state": page.ocr_state,
+    return {"page_id": str(page.id), "document_id": str(page.document_id), "label": page_label(s, page.id),
+            "ocr_state": page.ocr_state,
             "ocr_error": page.ocr_error, "text": pt.text if pt is not None else None,
             "version": pt.version if pt is not None else None, "source": pt.source if pt is not None else None,
             "needs_check": needs_check(pt), "verified": verified, "alerts": alerts,

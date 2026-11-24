@@ -26,10 +26,29 @@ export class ExportBlockedError extends Error {
 export type Me = { id: string; firm_id: string; email: string; display_name: string; role: string;
   bar_number: string | null; bar_verified: boolean }
 export type CaseSummary = { id: string; title: string; our_side: 'plaintiff' | 'defendant'; case_type: string }
-export type DocPage = { id: string; page_no: number; needs_ocr: boolean }
+// 頁的辨識狀態（計畫 2A）：none＝檔案本身有文字；pending＝待辨識；read＝AI 已讀、校對中；done＝已辨識；failed＝辨識失敗
+export type OcrState = 'none' | 'pending' | 'read' | 'done' | 'failed'
+// needs_check＝目前文字是辨識或手動輸入、還沒對照原圖；verified＝已對照原圖（後端一律有這些欄位，舊測試資料可省略）
+export type DocPage = { id: string; page_no: number; needs_ocr: boolean; ocr_state?: OcrState; needs_check?: boolean
+  alert_count?: number; verified?: boolean }
+export type OcrProgress = { total: number; done: number; failed: number; proofing: number; minutes_left: number }
+// 辨識工作掛在文件上；waiting＝頁數超過上限，等律師確認後才開始
+export type OcrJob = Omit<JobView, 'status'> & { status: 'running' | 'done' | 'failed' | 'waiting'
+  document_id: string | null }
+export type DocOcr = { job: OcrJob | null; progress: OcrProgress; can_reocr: boolean; scan_hint: boolean
+  can_resume: boolean }
 // filed_by_party_id：對造書狀的遞狀人（當事人被刪掉後變 null）
 export type CaseDocument = { id: string; kind: 'evidence' | 'opponent_brief'; filename: string; round_id: string | null;
-  filed_by_party_id: string | null; page_count: number; pages: DocPage[] }
+  filed_by_party_id: string | null; page_count: number; pages: DocPage[]; ocr?: DocOcr }
+// 對照原圖面板（計畫 2A）：一則提醒＝文字上的 [start, end) 與校對員讀到的字、圖上的框（box：x1, y1, x2, y2）
+export type OcrAlert = { kind: string; start: number; end: number; message: string; proof_text: string | null
+  box: number[] | null; color: 'red' | 'yellow' }
+export type PageOcr = { page_id: string; document_id: string; label: string | null; ocr_state: OcrState
+  ocr_error: string | null; text: string | null; version: number | null; source: string | null; needs_check: boolean
+  verified: { by_name: string | null; at: string | null } | null; alerts: OcrAlert[]; has_image: boolean
+  can_edit: boolean; can_verify: boolean; blank_unconfirmed: boolean }
+export type UploadResult = { id: string; page_count: number
+  ocr?: { status: OcrJob['status']; pages: number; minutes: number } | null }
 export type Exhibit = { id: string; label: string; prefix: string; number: number; document_id: string;
   filename: string | null }
 export type RoundSummary = { id: string; seq: number; status: RoundStatus; error: string | null
@@ -54,7 +73,9 @@ export type CaseDetail = CaseSummary & { header: CaseHeader; parties: Party[]; p
   // 建立輪次時可選的書狀種類（原告不能寫答辯狀，被告不能寫起訴狀）
   brief_kind_options?: { code: BriefKind; label: string }[]; default_brief_kind?: BriefKind
   // 卷證說明、大事記的 AI 工作狀態（沒執行過是 null）
-  jobs?: { evidence_notes: JobView | null; timeline: JobView | null } }
+  jobs?: { evidence_notes: JobView | null; timeline: JobView | null }
+  // 沒有進行中辨識工作的待辨識頁數（「開始辨識（N 頁）」）
+  pending_ocr_pages?: number }
 // 新步驟（卷證說明、大事記、健檢）的原文出處（設計 5.1）：label 讀取時才算（證物可以改號）
 // status：found＝摘錄在那一頁；not_found＝沒過（reasons 說明哪一項）；absence＝缺漏類；unchecked＝律師填的，不比對
 export type SourceView = { page_id: string | null; label: string | null; quote: string
@@ -184,8 +205,39 @@ export function uploadDocument(caseId: string, file: File, kind: 'evidence' | 'o
   form.append('kind', kind)
   if (roundId) form.append('round_id', roundId)
   if (filedByPartyId) form.append('filed_by_party_id', filedByPartyId)
-  return req<{ id: string; page_count: number }>(`/cases/${caseId}/documents`, { method: 'POST', body: form })
+  return req<UploadResult>(`/cases/${caseId}/documents`, { method: 'POST', body: form })
 }
+
+const PHOTO = /\.(jpe?g|png)$/i
+
+// 上傳一份文件：多張照片合成一份（一個證物號）；只有一個、而且不是照片的檔案走 file
+export function uploadDocuments(caseId: string, files: File[], kind: 'evidence' | 'opponent_brief', roundId?: string,
+  filedByPartyId?: string) {
+  const form = new FormData()
+  const field = files.length === 1 && !PHOTO.test(files[0].name) ? 'file' : 'files'
+  for (const f of files) form.append(field, f)
+  form.append('kind', kind)
+  if (roundId) form.append('round_id', roundId)
+  if (filedByPartyId) form.append('filed_by_party_id', filedByPartyId)
+  return req<UploadResult>(`/cases/${caseId}/documents`, { method: 'POST', body: form })
+}
+
+// 辨識（計畫 2A）：頁數超過上限時回 409 confirm_ocr（ApiError.code），畫面確認後帶 confirm 再送一次
+type OcrStart = { job: OcrJob | null; progress: OcrProgress }
+export const startDocumentOcr = (docId: string, opts: { confirm?: boolean; retryFailed?: boolean } = {}) =>
+  req<OcrStart>(`/documents/${docId}/ocr`, json('POST', { confirm: !!opts.confirm, retry_failed: !!opts.retryFailed }))
+export const reocrDocument = (docId: string, confirm: boolean) =>
+  req<OcrStart & { pages: number }>(`/documents/${docId}/reocr`, json('POST', { confirm }))
+export const startCaseOcr = (caseId: string, confirm: boolean) =>
+  req<{ jobs: OcrJob[]; pages: number }>(`/cases/${caseId}/ocr`, json('POST', { confirm }))
+export const getPageOcr = (pageId: string) => req<PageOcr>(`/pages/${pageId}/ocr`)
+// baseVersion：畫面上那一版（失敗頁沒有版本＝null）；版本不符回 409「這一頁的文字已更新，請重新載入」
+export const savePageText = (pageId: string, text: string, baseVersion: number | null, verify: boolean) =>
+  req<PageOcr>(`/pages/${pageId}/text`, json('PUT', { text, base_version: baseVersion, verify }))
+export const verifyPage = (pageId: string, version: number) =>
+  req<PageOcr>(`/pages/${pageId}/verify`, json('POST', { version }))
+export const confirmBlank = (pageId: string) => req<PageOcr>(`/pages/${pageId}/blank-confirm`, json('POST'))
+export const pageImageUrl = (pageId: string) => `/api/pages/${pageId}/image`
 
 // 兩段式執行：先拆解（停在待確認，律師勾選），再起草
 export const extractRound = (roundId: string) => req<{ status: string }>(`/rounds/${roundId}/extract`, json('POST'))

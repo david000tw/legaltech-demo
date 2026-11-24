@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  downloadFilingPackage, ExportBlockedError, exportDraft, patchParagraph, reviewParagraph, uploadDocument,
+  ApiError, downloadFilingPackage, ExportBlockedError, exportDraft, patchParagraph, reviewParagraph, startDocumentOcr,
+  uploadDocument, uploadDocuments,
 } from './api'
 
 function respond(status: number, body: unknown) {
@@ -11,6 +12,33 @@ function respond(status: number, body: unknown) {
 
 describe('api', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('uploadDocuments uses files for photos and file for a single document', async () => {
+    const f = respond(200, { id: 'd1', page_count: 1, ocr: null })
+    const form = (n: number) => (f.mock.calls[n] as unknown as [string, RequestInit])[1].body as FormData
+    const pdf = new File(['%PDF'], '診斷.pdf', { type: 'application/pdf' })
+    const a = new File(['a'], 'a.JPG', { type: 'image/jpeg' })
+    const b = new File(['b'], 'b.png', { type: 'image/png' })
+    await uploadDocuments('c1', [pdf], 'evidence')
+    expect(form(0).getAll('file')).toHaveLength(1)
+    expect(form(0).getAll('files')).toHaveLength(0)
+    await uploadDocuments('c1', [a, b], 'opponent_brief', 'r1', 'pt1')
+    expect(form(1).getAll('files')).toHaveLength(2)
+    expect([form(1).get('kind'), form(1).get('round_id'), form(1).get('filed_by_party_id')])
+      .toEqual(['opponent_brief', 'r1', 'pt1'])
+    await uploadDocuments('c1', [a], 'evidence')
+    expect(form(2).getAll('files')).toHaveLength(1)
+    expect(f).toHaveBeenCalledWith('/api/cases/c1/documents', expect.objectContaining({ method: 'POST' }))
+  })
+
+  it('startDocumentOcr reports confirm_ocr as an ApiError code', async () => {
+    const f = respond(409, { detail: { code: 'confirm_ocr', message: '要開始辨識嗎？' } })
+    const err = await startDocumentOcr('d1', { confirm: false }).catch((e) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect([err.code, err.message]).toEqual(['confirm_ocr', '要開始辨識嗎？'])
+    expect(f).toHaveBeenCalledWith('/api/documents/d1/ocr', expect.objectContaining({ method: 'POST',
+      body: JSON.stringify({ confirm: false, retry_failed: false }) }))
+  })
 
   it('downloads the filing package with the UTF-8 filename from the response', async () => {
     const f = vi.fn(async () => new Response('zip', { status: 200, headers: {
