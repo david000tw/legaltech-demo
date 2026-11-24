@@ -121,7 +121,10 @@ def test_extract_rejects_unknown_extension():
 def test_unsupported_extension_415(lawyer_client):
     client, _, _ = lawyer_client
     case_id = new_case(client)
-    assert upload(client, case_id, "照片.jpg", b"\xff\xd8\xff").status_code == 415
+    assert upload(client, case_id, "試算表.xlsx", b"PK\x03\x04").status_code == 415
+    # 計畫 2A 起 JPG 是照片：壞掉的照片回 422
+    r = upload(client, case_id, "照片.jpg", b"\xff\xd8\xff")
+    assert r.status_code == 422 and r.json()["detail"] == "無法讀取第 1 張照片"
 
 
 def encrypted_pdf() -> bytes:

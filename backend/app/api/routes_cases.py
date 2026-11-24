@@ -1,8 +1,10 @@
+from dataclasses import dataclass
 from datetime import date
+from pathlib import PurePath
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 from sqlalchemy import func, select
 
@@ -13,10 +15,15 @@ from app.case_types import (
     procedure_for, procedure_warning,
 )
 from app.db import tenant_session
-from app.ingest.extract import UnreadableFile, UnsupportedFile
+from app.ingest.extract import UnreadableFile, UnsupportedFile, file_ext
 from app.ingest.service import current_page_text, ingest_document
 from app.models import Case, CaseParty, Document, Exhibit, Member, Page, Round
+from app.ocr.images import (
+    HEIC_EXTS, HEIC_MESSAGE, IMAGE_EXTS, MAX_PHOTOS, MIXED_MESSAGE, TOO_MANY_PHOTOS, looks_scanned_with_text,
+    photos_to_pdf,
+)
 from app.pipeline.jobs import job_json, latest_job
+from app.storage import LocalStorage
 
 router = APIRouter(prefix="/api")
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -271,16 +278,57 @@ def set_filer(document_id: UUID, body: FilerBody, m: CurrentMember = Depends(cur
         return {"id": str(doc.id), "filed_by_party_id": str(doc.filed_by_party_id) if doc.filed_by_party_id else None}
 
 
+@dataclass
+class _Prepared:
+    filename: str
+    data: bytes
+    photos: list[tuple[str, bytes]]  # 照片原檔（檔名、內容）
+    scan_hint: bool
+
+
+def _prepare_upload(uploads: list[UploadFile]) -> _Prepared:
+    """讀檔、檢查格式；照片合成一份 A4 PDF，一般 PDF 判斷是否像掃描後加文字層。都在資料庫交易之外做。"""
+    names = [u.filename or "未命名" for u in uploads]
+    exts = [file_ext(n) for n in names]
+    if any(e in HEIC_EXTS for e in exts):
+        raise HTTPException(415, HEIC_MESSAGE)
+    is_photo = [e in IMAGE_EXTS for e in exts]
+    if any(is_photo) and not all(is_photo) or len(uploads) > 1 and not any(is_photo):
+        raise HTTPException(422, MIXED_MESSAGE)
+    if len(uploads) > MAX_PHOTOS:
+        raise HTTPException(422, TOO_MANY_PHOTOS)
+    datas, total = [], 0
+    for u in uploads:
+        data = u.file.read(MAX_UPLOAD_BYTES - total + 1)
+        total += len(data)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, f"檔案超過 {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+        datas.append(data)
+    if not all(is_photo):
+        scan = exts[0] == ".pdf" and looks_scanned_with_text(datas[0])
+        return _Prepared(names[0], datas[0], [], scan)
+    try:
+        pdf = photos_to_pdf(datas)
+    except UnreadableFile as e:
+        raise HTTPException(422, str(e))
+    stem = PurePath(names[0]).stem or "照片"
+    name = f"{stem}.pdf" if len(datas) == 1 else f"{stem}（{len(datas)}張照片）.pdf"
+    return _Prepared(name, pdf, list(zip(names, datas)), False)
+
+
 @router.post("/cases/{case_id}/documents")
-def upload_document(case_id: UUID, file: UploadFile,
-                          kind: Literal["evidence", "opponent_brief"] = Form(...),
-                          round_id: UUID | None = Form(None),
-                          filed_by_party_id: UUID | None = Form(None),
-                          m: CurrentMember = Depends(current_member)) -> dict:
-    # 一般 def：FastAPI 會放到執行緒池，抽字時不會卡住其他請求。
-    data = file.file.read(MAX_UPLOAD_BYTES + 1)
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, f"檔案超過 {MAX_UPLOAD_BYTES // (1024 * 1024)} MB")
+def upload_document(case_id: UUID, request: Request, file: UploadFile | None = File(None),
+                    files: list[UploadFile] | None = File(None),
+                    kind: Literal["evidence", "opponent_brief"] = Form(...),
+                    round_id: UUID | None = Form(None),
+                    filed_by_party_id: UUID | None = Form(None),
+                    m: CurrentMember = Depends(current_member)) -> dict:
+    # 一般 def：FastAPI 會放到執行緒池，抽字、合成照片時不會卡住其他請求。
+    uploads = ([file] if file is not None else []) + list(files or [])
+    if not uploads:
+        raise HTTPException(422, "請選擇要上傳的檔案")
+    prep = _prepare_upload(uploads)
+    storage = LocalStorage(request.app.state.settings.storage_dir)
     with tenant_session(m.firm_id) as s:
         _case_or_404(s, case_id)
         if round_id is not None:
@@ -289,13 +337,17 @@ def upload_document(case_id: UUID, file: UploadFile,
                 raise HTTPException(404, "找不到輪次")
         _check_filer(s, case_id, filed_by_party_id)
         try:
-            doc = ingest_document(s, m.firm_id, case_id, kind, file.filename or "未命名", data, round_id)
+            doc = ingest_document(s, m.firm_id, case_id, kind, prep.filename, prep.data, round_id, storage=storage)
             doc.filed_by_party_id = filed_by_party_id
         except UnsupportedFile as e:
             raise HTTPException(415, str(e))
         except UnreadableFile as e:
             raise HTTPException(422, str(e))
-        return {"id": str(doc.id), "page_count": doc.page_count}
+        doc.scan_hint = prep.scan_hint
+        if prep.photos:
+            doc.source_images = [{"key": storage.put(m.firm_id, case_id, file_ext(name), data), "filename": name}
+                                 for name, data in prep.photos]
+        return {"id": str(doc.id), "page_count": doc.page_count, "ocr": None}
 
 
 @router.get("/pages/{page_id}")

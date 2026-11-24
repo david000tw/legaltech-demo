@@ -132,3 +132,32 @@ def test_export_docx_unchanged(db):
     force_reviewed(ctx["firm"], ctx["draft_id"])
     assert cs["lawyer"].post(f"/api/drafts/{ctx['draft_id']}/export").status_code == 200
     assert _records("docx") == 1 and _records("package") == 0
+
+
+def test_package_contains_generated_pdf_not_photo(db):
+    """計畫 2A：照片證物在遞狀包裡是系統合成的 PDF，不帶照片的 EXIF（拍攝地點等）。"""
+    from app.models import Citation, PageText
+    from tests.test_ocr_images import photo
+
+    ctx, cs = ready(db)
+    r = cs["lawyer"].post(f"/api/cases/{ctx['case_id']}/documents", data={"kind": "evidence"},
+                          files=[("files", ("收據.jpg", photo(exif_orientation=6)))])
+    assert r.status_code == 200, r.text
+    with tenant_session(ctx["firm"]) as s:
+        page = s.scalars(select(Page).where(Page.document_id == r.json()["id"])).one()
+        pt = PageText(firm_id=ctx["firm"], page_id=page.id, version=1, source="ai_ocr", text=EVIDENCE_TEXT,
+                      verified_against_image=True)
+        s.add(pt)
+        s.flush()
+        for c in s.scalars(select(Candidate).where(Candidate.round_id == ctx["round_id"], Candidate.code == "E1")):
+            c.page_text_id = pt.id
+        for c in s.scalars(select(Citation).where(Citation.page_text_id.is_not(None))):
+            c.page_text_id = pt.id
+    force_reviewed(ctx["firm"], ctx["draft_id"])
+    r = _package(cs["lawyer"], ctx)
+    assert r.status_code == 200, r.text
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    photo_entry = [n for n in z.namelist() if "收據" in n]
+    assert photo_entry == ["03_原證2_收據.pdf"]
+    data = z.read(photo_entry[0])
+    assert data.startswith(b"%PDF") and b"Exif" not in data
