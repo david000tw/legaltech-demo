@@ -67,6 +67,30 @@ describe('CaseDetail', () => {
     expect(api.getHealthReport).not.toHaveBeenCalledWith('r2')
   })
 
+  it('refetches the health report after new evidence is uploaded', async () => {
+    // 子專案乙驗收時在瀏覽器發現：同一頁上傳卷證後，健檢區塊沒有重新讀取，「資料已變更」要重新整理才出現
+    const drafted = [{ id: 'r1', seq: 1, status: 'drafted' as const, error: null }]
+    const added: api.CaseDocument = { id: 'd9', kind: 'evidence', filename: '06_收據.txt', round_id: null,
+      filed_by_party_id: null, page_count: 1, pages: [{ id: 'p9', page_no: 1, needs_ocr: false }] }
+    const uploaded = () => vi.mocked(api.uploadDocument).mock.calls.length > 0
+    vi.mocked(api.getCase).mockImplementation(async () => ({ ...baseCase, rounds: drafted,
+      documents: uploaded() ? [...baseCase.documents, added] : baseCase.documents }))
+    vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'drafted', error: null, stale: false,
+      brief_kind: 'preparatory', failed_stage: null, draft_id: 'dr1', claims: [] })
+    const report: api.HealthReportView = { created_at: '2026-11-24T00:00:00+00:00', outdated: false, items: [],
+      undisputed: [], issues: [], issues_label: '本件爭點', pending_ocr: [] }
+    vi.mocked(api.getHealthReport).mockImplementation(async () => ({ report: { ...report, outdated: uploaded() },
+      job: null }))
+    vi.mocked(api.uploadDocument).mockResolvedValue({ id: 'd9', page_count: 1 })
+    renderAt()
+    expect(await screen.findByRole('button', { name: '重新執行健檢' })).toBeInTheDocument()
+    expect(screen.queryByText('資料已變更，建議重新執行')).not.toBeInTheDocument()
+    const file = new File(['計程車收據'], '06_收據.txt', { type: 'text/plain' })
+    await userEvent.upload(screen.getByLabelText('上傳卷證（依上傳順序自動編號）'), file)
+    expect(api.uploadDocument).toHaveBeenCalledWith('c1', file, 'evidence')
+    expect(await screen.findByText('資料已變更，建議重新執行')).toBeInTheDocument()
+  })
+
   it('shows the evidence notes and timeline sections after the exhibits', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
     renderAt()

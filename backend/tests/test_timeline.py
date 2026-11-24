@@ -78,6 +78,14 @@ def test_timeline_checks_quote_date_amount(db, firm, case_id):
         "2025-03-09", "民國114年3月9日", 45000, "evidence", "ai")
 
 
+def test_timeline_yearless_date_in_description(db, firm, case_id):
+    fake = FakeProvider({"timeline": {"events": [
+        ev("原告支付醫療費用，3月10日再回診"), ev("原告3月9日支付醫療費用")]}})
+    view = by_desc(generate(firm, case_id, fake, db))
+    assert check(view["原告支付醫療費用，3月10日再回診"]) == ("not_found", ["date_not_in_quote"])
+    assert check(view["原告3月9日支付醫療費用"]) == ("found", [])
+
+
 def test_timeline_invalid_date(db, firm, case_id):
     fake = FakeProvider({"timeline": {"events": [ev("原告支付醫療費用", date="114-03-09")]}})
     e = generate(firm, case_id, fake, db)[0]

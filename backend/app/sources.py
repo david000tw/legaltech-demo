@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.amounts import parse_amounts
-from app.dates import PartialDate, date_in_text
+from app.dates import PartialDate, date_in_text, month_day_in_text
 from app.ingest.service import current_page_text
 from app.models import Document, Exhibit, Page
 from app.text_norm import normalize_text, source_found
@@ -124,12 +124,13 @@ def pending_ocr(pages: Iterable[SourcePage]) -> list[str]:
 
 
 def check_source(page: SourcePage | None, quote: str, *, dates: Iterable[PartialDate] = (),
-                 amounts: Iterable[int] = ()) -> list[str]:
-    """回傳原因代碼，空清單＝通過。摘錄對不上時只回 quote_not_found（沒找到原文，日期金額比對沒有意義）。"""
+                 amounts: Iterable[int] = (), month_days: Iterable[tuple[int, int]] = ()) -> list[str]:
+    """回傳原因代碼，空清單＝通過。摘錄對不上時只回 quote_not_found（沒找到原文，日期金額比對沒有意義）。
+    month_days 是句子裡沒寫年份的月日（parse_month_days），同一個月日要在摘錄裡。"""
     if page is None or page.text is None or not source_found(page.text, quote or "", min_chars=6):
         return ["quote_not_found"]
     reasons = []
-    if any(not date_in_text(d, quote) for d in dates):
+    if any(not date_in_text(d, quote) for d in dates) or any(not month_day_in_text(md, quote) for md in month_days):
         reasons.append("date_not_in_quote")
     in_quote = set(parse_amounts(quote))
     if any(a not in in_quote for a in amounts):

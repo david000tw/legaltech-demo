@@ -31,6 +31,11 @@ def test_check_source_reasons():
     assert check_source(page, "掛號費共計4萬元整", amounts=[45000]) == ["amount_not_in_quote"]
     assert check_source(page, "這句話不在原文裡面") == ["quote_not_found"]
     assert check_source(None, "民國114年3月9日支付醫療費用") == ["quote_not_found"]
+    # 沒寫年份的月日：同一個月日要在摘錄裡；和有年份的日期一起不符時，原因只列一次
+    assert check_source(page, "民國114年3月9日支付醫療費用", month_days=[(3, 9)]) == []
+    assert check_source(page, "民國114年3月9日支付醫療費用", month_days=[(3, 10)]) == ["date_not_in_quote"]
+    assert check_source(page, "支付醫療費用新臺幣 45,000 元", dates=[PartialDate(2025, 3, 9)],
+                        month_days=[(3, 10)]) == ["date_not_in_quote"]
     assert set(REASON_LABEL) == {"quote_not_found", "date_not_in_quote", "amount_not_in_quote", "date_invalid",
                                  "not_opponent"}
 

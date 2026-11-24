@@ -19,9 +19,9 @@ const STATUS_LABEL: Record<api.RoundStatus, string> = {
 const partyLabel = (p: api.Party) => `${p.role} ${p.name}`
 const KIND_LABEL: Record<api.BriefKind, string> = { complaint: '起訴狀', answer: '答辯狀', preparatory: '準備書狀' }
 
-function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
+function RoundPanel({ caseId, caseType, round, parties, briefs, docCount, onChanged }: {
   caseId: string; caseType: string; round: api.RoundSummary; parties: api.Party[]; briefs: api.CaseDocument[]
-  onChanged: () => void
+  docCount: number; onChanged: () => void
 }) {
   const [detail, setDetail] = useState<api.RoundDetail | null>(null)
   // 起訴狀的案情說明與聲明設定：律師改過的值優先，否則用後端存的值
@@ -51,6 +51,8 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
   useEffect(() => { void refresh() }, [refresh])
 
   const status = detail?.status ?? round.status
+  const claimsKey = (detail?.claims ?? [])
+    .map((c) => [c.id, c.selected, c.summary, c.request_type ?? '', c.amount ?? '', c.confirmed ?? ''].join(':')).join('|')
   useEffect(() => {
     if (status !== 'extracting' && status !== 'drafting') return
     const t = setInterval(() => { void refresh() }, POLL_MS)
@@ -281,7 +283,9 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
           </button>
         </div>
       )}
-      {status === 'drafted' && detail?.draft_id && <HealthCheckPanel roundId={round.id} briefKind={kind} />}
+      {/* 卷證、對造書狀或主張有變時重新讀取，才會顯示「資料已變更，建議重新執行」（欄位同後端 health_fingerprint） */}
+      {status === 'drafted' && detail?.draft_id && <HealthCheckPanel key={`health-${docCount}-${claimsKey}`}
+        roundId={round.id} briefKind={kind} />}
       {claims.length > 0 && (
         <ol className="mt-3 space-y-1 text-sm text-slate-700">
           {claims.map((c) => (
@@ -582,6 +586,7 @@ export default function CaseDetail() {
         </div>
         {data.rounds.map((r) => (
           <RoundPanel key={r.id} caseId={caseId} caseType={data.case_type} round={r} parties={data.parties} onChanged={load}
+            docCount={data.documents.length}
             briefs={data.documents.filter((d) => d.kind === 'opponent_brief' && d.round_id === r.id)} />
         ))}
       </section>

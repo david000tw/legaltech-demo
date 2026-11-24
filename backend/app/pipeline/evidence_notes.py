@@ -17,7 +17,7 @@ from app.ai.prompts import load_prompt
 from app.ai.provider import AIProvider
 from app.ai.schemas import EVIDENCE_NOTES_SCHEMA
 from app.amounts import parse_amounts
-from app.dates import parse_dates
+from app.dates import parse_dates, parse_month_days
 from app.db import tenant_session
 from app.ingest.service import current_page_text
 from app.models import AIJob, Case, Document, EvidenceNote, Page
@@ -99,7 +99,8 @@ def _save(s: Session, job: AIJob, batch, data: dict, fingerprints: dict[UUID, st
             if n.get("absence"):
                 status, reasons = "absence", []
             else:
-                reasons = check_source(page, quote, dates=parse_dates(text), amounts=parse_amounts(text))
+                reasons = check_source(page, quote, dates=parse_dates(text), amounts=parse_amounts(text),
+                                       month_days=parse_month_days(text))
                 status = "not_found" if reasons else "found"
             s.add(EvidenceNote(firm_id=job.firm_id, case_id=job.case_id, document_id=doc_id, kind=kind, seq=seq,
                                text=text, page_id=page.page_id if page else None, quote=quote, status=status,

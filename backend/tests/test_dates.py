@@ -1,7 +1,9 @@
 """子專案乙 Task 2：日期解析（卷證說明、大事記的日期要在原文摘錄裡）。"""
 import pytest
 
-from app.dates import PartialDate, date_in_text, parse_dates, parse_iso, roc_label
+from app.dates import (
+    PartialDate, date_in_text, month_day_in_text, parse_dates, parse_iso, parse_month_days, roc_label,
+)
 
 
 @pytest.mark.parametrize("text,expected", [
@@ -30,6 +32,24 @@ def test_date_in_text_month_precision():
     assert date_in_text(PartialDate(2025, 3, None), "民國114年3月9日離院")
     assert not date_in_text(PartialDate(2025, 3, 10), "民國114年3月9日離院")
     assert date_in_text(PartialDate(2025, 3, 9), "於2025/03/09就診")
+
+
+# 子專案乙驗收：「原告在9月25日已說…」這類沒寫年份的月日，原本不檢查，句子照樣標「找到原文」
+@pytest.mark.parametrize("text,expected", [
+    ("原告在9月25日已說先付清", [(9, 25)]), ("對話中09/25已付清", [(9, 25)]), ("十月二十六日才知道", [(10, 26)]),
+    ("114年3月13日約好，3月15日又傳訊息", [(3, 15)]), ("同年5月31日繳款", [(5, 31)]),
+    ("民國115年9月30日付款", []), ("2026/09/19至2026/10/28", []), ("有期徒刑1年2月3日", []),
+    ("應繼分各1/4、3/10", []), ("每月5日給付", []), ("宜休養三個月", []), ("114年13月40日", []), ("13/45", []),
+])
+def test_parse_month_days(text, expected):
+    assert parse_month_days(text) == expected
+
+
+def test_month_day_in_text():
+    assert month_day_in_text((9, 18), "陳志豪（09/18 19:42）：不好意思")
+    assert month_day_in_text((9, 30), "付款日期：民國115年9月30日")
+    assert month_day_in_text((3, 14), "3月10日至3月14日請特休假")
+    assert not month_day_in_text((9, 25), "付款日期：民國115年9月30日")
 
 
 def test_parse_iso():

@@ -84,6 +84,25 @@ def test_health_items_and_sources(db):
     assert report["issues_label"] == "本件爭點" and report["pending_ocr"] == []
 
 
+def test_health_codes_in_text_show_names(db):
+    """子專案乙驗收：140 項健檢有 84 項的說明寫「見J5」這類內部代碼，律師看不懂。
+    讀取時把本輪候選代碼換成判決字號或法條名稱；不在本輪候選的代碼（J9、J10）原樣保留，J10 不會被當成 J1。"""
+    ctx = drafted()
+    item = {**HIGH, "title": "與有過失（S1）", "explanation": "類似情形見J1；J1、S1可參；J9 與 J10 不在清單。"}
+    undisputed = [{"fact": "被告承認未減速（S1）", "source": "對造書狀A", "page_no": 1, "quote": OPP_QUOTE}]
+    report, _, _ = run(ctx, report_data(items=[item], undisputed=undisputed, issues=["是否適用J1的見解"]), db)
+    got = report["items"][0]
+    j1 = got["references"][0]["label"]
+    assert "3946" in j1
+    assert got["title"] == "與有過失（民法第191條之2）"
+    assert got["explanation"] == f"類似情形見{j1}；{j1}、民法第191條之2可參；J9 與 J10 不在清單。"
+    assert report["undisputed"][0]["fact"] == "被告承認未減速（民法第191條之2）"
+    assert report["issues"] == [f"是否適用{j1}的見解"]
+    with tenant_session(ctx["firm"]) as s:  # 存的仍是代碼：判決法條名稱讀取時才算
+        stored = s.scalars(select(HealthReport).where(HealthReport.round_id == ctx["round_id"])).one()
+        assert stored.items[0]["explanation"] == item["explanation"]
+
+
 def test_health_basis_can_cite_opponent(db):
     ctx = drafted()
     item = {**HIGH, "evidence": [{"source": "對造書狀A", "page_no": 1, "quote": OPP_QUOTE}]}

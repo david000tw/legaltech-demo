@@ -104,6 +104,30 @@ def date_in_text(d: PartialDate, text: str) -> bool:
                for p in parse_dates(text))
 
 
+# 沒寫年份的月日（「9月25日」「09/25」）：先拿掉完整日期（含「1年2月3日」這類不成日期的寫法），剩下的才算；
+# 斜線寫法只認兩位數「09/25」，「應繼分1/4」「3/10」是分數不是日期
+_MD_CJK = re.compile(rf"(?<![0-9{_CN}])(?P<m>{_NUM})\s*月\s*(?P<d>{_NUM})\s*日")
+_MD_SEP = re.compile(r"(?<![0-9./:\-])(?P<m>[0-9]{2})/(?P<d>[0-9]{2})(?![0-9/])")
+
+
+def parse_month_days(text: str) -> list[tuple[int, int]]:
+    """文字裡沒寫年份的月日（月, 日），依出現順序、去重；有年份的完整日期不列。"""
+    norm = unicodedata.normalize("NFKC", text or "")
+    norm = _SEP_DATE.sub(lambda m: " " * len(m.group(0)), _CJK_DATE.sub(lambda m: " " * len(m.group(0)), norm))
+    hits: list[tuple[int, tuple[int, int]]] = []
+    for pattern in (_MD_CJK, _MD_SEP):
+        for m in pattern.finditer(norm):
+            month, day = _cn_int(m.group("m")), _cn_int(m.group("d"))
+            if month is not None and day is not None and 1 <= month <= 12 and 1 <= day <= 31:
+                hits.append((m.start(), (month, day)))
+    return list(dict.fromkeys(md for _, md in sorted(hits, key=lambda h: h[0])))
+
+
+def month_day_in_text(md: tuple[int, int], text: str) -> bool:
+    """同一個月日出現在文字裡：完整日期或沒寫年份的月日都算。"""
+    return md in parse_month_days(text) or any((p.month, p.day) == md for p in parse_dates(text))
+
+
 def parse_iso(value: str) -> PartialDate | None:
     """AI 回傳的西元日期：YYYY-MM-DD 或 YYYY-MM；不存在的日期（2月30日）回 None。"""
     m = _ISO.match((value or "").strip())

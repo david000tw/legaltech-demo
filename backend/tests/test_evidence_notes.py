@@ -77,6 +77,16 @@ def test_note_amount_and_date_must_be_in_quote(db, firm):
                              ("proves", "not_found", ["date_not_in_quote"])]
 
 
+def test_note_yearless_date_must_be_in_quote(db, firm):
+    # 子專案乙驗收：注意事項寫「3月10日」引用別份證物的日期，摘錄裡沒有，原本仍標「找到原文」
+    case_id, _ = make_round(firm, evidence={"01_收據.txt": RECEIPT})
+    fake = FakeProvider({"evidence_notes": reply(("原證1", [
+        note("收據日期與3月10日的說法不一致", "民國114年3月9日 林大明 支付", kind="caution"),
+        note("3月9日支付醫療費用", "民國114年3月9日 林大明 支付")]))})
+    doc = by_exhibit(generate(firm, case_id, fake, db))["原證1"]
+    assert statuses(doc) == [("proves", "found", []), ("caution", "not_found", ["date_not_in_quote"])]
+
+
 def _ingest(firm, case_id, kind, name, data):
     with tenant_session(firm) as s:
         return ingest_document(s, firm, case_id, kind, name, data).id

@@ -16,7 +16,7 @@ from app.ai.prompts import load_prompt
 from app.ai.provider import AIProvider
 from app.ai.schemas import TIMELINE_SCHEMA
 from app.amounts import parse_amounts
-from app.dates import PartialDate, parse_dates, parse_iso, roc_label
+from app.dates import PartialDate, parse_dates, parse_iso, parse_month_days, roc_label
 from app.db import tenant_session
 from app.models import AIJob, Case, TimelineEvent
 from app.pipeline.case_context import case_context
@@ -85,7 +85,7 @@ def _save(s: Session, job: AIJob, events: list[dict], pages: dict[tuple[str, int
         amount = raw_amount if valid else None
         dates = ([pd] if pd else []) + parse_dates(description)
         amounts = ([amount] if amount is not None else []) + parse_amounts(description)
-        reasons = check_source(page, quote, dates=dates, amounts=amounts)
+        reasons = check_source(page, quote, dates=dates, amounts=amounts, month_days=parse_month_days(description))
         if raw_date and pd is None:
             reasons.append("date_invalid")
         event_date, precision = _event_date(pd)

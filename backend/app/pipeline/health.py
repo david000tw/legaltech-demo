@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -166,6 +167,14 @@ def _ref_label(s: Session, c: Candidate | None, code: str) -> str:
     return article_display(a.statute.name, a.article_no)
 
 
+# AI 在說明裡常寫候選代碼（「見J5」）：讀取時換成判決字號、法條名稱；J10 不會被當成 J1
+_CODE_IN_TEXT = re.compile(r"(?<![A-Za-z0-9])([JS]\d+)(?![0-9])")
+
+
+def _named(text: str, names: dict[str, str]) -> str:
+    return _CODE_IN_TEXT.sub(lambda m: names.get(m.group(1), m.group(1)), text)
+
+
 def _basis_view(s: Session, b: dict) -> dict:
     return source_view(s, UUID(b["page_id"]) if b.get("page_id") else None, b.get("quote", ""), b["status"],
                        b.get("reasons", []))
@@ -178,14 +187,22 @@ def report_view(s: Session, round_id: UUID) -> dict | None:
         return None
     rnd = s.get(Round, round_id)
     cands = round_candidates(s, round_id)
-    items = [{**{k: it[k] for k in ("level", "title", "explanation", "claim_seqs", "absence", "not_in_list")},
+    # 只查用得到的代碼名稱（說明文字裡出現的、references 裡的），不必每次查完整份候選清單
+    texts = [x for it in report.items or [] for x in (it["title"], it["explanation"])]
+    texts += [u["fact"] for u in report.undisputed or []] + list(report.issues or [])
+    used = {m.group(1) for t in texts for m in _CODE_IN_TEXT.finditer(t)}
+    used |= {code for it in report.items or [] for code in it["references"]}
+    names = {code: _ref_label(s, cands[code], code) for code in used
+             if code in cands and cands[code].kind in REF_KINDS}
+    items = [{**{k: it[k] for k in ("level", "claim_seqs", "absence", "not_in_list")},
+              "title": _named(it["title"], names), "explanation": _named(it["explanation"], names),
               "basis": [_basis_view(s, b) for b in it["basis"]],
-              "references": [{"code": code, "label": _ref_label(s, cands.get(code), code)} for code in it["references"]]}
+              "references": [{"code": code, "label": names.get(code, code)} for code in it["references"]]}
              for it in report.items or []]
     undisputed = None if report.undisputed is None else [
-        {"fact": u["fact"], "basis": _basis_view(s, u["basis"])} for u in report.undisputed]
+        {"fact": _named(u["fact"], names), "basis": _basis_view(s, u["basis"])} for u in report.undisputed]
     return {"created_at": report.created_at.isoformat(),
             "outdated": report.fingerprint != health_fingerprint(s, round_id),
-            "items": items, "undisputed": undisputed, "issues": report.issues or [],
+            "items": items, "undisputed": undisputed, "issues": [_named(x, names) for x in report.issues or []],
             "issues_label": "預期爭點" if rnd.brief_kind == "complaint" else "本件爭點",
             "pending_ocr": pending_ocr(source_pages(s, rnd.case_id, round_id).values())}
