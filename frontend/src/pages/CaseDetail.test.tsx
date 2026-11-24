@@ -441,6 +441,32 @@ describe('CaseDetail brief filer and notices', () => {
     expect(api.confirmClaim).toHaveBeenCalledWith('q2')
   })
 
+  it('saves an edited request item when leaving the row, so switching tabs keeps it', async () => {
+    // critic R1：改了金額切去卷證分頁核對再回來，不能變回 AI 的金額、讓律師按「確認」確認進訴之聲明
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase,
+      rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null, brief_kind: 'complaint', failed_stage: null,
+        copied_from_seq: null }] })
+    let stored = complaintRound
+    vi.mocked(api.getRound).mockImplementation(async () => stored)
+    vi.mocked(api.patchClaim).mockImplementation(async (id, body) => {
+      stored = { ...stored, claims: stored.claims.map((c) => c.id === id
+        ? { ...c, summary: body.label ?? c.summary, amount: body.amount ?? null, confirmed: false } : c) }
+      return stored.claims.find((c) => c.id === id)!
+    })
+    renderAt()
+    await openTab('書狀')
+    const amount = await screen.findByLabelText('請求項目2 金額')
+    await userEvent.clear(amount)
+    await userEvent.type(amount, '150000')
+    await userEvent.click(screen.getByLabelText('請求項目2 名稱'))  // 同一列換欄位：還在改，不存
+    expect(api.patchClaim).not.toHaveBeenCalled()
+    await openTab('卷證與時間軸')
+    await waitFor(() => expect(api.patchClaim).toHaveBeenCalledWith('q2',
+      { label: '車輛修復費', request_type: 'monetary', amount: 150000 }))
+    await openTab('書狀')
+    await waitFor(() => expect(screen.getByLabelText('請求項目2 金額')).toHaveValue('150000'))
+  })
+
   it('assistants cannot confirm request items', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase,
       rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null, brief_kind: 'complaint', failed_stage: null,

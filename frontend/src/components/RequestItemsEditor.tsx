@@ -1,6 +1,6 @@
 // 起訴狀的我方請求項目（設計 5.2）：AI 提案，律師逐項確認金額；可修改、新增、刪除。
 // 金額一旦修改就要重新確認；訴之聲明的金額由系統依確認過的項目加總，AI 不寫金額。
-import { useState } from 'react'
+import { useState, type FocusEvent } from 'react'
 import * as api from '../api'
 
 const NOTE_LABEL: Record<string, string> = {
@@ -23,10 +23,17 @@ function ItemRow({ item, canReview, act }: {
   const changed = label !== item.summary || type !== item.request_type
     || (type === 'monetary' && amount !== (item.amount == null ? '' : String(item.amount)))
   const name = `請求項目${item.seq}`
+  const save = () => act(() => api.patchClaim(item.id, {
+    label, request_type: type, amount: type === 'monetary' && amount !== '' ? Number(amount) : null }))
+  // 改了就在離開這一列時存（例如切到卷證分頁核對原證）：分頁切走會卸載，沒存的金額不能悄悄變回 AI 的金額。
+  // 同一列換欄位或按列內按鈕不算離開
+  function leaveRow(e: FocusEvent<HTMLDivElement>) {
+    if (changed && !e.currentTarget.contains(e.relatedTarget as Node | null)) void save()
+  }
 
   return (
     <li className="space-y-1 py-2">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2" onBlur={leaveRow}>
         <span className="text-slate-500">{item.seq}.</span>
         <input aria-label={`${name} 名稱`} value={label} onChange={(e) => setLabel(e.target.value)}
           className="w-40 rounded border border-slate-300 px-2 py-0.5" />
@@ -42,9 +49,7 @@ function ItemRow({ item, canReview, act }: {
             className="w-28 rounded border border-slate-300 px-2 py-0.5" placeholder="新臺幣（元）" />
         )}
         {changed && (
-          <button type="button" className="rounded border px-2 py-0.5 text-xs"
-            onClick={() => act(() => api.patchClaim(item.id, {
-              label, request_type: type, amount: type === 'monetary' && amount !== '' ? Number(amount) : null }))}>
+          <button type="button" className="rounded border px-2 py-0.5 text-xs" onClick={() => void save()}>
             儲存
           </button>
         )}
