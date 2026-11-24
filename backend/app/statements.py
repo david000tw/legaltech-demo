@@ -105,12 +105,15 @@ def draft_reasons(s: Session, draft_id: UUID) -> list[str]:
         st = statement_of(s, draft_id)
         if st is None or not (st.text or "").strip():
             out.append("statement_missing")
-    if rnd.brief_kind == "complaint" and not _has_money(s, rnd.id) and rnd.claim_value is None:
+    if rnd.brief_kind == "complaint" and claim_value(s, rnd)[1] is None:
         out.append("claim_value_missing")
     return out
 
 
 def claim_value(s: Session, rnd: Round) -> tuple[str, int | None]:
-    """訴訟標的金額（有金錢請求）或價額（只有非金錢請求）；律師填的值優先。"""
-    label = "訴訟標的金額" if _has_money(s, rnd.id) else "訴訟標的價額"
-    return label, rnd.claim_value if rnd.claim_value is not None else (round_total(s, rnd.id) or None)
+    """只有金錢請求：訴訟標的金額＝律師填的值，否則用加總（加總為 0 視為沒有）。
+    有任何非金錢請求：訴訟標的價額，只能由律師填（金錢加總不等於價額）。"""
+    items = confirmed_requests(s, rnd.id)
+    if items and all(c.request_type == "monetary" for c in items):
+        return "訴訟標的金額", rnd.claim_value if rnd.claim_value is not None else (round_total(s, rnd.id) or None)
+    return "訴訟標的價額", rnd.claim_value

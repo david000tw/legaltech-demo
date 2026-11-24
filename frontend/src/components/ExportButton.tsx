@@ -31,7 +31,7 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
   amounts_unchecked: () => '多位原告或非連帶被告：請律師核對金額',
   amount_unverified: (a) => `金額未對到請求項目或卷證：${Number(a).toLocaleString('en-US')}元`,
   amount_marker_misplaced: () => '系統金額標記只能用在起訴狀的訴之聲明',
-  claim_value_missing: () => '請填寫訴訟標的價額',
+  claim_value_missing: () => '請填寫訴訟標的金額或價額',
 }
 
 // 阻擋原因的位置：聲明與整份書狀沒有段落編號

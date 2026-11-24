@@ -84,20 +84,21 @@ def procedure_for(case_type: str | None, case_number: str | None) -> str:
     return case_type_of(case_type).procedure
 
 
-def procedure_warning(case_type: str | None, case_number: str | None) -> str | None:
+def procedure_warning(case_type: str | None, case_number: str | None,
+                      brief_kind: str = "preparatory") -> str | None:
     word = _word(case_number)
     ct = case_type_of(case_type)
     if word is None:
         if not (case_number or "").strip():
             return None
         return (f"無法判讀案號「{case_number.strip()}」的字別，書狀名稱與受文先依「{ct.label}」預設的"
-                f"{PROCEDURE_LABEL[ct.procedure]}程序（{PROCEDURES[ct.procedure][0]}）；"
+                f"{PROCEDURE_LABEL[ct.procedure]}程序（{brief_title(ct.procedure, brief_kind)}）；"
                 "請改成「113年度家訴字第5號」這種格式，或確認程序。")
     actual = procedure_for(case_type, case_number)
     if actual == ct.procedure:
         return None
     return (f"案號字別「{word}」屬{PROCEDURE_LABEL[actual]}程序，與「{ct.label}」預設的{PROCEDURE_LABEL[ct.procedure]}"
-            f"程序不同；書狀名稱與受文依案號（{PROCEDURES[actual][0]}），請確認案號與案型。")
+            f"程序不同；書狀名稱與受文依案號（{brief_title(actual, brief_kind)}），請確認案號與案型。")
 
 
 BRIEF_KINDS = {"complaint": "起訴狀", "answer": "答辯狀", "preparatory": "準備書狀"}
@@ -145,10 +146,12 @@ def complaint_statement(case_type: str, *, has_money: bool, has_non_money: bool,
     if non_money:
         if case_type == "estate_partition":
             lines.append("兩造公同共有被繼承人○○○所遺如附表所示之遺產，准依附表所示方法分割。")
-        elif variant == "deceased":
+        elif case_type == "nominee_registration" and variant == "deceased":
             lines.append("被告應就被繼承人○○○所遺坐落○○之不動產辦理繼承登記後，將所有權移轉登記予原告。")
-        else:
+        elif case_type == "nominee_registration":
             lines.append("被告應將坐落○○之不動產（權利範圍○○）所有權移轉登記予原告。")
+        else:  # 其他案型的非金錢請求沒有固定句型：留空格，statement_blank 會擋到律師改寫為止
+            lines.append("被告應○○○。")
     lines.append("訴訟費用由兩造按附表所示應繼分比例負擔。" if case_type == "estate_partition" else "訴訟費用由被告負擔。")
     if has_money and provisional:  # 分割遺產（形成判決）與移轉登記（命為意思表示）不能聲請假執行
         lines.append("就第一項聲明，原告願供擔保，請准宣告假執行。" if non_money else "原告願供擔保，請准宣告假執行。")

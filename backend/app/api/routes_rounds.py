@@ -203,6 +203,8 @@ def add_request(round_id: UUID, body: RequestBody, m: CurrentMember = Depends(cu
 def delete_claim(claim_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
         claim = _editable_claim(s, claim_id, kind="request")
+        if claim.confirmed_by is not None and m.role != "lawyer":  # 確認是律師的責任，刪除已確認的項目也是
+            raise HTTPException(403, "已確認的請求項目只能由律師刪除")
         s.delete(claim)
         return {"id": str(claim_id), "deleted": True}
 

@@ -110,6 +110,17 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
     }
     await api.extractRound(round.id)
   })
+  // 案情說明離開欄位就存：沒按「拆解」就重新整理也不會不見。不設 busy，免得緊接著按「拆解」時按鈕已被停用
+  async function saveNarrative() {
+    if (narrative === null || narrative === (detail?.narrative ?? '')) return
+    setMessage(null)
+    try {
+      await api.patchRound(round.id, { narrative })
+      await refresh()
+    } catch (e) {
+      setMessage((e as Error).message)
+    }
+  }
   const copy = () => act(async () => { await api.copyRound(round.id); onChanged() })
   const draft = () => act(() => api.draftRound(round.id))
   // 重新拆解：律師改過勾選時後端要求確認，確認後再送一次
@@ -191,7 +202,8 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
         <div className="mt-3 space-y-2 text-sm">
           <label className="block text-slate-700">
             案情說明
-            <textarea aria-label="案情說明" value={narrativeText} onChange={(e) => setNarrative(e.target.value)} rows={4}
+            <textarea aria-label="案情說明" value={narrativeText} onChange={(e) => setNarrative(e.target.value)}
+              onBlur={() => void saveNarrative()} rows={4}
               placeholder="說明當事人要請求什麼、為什麼（AI 依此與卷證整理請求項目）"
               className="mt-1 w-full rounded border border-slate-300 p-2" />
           </label>

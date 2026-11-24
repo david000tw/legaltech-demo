@@ -372,6 +372,21 @@ describe('CaseDetail brief filer and notices', () => {
     expect(screen.queryByLabelText('上傳對造書狀')).not.toBeInTheDocument()
   })
 
+  it('saves the complaint narrative when leaving the field', async () => {
+    // 子專案甲 M8：案情說明離開欄位就存，重新整理後不會不見
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase,
+      rounds: [{ id: 'r1', seq: 1, status: 'created', error: null, brief_kind: 'complaint', failed_stage: null,
+        copied_from_seq: null }] })
+    vi.mocked(api.getRound).mockResolvedValue({ ...complaintRound, status: 'created', narrative: null, claims: [] })
+    vi.mocked(api.patchRound).mockResolvedValue({})
+    renderAt()
+    await userEvent.type(await screen.findByLabelText('案情說明'), '原告請求醫療費。')
+    expect(api.patchRound).not.toHaveBeenCalled()
+    await userEvent.tab()
+    await waitFor(() => expect(api.patchRound).toHaveBeenCalledTimes(1))
+    expect(api.patchRound).toHaveBeenCalledWith('r1', { narrative: '原告請求醫療費。' })
+  })
+
   it('copy button only on drafted rounds', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase,
       rounds: [{ id: 'r1', seq: 1, status: 'drafted', error: null, brief_kind: 'preparatory', failed_stage: null,

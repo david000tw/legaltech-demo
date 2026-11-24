@@ -176,3 +176,19 @@ def test_amount_in_heading_checked(db):
     firm = create_firm("甲事務所")
     pid = _plain_draft(firm, {}, "原告受有損害。", heading="醫療費用新臺幣49,000元")
     assert _amount_reasons(firm, pid) == ["amount_unverified:49000"]
+
+
+def test_allowed_amounts_computed_once_per_export(db, monkeypatch):
+    # 子專案甲 M4：一次匯出檢查只查一次可用金額（卷證、對造書狀、主張），不要每段重查
+    from app.verify import citations
+    from tests.verify_helpers import make_paragraph
+    ctx, _ = make_brief(db, body=False)
+    for seq, n in enumerate(("45,000", "405,000", "7,000"), start=1):
+        make_paragraph(ctx, f"原告支出新臺幣{n}元。", [], heading=f"關於損害{seq}", seq=seq)
+    calls = []
+    real = citations._amount_sources
+    monkeypatch.setattr(citations, "_amount_sources", lambda s, rnd: calls.append(1) or real(s, rnd))
+    with tenant_session(ctx["firm"]) as s:
+        blockers = export_blockers(s, ctx["draft_id"])
+    assert len(calls) == 1
+    assert Blocker(3, "amount_unverified:7000", 3) in blockers

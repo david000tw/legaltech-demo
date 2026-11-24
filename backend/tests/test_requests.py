@@ -229,3 +229,13 @@ def test_round_reports_review_right(api):
     client, assistant, _, rid, _ = api
     assert client.get(f"/api/rounds/{rid}").json()["can_review"] is True
     assert assistant.get(f"/api/rounds/{rid}").json()["can_review"] is False
+
+
+def test_assistant_cannot_delete_confirmed_request(api):
+    # 子專案甲 M1：律師確認過的請求項目，助理不能刪（確認是律師的責任）
+    client, assistant, _, rid, _ = api
+    item = _items(client, rid)[0]
+    assert client.post(f"/api/claims/{item['id']}/confirm").status_code == 200
+    r = assistant.delete(f"/api/claims/{item['id']}")
+    assert r.status_code == 403 and r.json()["detail"] == "已確認的請求項目只能由律師刪除"
+    assert client.delete(f"/api/claims/{item['id']}").status_code == 200

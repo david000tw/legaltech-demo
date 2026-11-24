@@ -194,11 +194,21 @@ def test_copy_other_firm_404(lawyer_client, db):
     assert b.post(f"/api/rounds/{rid}/copy").status_code == 404
 
 
-def test_copy_with_deleted_filer(db, firm):
-    rid = _drafted(firm, db)
+def test_copy_with_deleted_filer(lawyer_client, db):
+    # 子專案甲 M7：遞狀人從當事人清單刪掉後，原輪與複製出的新輪的遞狀人都是空白（外鍵 SET NULL）
+    client, firm, _ = lawyer_client
+    case_id, rid = round_with_evidence(firm)
+    _drafted(firm, db, rid)
+    r = client.put(f"/api/cases/{case_id}/parties", json=[{"name": "陳志豪", "role": "被告", "alignment": "opposing"}])
+    assert r.status_code == 200, r.text
     with tenant_session(firm) as s:
         doc = s.scalars(select(Document).where(Document.round_id == rid)).one()
-        assert doc.filed_by_party_id is None  # 遞狀人被刪掉後就是空白
+        doc.filed_by_party_id = r.json()[0]["id"]
+    with tenant_session(firm) as s:
+        assert s.scalars(select(Document).where(Document.round_id == rid)).one().filed_by_party_id is not None
+    assert client.put(f"/api/cases/{case_id}/parties", json=[]).status_code == 200
+    with tenant_session(firm) as s:
+        assert s.scalars(select(Document).where(Document.round_id == rid)).one().filed_by_party_id is None
     new = _copy(firm, rid)
     with tenant_session(firm) as s:
         assert s.scalars(select(Document).where(Document.round_id == new)).one().filed_by_party_id is None

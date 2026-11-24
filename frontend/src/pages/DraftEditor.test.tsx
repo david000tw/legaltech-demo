@@ -272,7 +272,7 @@ describe('DraftEditor procedure', () => {
     expect(order[0]).toBe(block)
     await userEvent.click(within(block).getByRole('button', { name: '標記已審' }))
     expect(api.reviewParagraph).toHaveBeenCalledWith('st1', 'sv1')
-    expect(screen.getByText('整份書狀：請填寫訴訟標的價額')).toBeInTheDocument()
+    expect(screen.getByText('整份書狀：請填寫訴訟標的金額或價額')).toBeInTheDocument()
     expect(screen.getByText('聲明：段落尚未審核')).toBeInTheDocument()
   })
 

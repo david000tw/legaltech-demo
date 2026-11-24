@@ -87,7 +87,7 @@ def get_draft(draft_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
                 # 書狀名稱依程序；程序警示在匯出前再提示一次，但不阻擋（設計 5.6）
                 "brief_title": export_brief_title(s, draft_id),
                 "brief_kind": rnd.brief_kind, "case_type": case.case_type,
-                "procedure_warning": procedure_warning(case.case_type, case.case_number),
+                "procedure_warning": procedure_warning(case.case_type, case.case_number, rnd.brief_kind),
                 # 聲明區塊（起訴狀、答辯狀）放在內文之前，不佔段落編號
                 "statement": paragraph_json(s, statement, 0) if statement is not None else None,
                 "statement_label": STATEMENT_LABEL.get(rnd.brief_kind),

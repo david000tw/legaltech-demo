@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Candidate, Citation, Claim, Document, Draft, Judgment, JudgmentPassage, Page, PageText, Paragraph,
+    Candidate, Citation, Claim, Document, Draft, Judgment, JudgmentPassage, Page, PageText, Paragraph, Round,
     StatuteArticle,
 )
 from app.ingest.service import current_page_text
@@ -304,9 +304,18 @@ def paragraph_citations(s: Session, paragraph_id: UUID) -> list[Citation]:
     return list(s.scalars(select(Citation).where(Citation.paragraph_id == paragraph_id).order_by(Citation.code)))
 
 
-def allowed_amounts(s: Session, p: Paragraph) -> set[int]:
-    """書狀裡可以直接寫的金額（設計 5.5）：起訴狀確認過的請求項目與加總、本案卷證、本輪對造書狀、本輪主張原文。"""
+def allowed_amounts(s: Session, p: Paragraph, cache: dict | None = None) -> set[int]:
+    """書狀裡可以直接寫的金額（設計 5.5）。cache 讓一次匯出檢查只查一次（以輪次 id 為鍵）。"""
     rnd = round_of(s, p)
+    if cache is None:
+        return _amount_sources(s, rnd)
+    if rnd.id not in cache:
+        cache[rnd.id] = _amount_sources(s, rnd)
+    return cache[rnd.id]
+
+
+def _amount_sources(s: Session, rnd: Round) -> set[int]:
+    """起訴狀確認過的請求項目與加總、本案卷證、本輪對造書狀、本輪主張原文裡的金額。"""
     out: set[int] = set()
     if rnd.brief_kind == "complaint":
         items = confirmed_requests(s, rnd.id)
@@ -326,18 +335,18 @@ def allowed_amounts(s: Session, p: Paragraph) -> set[int]:
     return out
 
 
-def amount_reasons(s: Session, p: Paragraph, text: str) -> list[str]:
+def amount_reasons(s: Session, p: Paragraph, text: str, cache: dict | None = None) -> list[str]:
     """段落裡（不含引用標記展開的引文）每個對不上的金額，律師按「已核對金額」前都擋下。"""
     if p.kind == "statement" and round_of(s, p).amounts_checked_by is not None:
         return []  # 律師已勾「金額已自行核對」，涵蓋聲明裡自己寫的金額
     found = list(dict.fromkeys(parse_amounts(MARKER_RE.sub("", text))))
     if not found:
         return []
-    allowed = allowed_amounts(s, p) | set(p.amounts_confirmed or [])
+    allowed = allowed_amounts(s, p, cache) | set(p.amounts_confirmed or [])
     return [f"amount_unverified:{n}" for n in found if n not in allowed]
 
 
-def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
+def verify_paragraph(s: Session, p: Paragraph, cache: dict | None = None) -> list[str]:
     """回傳段落層原因並寫入 p.verify_reasons；同時重新驗證每筆引用。"""
     cites = {c.code: c for c in paragraph_citations(s, p.id)}
     markers = MARKER_RE.findall(p.text or "")
@@ -371,7 +380,7 @@ def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
     opp = [op.text.text for op in opponent_pages(s, _round_id_for(s, p)) if op.text is not None]
     for head in scan_inline_quotes(p.heading, opp) + scan_inline_quotes(p.text, opp):
         reasons.append(f"inline_quote_unverified:{head}")
-    reasons.extend(amount_reasons(s, p, f"{p.heading or ''}\n{body}"))  # 標題也會印進書狀，金額一起核對
+    reasons.extend(amount_reasons(s, p, f"{p.heading or ''}\n{body}", cache))  # 標題也會印進書狀，金額一起核對
     if p.kind == "statement":
         reasons.extend(statement_reasons(s, p))
     for c in cites.values():
@@ -389,10 +398,10 @@ class Blocker:
     scope: str = "paragraph"  # paragraph＝內文段落；statement＝聲明區塊；draft＝整份草稿
 
 
-def paragraph_blockers(s: Session, p: Paragraph) -> list[str]:
+def paragraph_blockers(s: Session, p: Paragraph, cache: dict | None = None) -> list[str]:
     """重新驗證並回傳該段所有阻擋原因（含 unreviewed）。"""
     out: list[str] = []
-    reasons = verify_paragraph(s, p)
+    reasons = verify_paragraph(s, p, cache)
     if p.status != "reviewed":
         out.append("unreviewed")
     out.extend(reasons)
@@ -423,12 +432,13 @@ def body_paragraphs(s: Session, draft_id: UUID) -> list[Paragraph]:
 def export_blockers(s: Session, draft_id: UUID) -> list[Blocker]:
     """匯出前一律重新驗證，不信任先前存的結果。"""
     out: list[Blocker] = [Blocker(0, r, 0, "draft") for r in draft_reasons(s, draft_id)]
+    cache: dict = {}  # 可用金額同一輪只查一次
     statement = statement_of(s, draft_id)
     if statement is not None and (statement.text or "").strip():
-        out.extend(Blocker(0, r, 0, "statement") for r in paragraph_blockers(s, statement))
+        out.extend(Blocker(0, r, 0, "statement") for r in paragraph_blockers(s, statement, cache))
     paragraphs = body_paragraphs(s, draft_id)
     if not paragraphs:
         return out + [Blocker(0, "empty_draft", 0, "draft")]
     for n, p in enumerate(paragraphs, start=1):
-        out.extend(Blocker(p.seq, r, n) for r in paragraph_blockers(s, p))
+        out.extend(Blocker(p.seq, r, n) for r in paragraph_blockers(s, p, cache))
     return out

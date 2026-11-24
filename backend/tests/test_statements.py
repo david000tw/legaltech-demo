@@ -240,3 +240,19 @@ def test_draft_reports_kind_and_case_type(db):
     ctx, cs = make_brief(db, kind="answer", case_type="estate_partition", amounts=())
     body = cs["lawyer"].get(f"/api/drafts/{ctx['draft_id']}").json()
     assert body["brief_kind"] == "answer" and body["case_type"] == "estate_partition"
+
+
+def test_mixed_complaint_needs_claim_value(db):
+    # 子專案甲 M2：有非金錢請求時，訴訟標的價額只能由律師填（不能拿金錢加總充數）
+    ctx, cs = make_brief(db, amounts=(45000,), non_money=1)
+    assert Blocker(0, "claim_value_missing", 0, "draft") in _blockers(ctx)
+    assert cs["lawyer"].get(f"/api/drafts/{ctx['draft_id']}").json()["claim_value"] == {
+        "label": "訴訟標的價額", "value": None}
+
+
+def test_zero_amount_complaint_blocked_not_500(db):
+    # 子專案甲 M5：金錢請求加總為 0，視為沒有訴訟標的金額，匯出時擋下而不是當掉
+    ctx, cs = make_brief(db, amounts=(0,))
+    force_reviewed(ctx["firm"], ctx["draft_id"])
+    r = cs["lawyer"].post(f"/api/drafts/{ctx['draft_id']}/export")
+    assert r.status_code == 409 and any(b["reason"] == "claim_value_missing" for b in r.json()["blockers"])

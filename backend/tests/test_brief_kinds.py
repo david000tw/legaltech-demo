@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.case_types import (
     allowed_brief_kinds, answer_statement, auto_money_statement, brief_title, complaint_statement,
-    default_brief_kind,
+    default_brief_kind, procedure_warning,
 )
 from app.db import tenant_session
 from app.models import CaseParty, Round
@@ -205,3 +205,16 @@ def test_export_filename_uses_kind(db):
     r = cs["lawyer"].post(f"/api/drafts/{ctx['draft_id']}/export")
     assert r.status_code == 200, r.text
     assert quote("民事答辯狀.docx") in r.headers["content-disposition"]
+
+
+def test_money_case_non_money_line_is_generic():
+    # 子專案甲 M3：車禍、配偶權這類案型的非金錢請求，不套不動產移轉的句子，留空格讓律師寫
+    text = complaint_statement("traffic_tort", has_money=True, has_non_money=True, joint=False,
+                               provisional=True, auto_money=True, variant=None)
+    assert "被告應○○○。" in text and "不動產" not in text
+
+
+def test_procedure_warning_names_brief_kind():
+    # 子專案甲 M6：程序提醒寫的書狀名稱要跟本輪書狀種類一致
+    w = procedure_warning("spousal_rights", "113年度家訴字第5號", "complaint")
+    assert "家事起訴狀" in w and "準備書狀" not in w
