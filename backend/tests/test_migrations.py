@@ -428,3 +428,50 @@ def test_0013_job_step_and_status(db):
         assert steps == ["timeline"]
     finally:
         command.upgrade(cfg, "head")
+
+
+def _tables() -> set[str]:
+    eng = create_engine(TEST_ADMIN_DB)
+    try:
+        with eng.connect() as c:
+            return set(c.execute(text("select table_name from information_schema.tables "
+                                      "where table_schema='public'")).scalars())
+    finally:
+        eng.dispose()
+
+
+def test_0014_round_trip(db):
+    """計畫 2B：支持度檢查結果表。"""
+    from alembic import command
+    cfg = _cfg()
+    command.downgrade(cfg, "0013")
+    try:
+        assert "support_checks" not in _tables()
+    finally:
+        command.upgrade(cfg, "head")
+    assert {"fingerprint", "verdict", "status", "claim_token", "claimed_at", "release_reason",
+            "released_bar_number"} <= _cols("support_checks")
+
+
+def test_0014_review_action_and_downgrade_drops_releases(db):
+    """0014 之後可以寫 release_support；降版時先刪掉這些紀錄（舊 CHECK 表示不了）。"""
+    from alembic import command
+
+    from app.db import admin_session
+    from app.models import ReviewEvent
+    from tests.verify_helpers import make_paragraph, setup_verify_round
+    ctx = setup_verify_round()
+    pid = make_paragraph(ctx, "被告應賠償。", [])
+    with admin_session() as s:
+        s.add(ReviewEvent(firm_id=ctx["firm"], paragraph_id=pid, action="release_support", after_text="E1"))
+        s.add(ReviewEvent(firm_id=ctx["firm"], paragraph_id=pid, action="edit", after_text="x"))
+    cfg = _cfg()
+    command.downgrade(cfg, "0013")
+    try:
+        eng = create_engine(TEST_ADMIN_DB)
+        with eng.connect() as c:
+            actions = c.execute(text("select action from review_events")).scalars().all()
+        eng.dispose()
+        assert actions == ["edit"]
+    finally:
+        command.upgrade(cfg, "head")

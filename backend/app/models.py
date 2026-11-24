@@ -454,7 +454,7 @@ class ReviewEvent(Base):
     __tablename__ = "review_events"
     __table_args__ = (
         _enum("action", ("edit", "rewrite", "confirm_citation", "confirm_court_reasoning", "mark_reviewed", "revert",
-                         "confirm_amount"), "ck_review_action"),
+                         "confirm_amount", "release_support"), "ck_review_action"),
         _tfk("paragraph_id", "paragraphs", "CASCADE"),
         _tfk("member_id", "members"),
     )
@@ -670,6 +670,45 @@ class HealthReport(Base):
     items: Mapped[list] = _jsonb_list()
     undisputed: Mapped[list | None] = mapped_column(JSONB)  # 起訴狀沒有（起訴時尚無對造陳述）
     issues: Mapped[list] = _jsonb_list()
+
+
+SUPPORT_VERDICTS = ("supports", "partial", "not_supported", "party_claim_misuse")
+SUPPORT_STATUSES = ("pending", "done", "failed")
+
+
+class SupportCheck(Base):
+    """支持度檢查（設計 7）：以指紋保存結果與律師放行紀錄；引用列每次改段落都會重建，所以不掛在引用上。"""
+    __tablename__ = "support_checks"
+    __table_args__ = (
+        UniqueConstraint("case_id", "fingerprint", name="uq_support_check_fp"),
+        _enum("kind", ("evidence", "judgment", "statute"), "ck_support_kind"),
+        _enum("status", SUPPORT_STATUSES, "ck_support_status"),
+        _enum("verdict", SUPPORT_VERDICTS, "ck_support_verdict"),
+        _tfk("case_id", "cases", "CASCADE"),
+        _tfk("released_by", "members"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    firm_id: Mapped[uuid.UUID] = _firm()
+    case_id: Mapped[uuid.UUID] = _ref()
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(20))
+    label: Mapped[str] = mapped_column(Text)
+    quote: Mapped[str] = mapped_column(Text)
+    sentence: Mapped[str] = mapped_column(Text)  # 送給 AI 的句子
+    source: Mapped[str] = mapped_column(Text)  # 來源全文
+    status: Mapped[str] = mapped_column(String(10), default="pending", server_default="pending")
+    verdict: Mapped[str | None] = mapped_column(String(20))
+    explanation: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # 認領這列的背景工作
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 背景工作最後一次心跳
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    released_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    released_bar_number: Mapped[str | None] = mapped_column(String(50))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    release_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created()
 
 
 class WorkCalendarDay(Base):
