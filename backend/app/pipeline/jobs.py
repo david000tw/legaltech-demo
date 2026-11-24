@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
@@ -124,16 +124,23 @@ class JobContext:
             raise _Superseded()
         return job
 
-    def call(self, step: str, system: str, user: str, schema: dict, effort: str) -> AIResult:
+    def call(self, step: str, system: str, user: str, schema: dict, effort: str, images: Sequence[bytes] = (),
+             model: str | None = None, timeout_s: int = 600) -> AIResult:
         with tenant_session(self.firm_id) as s:  # 已被接手就不再花錢呼叫
             self._running(s)
         result = call_ai(self.provider, firm_id=self.firm_id, case_id=self.case_id, member_id=self.member_id,
-                         step=step, system=system, user=user, schema=schema, effort=effort)  # 用量在獨立交易記錄
+                         step=step, system=system, user=user, schema=schema, effort=effort, timeout_s=timeout_s,
+                         images=images, model=model)  # 用量在獨立交易記錄
         with tenant_session(self.firm_id) as s:
             job = s.get(AIJob, self.job_id)
             if job is not None and job.status == "running":
                 job.heartbeat_at = _now()
         return result
+
+    def beat(self) -> None:
+        """只更新心跳（例如等校對員時）；工作已被接手或已結束就丟 _Superseded。"""
+        with tenant_session(self.firm_id) as s:
+            self._running(s).heartbeat_at = _now()
 
     def write(self, fn: Callable[[Session], None]) -> None:
         with tenant_session(self.firm_id) as s:

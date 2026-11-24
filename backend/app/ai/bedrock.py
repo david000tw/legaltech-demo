@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from app.ai.provider import AIResult, ProviderNotEnabled
 from app.config import Settings
 
@@ -18,6 +20,6 @@ class BedrockProvider:
     def build(cls, settings: Settings) -> BedrockProvider:
         raise ProviderNotEnabled("Bedrock 尚未啟用")
 
-    def run(self, *, step: str, system: str, user: str, schema: dict, effort: str,
-            timeout_s: int = 600) -> AIResult:
+    def run(self, *, step: str, system: str, user: str, schema: dict, effort: str, timeout_s: int = 600,
+            images: Sequence[bytes] = (), model: str | None = None) -> AIResult:
         raise ProviderNotEnabled("Bedrock 尚未啟用")

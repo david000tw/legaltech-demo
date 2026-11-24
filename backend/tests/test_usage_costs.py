@@ -246,3 +246,17 @@ def test_usage_other_firm_isolated(db):
     body = c.get("/api/usage").json()
     assert body["rows"] == [] and body["filters"]["cases"] == []
     assert date.fromisoformat(body["rate"]["rate_set_on"])
+
+
+def test_call_ai_records_overridden_model_on_success_and_failure(db):
+    """計畫 2A：辨識每次指定 opus；成功與失敗的用量列都記實際指定的模型。"""
+    firm = create_firm("甲事務所")
+    ok = FakeProvider({"ocr": {"text": "收據"}})
+    r = call_ai(ok, firm_id=firm, case_id=None, member_id=None, step="ocr", system="s", user="u", schema={},
+                effort="low", images=[b"png"], model="opus")
+    assert r.model == "opus" and ok.calls[0]["images"] == [b"png"] and ok.calls[0]["model"] == "opus"
+    bad = FakeProvider({"ocr": AIError("timeout", "太久")})
+    with pytest.raises(AIError):
+        call_ai(bad, firm_id=firm, case_id=None, member_id=None, step="ocr", system="s", user="u", schema={},
+                effort="low", model="opus")
+    assert sorted((r.step, r.model, r.result) for r in _rows(firm)) == [("ocr", "opus", "failed"), ("ocr", "opus", "ok")]

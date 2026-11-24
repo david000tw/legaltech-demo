@@ -56,6 +56,14 @@ describe('UsagePage', () => {
     await waitFor(() => expect(api.getUsage).toHaveBeenLastCalledWith({ month: '2026-11', case_id: 'c1' }))
   })
 
+  it('labels OCR usage as 辨識', async () => {
+    vi.mocked(api.getUsage).mockResolvedValue({ ...SUMMARY, rows: [row({ step: 'ocr' })],
+      filters: { ...SUMMARY.filters, steps: ['ocr'] } })
+    renderAs('lawyer')
+    const table = await screen.findByRole('table', { name: '用量' })
+    expect(within(table).getByText('辨識')).toBeInTheDocument()
+  })
+
   it('firm admin edits a price and the exchange rate', async () => {
     vi.mocked(api.putPrice).mockResolvedValue({ ...PRICE, input_usd: 5 })
     renderAs('firm_admin')

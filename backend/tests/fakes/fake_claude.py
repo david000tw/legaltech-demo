@@ -23,12 +23,17 @@ def result(**kw) -> dict:
 def main() -> None:
     stdin = sys.stdin.buffer.read().decode("utf-8")
     argv = sys.argv[1:]
+    stream = "--input-format" in argv and argv[argv.index("--input-format") + 1] == "stream-json"
+    images = 0
+    if stream:
+        msg = json.loads(stdin.splitlines()[0])
+        images = sum(1 for c in msg["message"]["content"] if c.get("type") == "image")
     log = os.environ.get("FAKE_LOG")
     if log:
         sp = argv[argv.index("--system-prompt-file") + 1] if "--system-prompt-file" in argv else None
         entry = {
             "argv": argv, "cwd": os.getcwd(), "cwd_listing": os.listdir(os.getcwd()),
-            "env_keys": sorted(os.environ), "stdin": stdin,
+            "env_keys": sorted(os.environ), "stdin": stdin, "stdin_images": images,
             "system_prompt": Path(sp).read_text(encoding="utf-8") if sp and Path(sp).exists() else None,
         }
         with open(log, "a", encoding="utf-8") as f:
@@ -53,11 +58,19 @@ def main() -> None:
     elif mode == "cli_error":
         sys.stderr.buffer.write("error: unknown option '--safe-mode'\n".encode("utf-8"))
         raise SystemExit(1)
+    elif mode == "stream_result_only":  # stream-json 沒給 structured_output，只有 result 字串
+        out = json.dumps(result(result=json.dumps({"ok": True})), ensure_ascii=False)
     elif mode == "sleep":
         time.sleep(30)
         out = "{}"
     else:
         raise SystemExit(f"unknown FAKE_MODE {mode}")
+    if stream:  # 一行一個事件：先 system，再 result
+        try:
+            out = json.dumps(json.loads(out), ensure_ascii=False)
+        except ValueError:
+            pass
+        out = json.dumps({"type": "system"}) + "\n" + out + "\n"
     sys.stdout.buffer.write(out.encode("utf-8"))
 
 

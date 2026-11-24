@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     ai_provider: Literal["claude_code_local", "bedrock"] = "claude_code_local"
     claude_cmd: list[str] = ["claude"]
     ai_model: str = "opus"
+    ocr_model: str = "opus"  # 辨識固定用 Opus（比較測試：Sonnet 會偷改原文）
     bind_host: str = "127.0.0.1"
     port: int = 8000
     session_secret: str = "dev-only-secret-change-me"

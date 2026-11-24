@@ -210,3 +210,72 @@ def test_cli_error_keeps_stderr_and_does_not_retry(fake):
         fake("cli_error")
     assert e.value.kind == "other" and "unknown option" in e.value.message
     assert len(fake.calls()) == 1
+
+
+# ---- 計畫 2A Task 2：送圖片（stream-json）、每次指定模型、測試保護 ----
+PNG = b"\x89PNG\r\n\x1a\nfake-image-bytes"
+
+
+def _prov(model="opus"):
+    return ClaudeCodeLocalProvider([sys.executable, str(FAKE)], model)
+
+
+def _run(p, **kw):
+    return p.run(step="ocr", system="辨識指示", user="請抄錄這一頁。", schema=SCHEMA, effort="low", timeout_s=60, **kw)
+
+
+def test_build_stream_args_keeps_safety_flags():
+    from app.ai.claude_code import build_stream_args
+    args = build_stream_args(["claude"], model="opus", effort="low", system_prompt_path="p.md", schema=SCHEMA)
+    assert args[:2] == ["claude", "-p"]
+    assert args[args.index("--input-format") + 1] == "stream-json"
+    assert args[args.index("--output-format") + 1] == "stream-json"
+    for flag in ("--verbose", "--safe-mode", "--strict-mcp-config", "--no-session-persistence",
+                 "--disable-slash-commands"):
+        assert flag in args
+    assert args[args.index("--setting-sources") + 1] == ""
+    assert args[-2:] == ["--tools", ""]
+
+
+def test_claude_code_sends_images_via_stream_json(fake, monkeypatch):
+    monkeypatch.setenv("FAKE_MODE", "ok")
+    r = _run(_prov("sonnet"), images=[PNG], model="opus")
+    assert r.data == {"ok": True, "seen": False} and r.model == "opus"
+    call = fake.calls()[0]
+    assert call["stdin_images"] == 1
+    argv = call["argv"]
+    assert argv[argv.index("--model") + 1] == "opus"
+    assert argv[argv.index("--input-format") + 1] == "stream-json"
+    line = json.loads(call["stdin"])
+    content = line["message"]["content"]
+    assert content[0]["source"]["media_type"] == "image/png" and content[-1] == {"type": "text", "text": "請抄錄這一頁。"}
+
+
+def test_stream_result_without_structured_output(fake, monkeypatch):
+    monkeypatch.setenv("FAKE_MODE", "stream_result_only")
+    r = _run(_prov(), images=[PNG])
+    assert r.data == {"ok": True}
+
+
+def test_claude_code_text_only_path_unchanged(fake, monkeypatch):
+    monkeypatch.setenv("FAKE_MODE", "ok")
+    _run(_prov())
+    argv = fake.calls()[0]["argv"]
+    assert argv[argv.index("--output-format") + 1] == "json" and "--input-format" not in argv
+    assert fake.calls()[0]["stdin"] == "請抄錄這一頁。"
+
+
+def test_model_override(fake, monkeypatch):
+    monkeypatch.setenv("FAKE_MODE", "ok")
+    r = _run(_prov("sonnet"), model="opus")
+    argv = fake.calls()[0]["argv"]
+    assert argv[argv.index("--model") + 1] == "opus" and r.model == "opus"
+    r = _run(_prov("sonnet"))
+    assert r.model == "sonnet"
+
+
+def test_guard_blocks_real_claude():
+    with pytest.raises(pytest.fail.Exception, match="測試不能呼叫真的 Claude Code"):
+        ClaudeCodeLocalProvider(["claude"], "opus").run(step="t", system="s", user="u", schema=SCHEMA, effort="low")
+    with pytest.raises(pytest.fail.Exception, match="測試不能呼叫真的 Claude Code"):
+        _run(ClaudeCodeLocalProvider([r"C:\tools\claude.exe"], "opus"), images=[PNG])

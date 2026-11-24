@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID
 
 from app.ai.provider import AIError, AIProvider, AIResult, Usage
@@ -25,16 +26,18 @@ def _row(firm_id: UUID, case_id: UUID | None, member_id: UUID | None, step: str,
 
 
 def call_ai(provider: AIProvider, *, firm_id: UUID, case_id: UUID | None, member_id: UUID | None, step: str,
-            system: str, user: str, schema: dict, effort: str, timeout_s: int = 600) -> AIResult:
+            system: str, user: str, schema: dict, effort: str, timeout_s: int = 600,
+            images: Sequence[bytes] = (), model: str | None = None) -> AIResult:
     def record(rows: list[tuple[str, str, Usage, str]]) -> None:
         with tenant_session(firm_id) as s:
             s.add_all(_row(firm_id, case_id, member_id, step, name, model, u, res) for name, model, u, res in rows)
 
     try:
-        result = provider.run(step=step, system=system, user=user, schema=schema, effort=effort, timeout_s=timeout_s)
+        result = provider.run(step=step, system=system, user=user, schema=schema, effort=effort, timeout_s=timeout_s,
+                              images=images, model=model)
     except AIError as e:
-        name, model = getattr(provider, "name", "unknown"), getattr(provider, "model", "unknown")
-        record([(name, model, u, "failed") for u in (e.attempts or (ZERO,))])
+        name, used = getattr(provider, "name", "unknown"), model or getattr(provider, "model", "unknown")
+        record([(name, used, u, "failed") for u in (e.attempts or (ZERO,))])
         raise
     record([(result.provider, result.model, u, "failed") for u in result.retried]
            + [(result.provider, result.model, result.usage, "ok")])

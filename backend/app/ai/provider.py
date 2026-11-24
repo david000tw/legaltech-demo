@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -57,8 +58,10 @@ class ProviderNotEnabled(Exception):
 
 
 class AIProvider(Protocol):
-    def run(self, *, step: str, system: str, user: str, schema: dict, effort: str,
-            timeout_s: int = 600) -> AIResult: ...
+    def run(self, *, step: str, system: str, user: str, schema: dict, effort: str, timeout_s: int = 600,
+            images: Sequence[bytes] = (), model: str | None = None) -> AIResult:
+        """images：PNG bytes（辨識用）；model：這次要用的模型，None＝建立時的模型。"""
+        ...
 
 
 def check_startup(settings: Settings) -> None:

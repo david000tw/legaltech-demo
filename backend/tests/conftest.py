@@ -29,6 +29,42 @@ def make_settings(tmp_path: Path, **overrides) -> Settings:
     return Settings(**values)
 
 
+_REAL_CLAUDE = {"claude", "claude.exe", "claude.cmd"}
+
+
+def _argv0(args) -> str:
+    first = args if isinstance(args, (str, bytes, os.PathLike)) else (list(args) or [""])[0]
+    return Path(os.fsdecode(first)).name.lower()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_claude(request, monkeypatch):
+    """一般測試不能呼叫真的 Claude Code（會用掉訂閱額度）；標 real_ai 的測試不套用。"""
+    if request.node.get_closest_marker("real_ai"):
+        return
+    import subprocess
+
+    import app.ai.claude_code as cc
+
+    def check(args):
+        if _argv0(args) in _REAL_CLAUDE:
+            pytest.fail("測試不能呼叫真的 Claude Code")
+
+    real_run, real_popen = cc.subprocess.run, subprocess.Popen
+
+    def guarded_run(args, *a, **kw):
+        check(args)
+        return real_run(args, *a, **kw)
+
+    class GuardedPopen(real_popen):
+        def __init__(self, args, *a, **kw):
+            check(args)
+            super().__init__(args, *a, **kw)
+
+    monkeypatch.setattr(cc.subprocess, "run", guarded_run)
+    monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
+
+
 @pytest.fixture
 def test_settings(tmp_path) -> Settings:
     return make_settings(tmp_path)

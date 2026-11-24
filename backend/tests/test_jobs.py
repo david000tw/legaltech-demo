@@ -176,3 +176,21 @@ def test_job_endpoints_other_firm_404(lawyer_client, db):
     case_id, _ = make_round(other, evidence={"01_收據.txt": RECEIPT})
     assert client.post(f"/api/cases/{case_id}/evidence-notes").status_code == 404
     assert client.get(f"/api/cases/{case_id}/evidence-notes").status_code == 404
+
+
+def test_job_context_beat_and_timeout_passthrough(case):
+    """計畫 2A：等校對員時只更新心跳；工作已結束就丟 _Superseded；逾時、圖片、模型照傳給 provider。"""
+    firm, case_id = case
+    job_id = _start(firm, case_id)
+    _age(firm, job_id, 5)
+    before = _job(firm, job_id).heartbeat_at
+    fake = FakeProvider({STEP: {"notes": []}})
+    ctx = jobs.JobContext(firm, job_id, case_id, None, fake)
+    ctx.beat()
+    assert _job(firm, job_id).heartbeat_at > before
+    ctx.call(STEP, "s", "u", {}, "low", images=[b"png"], model="opus", timeout_s=120)
+    assert (fake.calls[0]["timeout_s"], fake.calls[0]["images"], fake.calls[0]["model"]) == (120, [b"png"], "opus")
+    with tenant_session(firm) as s:
+        s.get(AIJob, job_id).status = "failed"
+    with pytest.raises(jobs._Superseded):
+        ctx.beat()
