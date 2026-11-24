@@ -195,6 +195,8 @@ class Document(Base):
     sha256: Mapped[str] = mapped_column(String(64))
     page_count: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = _created()
+    # 這份卷證最後一次送 AI 產生說明時的原文指紋；與目前指紋不同＝要重新處理（設計 5.6）
+    notes_fingerprint: Mapped[str | None] = mapped_column(String(64))
 
 
 class Page(Base):
@@ -464,6 +466,107 @@ class ExportRecord(Base):
     bar_number: Mapped[str | None] = mapped_column(String(50))
     sha256: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = _created()
+
+
+AI_JOB_STEPS = ("evidence_notes", "timeline", "health")
+
+
+def _jsonb_list() -> Mapped[list]:
+    return mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+
+
+class AIJob(Base):
+    """按鈕觸發的 AI 工作（卷證說明、大事記、健檢）：前端輪詢狀態；心跳逾時可重新開始。"""
+    __tablename__ = "ai_jobs"
+    __table_args__ = (
+        _enum("step", AI_JOB_STEPS, "ck_ai_job_step"),
+        _enum("status", ("running", "done", "failed"), "ck_ai_job_status"),
+        _tfk("case_id", "cases", "CASCADE"),
+        _tfk("round_id", "rounds", "CASCADE"),
+        _tfk("member_id", "members"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    firm_id: Mapped[uuid.UUID] = _firm()
+    case_id: Mapped[uuid.UUID] = _ref()
+    round_id: Mapped[uuid.UUID | None] = _ref(nullable=True)  # 健檢才有輪次
+    step: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(10), default="running")
+    member_id: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    started_at: Mapped[datetime] = _created()
+    heartbeat_at: Mapped[datetime] = _created()
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class EvidenceNote(Base):
+    """卷證說明（設計 5.6）：每份我方卷證的證明方向與注意事項，每句帶原文出處。"""
+    __tablename__ = "evidence_notes"
+    __table_args__ = (
+        _enum("kind", ("proves", "caution"), "ck_evidence_note_kind"),
+        _enum("status", ("found", "not_found", "absence"), "ck_evidence_note_status"),
+        _enum("origin", ("ai", "lawyer"), "ck_evidence_note_origin"),
+        _tfk("case_id", "cases", "CASCADE"),
+        _tfk("document_id", "documents", "CASCADE"),
+        _tfk("page_id", "pages", "SET NULL (page_id)"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    firm_id: Mapped[uuid.UUID] = _firm()
+    case_id: Mapped[uuid.UUID] = _ref()
+    document_id: Mapped[uuid.UUID] = _ref()
+    kind: Mapped[str] = mapped_column(String(10))
+    seq: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    page_id: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    quote: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(10))
+    reasons: Mapped[list] = _jsonb_list()
+    origin: Mapped[str] = mapped_column(String(10), default="ai")
+    created_at: Mapped[datetime] = _created()
+
+
+class TimelineEvent(Base):
+    """大事記（設計 5.7）：日期、事件、金額、出處；對造書狀來的標「對造主張」。"""
+    __tablename__ = "timeline_events"
+    __table_args__ = (
+        _enum("date_precision", ("day", "month"), "ck_timeline_date_precision"),
+        _enum("source_kind", ("evidence", "opponent"), "ck_timeline_source_kind"),
+        _enum("origin", ("ai", "lawyer"), "ck_timeline_origin"),
+        _enum("status", ("found", "not_found", "unchecked"), "ck_timeline_status"),
+        _tfk("case_id", "cases", "CASCADE"),
+        _tfk("page_id", "pages", "SET NULL (page_id)"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    firm_id: Mapped[uuid.UUID] = _firm()
+    case_id: Mapped[uuid.UUID] = _ref()
+    seq: Mapped[int] = mapped_column(Integer)  # 同一天的事件依這個排（同一筆交易寫入的建立時間相同）
+    event_date: Mapped[date | None] = mapped_column(Date)
+    date_precision: Mapped[str | None] = mapped_column(String(10))
+    description: Mapped[str] = mapped_column(Text)
+    amount: Mapped[int | None] = mapped_column(BigInteger)
+    page_id: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    quote: Mapped[str] = mapped_column(Text, default="")
+    source_kind: Mapped[str | None] = mapped_column(String(10))
+    origin: Mapped[str] = mapped_column(String(10), default="ai")
+    status: Mapped[str] = mapped_column(String(10))
+    reasons: Mapped[list] = _jsonb_list()
+    created_at: Mapped[datetime] = _created()
+
+
+class HealthReport(Base):
+    """書狀健檢與爭點整理表（設計 5.8）：每輪最新一份。出處只存頁面 id 與摘錄，標籤讀取時才算。"""
+    __tablename__ = "health_reports"
+    __table_args__ = (
+        UniqueConstraint("round_id", name="uq_health_report_round"),
+        _tfk("round_id", "rounds", "CASCADE"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    firm_id: Mapped[uuid.UUID] = _firm()
+    round_id: Mapped[uuid.UUID] = _ref()
+    created_at: Mapped[datetime] = _created()
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    items: Mapped[list] = _jsonb_list()
+    undisputed: Mapped[list | None] = mapped_column(JSONB)  # 起訴狀沒有（起訴時尚無對造陳述）
+    issues: Mapped[list] = _jsonb_list()
 
 
 PUBLIC_TABLES = ("judgments", "judgment_passages", "statutes", "statute_articles")

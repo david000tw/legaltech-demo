@@ -85,6 +85,33 @@ def _cfg():
     return cfg
 
 
+def test_0006_round_trip(db):
+    """子專案乙：AI 工作、卷證說明、大事記、健檢四張表可以降級再升級（RLS 由 test_rls 的通用檢查涵蓋）。"""
+    from alembic import command
+    cfg = _cfg()
+    new = {"ai_jobs", "evidence_notes", "timeline_events", "health_reports"}
+
+    def schema():
+        eng = create_engine(TEST_ADMIN_DB)
+        try:
+            with eng.connect() as c:
+                tables = set(c.execute(text("select tablename from pg_tables where schemaname='public'")).scalars())
+                cols = set(c.execute(text("select column_name from information_schema.columns "
+                                          "where table_name='documents'")).scalars())
+                return tables, cols
+        finally:
+            eng.dispose()
+
+    command.downgrade(cfg, "0005")
+    try:
+        tables, cols = schema()
+        assert not new & tables and "notes_fingerprint" not in cols
+    finally:
+        command.upgrade(cfg, "head")
+    tables, cols = schema()
+    assert new <= tables and "notes_fingerprint" in cols
+
+
 def test_0005_keeps_old_rounds_usable(db):
     """子專案甲：升級後舊輪次照常可用；執行中、失敗的輪次都能重新拆解；降級可回復（新狀態對回舊狀態）。"""
     from alembic import command
