@@ -90,6 +90,11 @@ describe('SupportBadge', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 
+  it('shows the release date in Taiwan time', () => {
+    show(done('not_supported', { blocking: false, released: { ...released, at: '2026-11-24T17:36:00+00:00' } }))
+    expect(screen.getByText('已放行：lawyer（(110)北律字第0001號）2026-11-25：原文第二段另有說明')).toBeInTheDocument()
+  })
+
   it('a released unchecked citation says it was not checked by AI', () => {
     show({ status: 'failed', verdict: null, explanation: null, error: 'usage_limit: 額度用完', blocking: false,
       released: { ...released, reason: 'AI 無法使用' } })

@@ -12,9 +12,12 @@ function Tag({ tone, children }: { tone: keyof typeof TONE; children: string }) 
   return <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${TONE[tone]}`}>{children}</span>
 }
 
+// 放行日期以台灣時間顯示（後端存 UTC；台灣凌晨放行時 UTC 還是前一天）
+const TAIPEI_DATE = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' })
+
 function releasedText(s: api.SupportView): string {
   const r = s.released!
-  const who = `${r.name ?? ''}（${r.bar_number ?? ''}）${r.at.slice(0, 10)}`
+  const who = `${r.name ?? ''}（${r.bar_number ?? ''}）${TAIPEI_DATE.format(new Date(r.at))}`
   const head = s.status === 'failed' ? '已放行（未經 AI 檢查）' : '已放行'
   return `${head}：${who}${r.reason ? `：${r.reason}` : ''}`
 }
