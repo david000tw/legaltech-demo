@@ -11,7 +11,8 @@ vi.mock('../api', async (orig) => {
   return { ...real, getCase: vi.fn(), getRound: vi.fn(), createRound: vi.fn(), extractRound: vi.fn(), draftRound: vi.fn(),
     resetRound: vi.fn(), patchClaim: vi.fn(), copyRound: vi.fn(), patchRound: vi.fn(), confirmClaim: vi.fn(),
     addRequest: vi.fn(), deleteClaim: vi.fn(), uploadDocument: vi.fn(),
-    renumberExhibit: vi.fn(), getCaseOptions: vi.fn(), patchCase: vi.fn(), putParties: vi.fn(), setDocumentFiler: vi.fn() }
+    renumberExhibit: vi.fn(), getCaseOptions: vi.fn(), patchCase: vi.fn(), putParties: vi.fn(), setDocumentFiler: vi.fn(),
+    getEvidenceNotes: vi.fn(), getTimeline: vi.fn() }
 })
 
 const emptyHeader: api.CaseHeader = { court: null, case_number: null, division: null, cause: null, addressee: null,
@@ -48,9 +49,23 @@ function renderAt(state?: unknown) {
 beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(api.getCaseOptions).mockResolvedValue(OPTIONS)
+  vi.mocked(api.getEvidenceNotes).mockResolvedValue({ documents: [], job: null })
+  vi.mocked(api.getTimeline).mockResolvedValue({ events: [], pending_ocr: [], job: null })
 })
 
 describe('CaseDetail', () => {
+  it('shows the evidence notes and timeline sections after the exhibits', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
+    renderAt()
+    expect(await screen.findByRole('button', { name: '產生卷證說明' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '整理大事記' })).toBeInTheDocument()
+    const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+    expect(headings.indexOf('卷證說明')).toBe(headings.indexOf('卷證') + 1)
+    expect(headings.indexOf('大事記')).toBe(headings.indexOf('卷證') + 2)
+    expect(api.getEvidenceNotes).toHaveBeenCalledWith('c1')
+    expect(api.getTimeline).toHaveBeenCalledWith('c1')
+  })
+
 
   it('lists exhibits with numbers and marks scanned pages as 待辨識', async () => {
     vi.mocked(api.getCase).mockResolvedValue(baseCase)

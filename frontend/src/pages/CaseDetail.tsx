@@ -4,11 +4,13 @@ import * as api from '../api'
 import {
   attorneyProblem, headerDraftFrom, headerInput, toDrafts, toInputs, type HeaderDraft, type PartyDraft,
 } from '../caseForms'
+import { POLL_MS } from '../aiJobs'
 import CaseHeaderFields from '../components/CaseHeaderFields'
+import EvidenceNotesSection from '../components/EvidenceNotesSection'
 import PartiesEditor from '../components/PartiesEditor'
 import RequestItemsEditor from '../components/RequestItemsEditor'
+import TimelineSection from '../components/TimelineSection'
 
-const POLL_MS = 3000
 const STATUS_LABEL: Record<api.RoundStatus, string> = {
   created: '尚未執行', extracting: '拆解中…', extracted: '待確認', drafting: '起草中…', drafted: '草稿完成', failed: '執行失敗',
 }
@@ -555,6 +557,10 @@ export default function CaseDetail() {
           <input ref={evidenceRef} type="file" accept=".pdf,.docx,.txt" className="ml-2" onChange={uploadEvidence} />
         </label>
       </section>
+
+      {/* 卷證說明與大事記（設計 5.6、5.7）：只給律師參考，不進書狀 */}
+      <EvidenceNotesSection key={`notes-${data.exhibits.length}`} caseId={caseId} />
+      <TimelineSection key={`timeline-${data.documents.length}`} caseId={caseId} />
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">

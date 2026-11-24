@@ -52,7 +52,26 @@ export type CaseDetail = CaseSummary & { header: CaseHeader; parties: Party[]; p
   addressee_default: string; procedure_warning: string | null; reference_date_label: string
   documents: CaseDocument[]; exhibits: Exhibit[]; rounds: RoundSummary[]
   // 建立輪次時可選的書狀種類（原告不能寫答辯狀，被告不能寫起訴狀）
-  brief_kind_options?: { code: BriefKind; label: string }[]; default_brief_kind?: BriefKind }
+  brief_kind_options?: { code: BriefKind; label: string }[]; default_brief_kind?: BriefKind
+  // 卷證說明、大事記的 AI 工作狀態（沒執行過是 null）
+  jobs?: { evidence_notes: JobView | null; timeline: JobView | null } }
+// 新步驟（卷證說明、大事記、健檢）的原文出處（設計 5.1）：label 讀取時才算（證物可以改號）
+// status：found＝摘錄在那一頁；not_found＝沒過（reasons 說明哪一項）；absence＝缺漏類；unchecked＝律師填的，不比對
+export type SourceView = { page_id: string | null; label: string | null; quote: string
+  status: 'found' | 'not_found' | 'absence' | 'unchecked'; reasons: string[] }
+// 按鈕觸發的 AI 工作；stale＝心跳逾時，可以重新執行
+export type JobView = { id: string; status: 'running' | 'done' | 'failed'; error: string | null; started_at: string
+  stale: boolean }
+export type EvidenceNoteView = { id: string; kind: 'proves' | 'caution'; text: string; origin: 'ai' | 'lawyer'
+  source: SourceView }
+// needs_notes＝從沒產生過或原文變了；pending_ocr＝掃描頁（待辨識，未送 AI）
+export type EvidenceDocView = { document_id: string; exhibit: string; filename: string; needs_notes: boolean
+  pending_ocr: string[]; notes: EvidenceNoteView[] }
+// date：2025-03-09 或只到月 2025-03；date_label：民國年；source_kind＝opponent 的事件標「對造主張」
+export type TimelineEventView = { id: string; date: string | null; date_label: string | null; description: string
+  amount: number | null; source_kind: 'evidence' | 'opponent' | null; origin: 'ai' | 'lawyer'; source: SourceView | null }
+export type TimelineEventInput = { date?: string | null; description?: string; amount?: number | null
+  page_id?: string | null; quote?: string }
 // 建立／修改案件：狀頭欄位傳 null 代表清空；attorneys 建立時不傳＝預設帶入建立者（律師）
 export type CaseInput = Partial<Omit<CaseHeader, 'attorneys'>> & { title: string; our_side: 'plaintiff' | 'defendant'
   case_type: string; attorneys?: string[] }
@@ -197,3 +216,26 @@ export async function exportDraft(draftId: string): Promise<Blob> {
   if (!r.ok) throw await apiError(r)
   return r.blob()
 }
+
+// 卷證說明（設計 5.6）：按鈕觸發的 AI 工作，結果存起來；律師與助理都可以修改、刪除
+export const generateEvidenceNotes = (caseId: string) =>
+  req<{ job: JobView }>(`/cases/${caseId}/evidence-notes`, json('POST'))
+export const getEvidenceNotes = (caseId: string) =>
+  req<{ documents: EvidenceDocView[]; job: JobView | null }>(`/cases/${caseId}/evidence-notes`)
+export const patchEvidenceNote = (id: string, text: string) =>
+  req<EvidenceNoteView>(`/evidence-notes/${id}`, json('PATCH', { text }))
+export const deleteEvidenceNote = (id: string) =>
+  req<{ id: string; deleted: boolean }>(`/evidence-notes/${id}`, { method: 'DELETE' })
+// 大事記（設計 5.7）：重新整理只取代 AI 的事件，律師新增或修改的保留
+export const generateTimeline = (caseId: string) => req<{ job: JobView }>(`/cases/${caseId}/timeline`, json('POST'))
+export const getTimeline = (caseId: string) =>
+  req<{ events: TimelineEventView[]; pending_ocr: string[]; job: JobView | null }>(`/cases/${caseId}/timeline`)
+export const addTimelineEvent = (caseId: string, body: TimelineEventInput) =>
+  req<TimelineEventView>(`/cases/${caseId}/timeline/events`, json('POST', body))
+export const patchTimelineEvent = (id: string, body: TimelineEventInput) =>
+  req<TimelineEventView>(`/timeline-events/${id}`, json('PATCH', body))
+export const deleteTimelineEvent = (id: string) =>
+  req<{ id: string; deleted: boolean }>(`/timeline-events/${id}`, { method: 'DELETE' })
+// 看原文：卷證說明、大事記、健檢的出處（形狀與引用的原文對照相同）
+export const getPageSource = (pageId: string, quote: string) =>
+  req<CitationSource>(`/pages/${pageId}/source?quote=${encodeURIComponent(quote)}`)
