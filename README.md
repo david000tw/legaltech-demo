@@ -11,6 +11,14 @@
 
 ## 啟動（PowerShell）
 
+一鍵啟動（第一次使用前仍要先 `uv sync`、`pnpm install`）：
+
+```powershell
+.\dev.ps1    # 資料庫 → 更新資料表 → 後端、前端各開一個視窗 → 開瀏覽器；已在跑的會略過
+```
+
+手動逐步啟動：
+
 ```powershell
 $env:PYTHONUTF8=1            # 本機 Python 預設 cp950，一律改用 UTF-8
 docker compose up -d --wait db   # 資料庫只綁 127.0.0.1:55432
