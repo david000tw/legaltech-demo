@@ -29,6 +29,12 @@ def new_case(client, our_side="plaintiff") -> str:
     return r.json()["id"]
 
 
+def use_fake_ocr(client, text: str = "辨識文字") -> None:
+    """計畫 2A 起，上傳掃描頁或照片會自動辨識：測試一律用假的 AI。"""
+    from tests.fakes.fake_provider import FakeProvider
+    client.app.state.provider_factory = lambda settings, firm: FakeProvider({"ocr": {"text": text}})
+
+
 def upload(client, case_id, filename, data, kind="evidence", round_id=None):
     form = {"kind": kind}
     if round_id:
@@ -46,6 +52,7 @@ def test_pdf_text_layer_pages():
 
 def test_blank_pdf_marks_needs_ocr(lawyer_client):
     client, firm_id, _ = lawyer_client
+    use_fake_ocr(client)
     case_id = new_case(client)
     r = upload(client, case_id, "掃描檔.pdf", blank_pdf(2))
     assert r.status_code == 200, r.text
@@ -53,12 +60,15 @@ def test_blank_pdf_marks_needs_ocr(lawyer_client):
     with tenant_session(firm_id) as s:
         pages = s.scalars(select(Page).where(Page.document_id == doc_id)).all()
         assert len(pages) == 2 and all(p.needs_ocr for p in pages)
-        assert s.scalars(select(PageText).where(PageText.page_id.in_([p.id for p in pages]))).all() == []
-        assert current_page_text(s, pages[0].id) is None
+        # 沒有文字層版本；計畫 2A 起上傳後自動辨識，文字都來自辨識
+        sources = s.scalars(select(PageText.source).where(PageText.page_id.in_([p.id for p in pages]))).all()
+        assert sources == ["ai_ocr", "ai_ocr"]
+        assert current_page_text(s, pages[0].id).needs_image_check is True
 
 
 def test_chinese_filename_not_in_storage_key(lawyer_client):
     client, firm_id, _ = lawyer_client
+    use_fake_ocr(client)
     case_id = new_case(client)
     name = "原證1_診斷證明書（林口長庚）.pdf"
     r = upload(client, case_id, name, blank_pdf())
@@ -231,11 +241,13 @@ def test_ingest_sets_ocr_state(lawyer_client):
     d.add_paragraph("診斷：右腕骨折。")
     buf = io.BytesIO()
     d.save(buf)
-    ids = [upload(client, case_id, name, data).json()["id"] for name, data in (
-        ("掃描檔.pdf", blank_pdf(1)),
-        ("判決.pdf", (FIXTURES / "tcev_113_3946.pdf").read_bytes()),
-        ("診斷.docx", buf.getvalue()),
-    )]
+    from app.ingest.service import ingest_document
+    with tenant_session(firm_id) as s:  # 直接建頁（不經上傳 API，所以不會自動辨識）
+        ids = [ingest_document(s, firm_id, case_id, "evidence", name, data).id for name, data in (
+            ("掃描檔.pdf", blank_pdf(1)),
+            ("判決.pdf", (FIXTURES / "tcev_113_3946.pdf").read_bytes()),
+            ("診斷.docx", buf.getvalue()),
+        )]
     with tenant_session(firm_id) as s:
         states = [{p.ocr_state for p in s.scalars(select(Page).where(Page.document_id == i))} for i in ids]
     assert states == [{"pending"}, {"none"}, {"none"}]

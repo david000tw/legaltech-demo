@@ -4,7 +4,7 @@ from pathlib import PurePath
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 from sqlalchemy import func, select
 
@@ -18,12 +18,14 @@ from app.db import tenant_session
 from app.ingest.extract import UnreadableFile, UnsupportedFile, file_ext
 from app.ingest.service import current_page_text, ingest_document
 from app.models import Case, CaseParty, Document, Exhibit, Member, Page, Round
+from app.ocr.job import current_texts, document_ocr_json, page_ocr_fields, pending_without_job
 from app.ocr.images import (
     HEIC_EXTS, HEIC_MESSAGE, IMAGE_EXTS, MAX_PHOTOS, MIXED_MESSAGE, TOO_MANY_PHOTOS, looks_scanned_with_text,
     photos_to_pdf,
 )
 from app.pipeline.jobs import job_json, latest_job
 from app.storage import LocalStorage
+from app.api.routes_ocr import ocr_upload_summary, schedule
 
 router = APIRouter(prefix="/api")
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -191,9 +193,12 @@ def get_case(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
         pages = s.scalars(select(Page).where(Page.document_id.in_([d.id for d in docs]))
                           .order_by(Page.page_no)).all()
         by_doc: dict[UUID, list[dict]] = {}
+        page_rows: dict[UUID, list[Page]] = {}
+        cur = current_texts(s, [p.id for p in pages])
         for p in pages:
+            page_rows.setdefault(p.document_id, []).append(p)
             by_doc.setdefault(p.document_id, []).append(
-                {"id": str(p.id), "page_no": p.page_no, "needs_ocr": p.needs_ocr})
+                {"id": str(p.id), "page_no": p.page_no, "needs_ocr": p.needs_ocr, **page_ocr_fields(p, cur.get(p.id))})
         exhibits = s.scalars(select(Exhibit).where(Exhibit.case_id == case_id)
                              .order_by(Exhibit.prefix, Exhibit.number)).all()
         names = {d.id: d.filename for d in docs}
@@ -212,7 +217,10 @@ def get_case(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
             "documents": [{"id": str(d.id), "kind": d.kind, "filename": d.filename,
                            "round_id": str(d.round_id) if d.round_id else None,
                            "filed_by_party_id": str(d.filed_by_party_id) if d.filed_by_party_id else None,
-                           "page_count": d.page_count, "pages": by_doc.get(d.id, [])} for d in docs],
+                           "page_count": d.page_count, "pages": by_doc.get(d.id, []),
+                           "ocr": document_ocr_json(s, d, page_rows.get(d.id, []))} for d in docs],
+            # 沒有進行中工作的待辨識頁數（「開始辨識（N 頁）」）
+            "pending_ocr_pages": sum(pending_without_job(s, case_id).values()),
             "exhibits": [{"id": str(e.id), "label": f"{e.prefix}{e.number}", "prefix": e.prefix,
                           "number": e.number, "document_id": str(e.document_id),
                           "filename": names.get(e.document_id)} for e in exhibits],
@@ -317,7 +325,8 @@ def _prepare_upload(uploads: list[UploadFile]) -> _Prepared:
 
 
 @router.post("/cases/{case_id}/documents")
-def upload_document(case_id: UUID, request: Request, file: UploadFile | None = File(None),
+def upload_document(case_id: UUID, request: Request, background: BackgroundTasks,
+                    file: UploadFile | None = File(None),
                     files: list[UploadFile] | None = File(None),
                     kind: Literal["evidence", "opponent_brief"] = Form(...),
                     round_id: UUID | None = Form(None),
@@ -347,7 +356,10 @@ def upload_document(case_id: UUID, request: Request, file: UploadFile | None = F
         if prep.photos:
             doc.source_images = [{"key": storage.put(m.firm_id, case_id, file_ext(name), data), "filename": name}
                                  for name, data in prep.photos]
-        return {"id": str(doc.id), "page_count": doc.page_count, "ocr": None}
+        job, ocr = ocr_upload_summary(s, doc.id, m.id)  # 掃描頁、照片自動排入辨識
+        out = {"id": str(doc.id), "page_count": doc.page_count, "ocr": ocr}
+    schedule(request, background, m.firm_id, [job])
+    return out
 
 
 @router.get("/pages/{page_id}")

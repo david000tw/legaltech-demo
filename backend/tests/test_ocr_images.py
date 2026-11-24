@@ -14,7 +14,7 @@ from app.ocr.images import looks_scanned_with_text, photos_to_pdf, render_pdf_pa
 from app.storage import LocalStorage
 from tests.helpers import create_firm, create_member, login
 from tests.pdf_helpers import image_pdf_with_text_layer
-from tests.test_ingest import new_case, upload
+from tests.test_ingest import new_case, upload, use_fake_ocr
 
 
 def photo(size=(600, 400), mode="RGB", fmt="JPEG", exif_orientation=None, label="收據") -> bytes:
@@ -95,11 +95,13 @@ def _multi(client, case_id, items, kind="evidence"):
 
 def test_upload_multiple_photos_one_exhibit(lawyer_client):
     client, firm_id, _ = lawyer_client
+    use_fake_ocr(client)
     case_id = new_case(client)
     a, b = photo(label="A"), photo(mode="RGBA", fmt="PNG", label="B")
     r = _multi(client, case_id, [("a.jpg", a), ("b.png", b)])
     assert r.status_code == 200, r.text
-    assert r.json()["page_count"] == 2 and r.json()["ocr"] is None
+    assert r.json()["page_count"] == 2
+    assert r.json()["ocr"] == {"status": "running", "pages": 2, "minutes": 1}
     detail = client.get(f"/api/cases/{case_id}").json()
     assert [e["label"] for e in detail["exhibits"]] == ["原證1"]
     storage = LocalStorage(client.app.state.settings.storage_dir)
@@ -109,12 +111,13 @@ def test_upload_multiple_photos_one_exhibit(lawyer_client):
         assert [x["filename"] for x in doc.source_images] == ["a.jpg", "b.png"]
         assert [storage.get(x["key"]) for x in doc.source_images] == [a, b]
         pages = s.scalars(select(Page).where(Page.document_id == doc.id).order_by(Page.page_no)).all()
-        assert [p.ocr_state for p in pages] == ["pending", "pending"]
+        assert [p.ocr_state for p in pages] == ["done", "done"]  # 上傳後自動辨識（假的 AI）
         assert storage.get(doc.storage_key).startswith(b"%PDF")
 
 
 def test_upload_single_photo_named_pdf(lawyer_client):
     client, firm_id, _ = lawyer_client
+    use_fake_ocr(client)
     case_id = new_case(client)
     r = upload(client, case_id, "診斷證明.JPG", photo())
     assert r.status_code == 200, r.text
@@ -147,6 +150,7 @@ def test_upload_sets_scan_hint(lawyer_client):
 
 def test_page_image_endpoint(lawyer_client, db):
     client, firm_id, _ = lawyer_client
+    use_fake_ocr(client)
     case_id = new_case(client)
     doc_id = upload(client, case_id, "收據.jpg", photo()).json()["id"]
     d = docx.Document()

@@ -22,6 +22,7 @@ from app.ai.usage import call_ai
 from app.config import Settings
 from app.db import tenant_session
 from app.models import AIJob, Case, Firm
+from app.ocr.state import OCR_STALE_AFTER
 from app.pipeline.run import STALE_AFTER
 
 log = logging.getLogger(__name__)
@@ -51,12 +52,17 @@ def _now() -> datetime:
 
 
 def _stale(job: AIJob) -> bool:
-    return job.status == "running" and _now() - job.heartbeat_at > STALE_AFTER
+    # 辨識每次 AI 呼叫最多 120 秒（含重試 240 秒）、等校對員時每 30 秒更新心跳，所以過期門檻較短
+    limit = OCR_STALE_AFTER if job.step == "ocr" else STALE_AFTER
+    return job.status == "running" and _now() - job.heartbeat_at > limit
 
 
-def latest_job(s: Session, case_id: UUID, round_id: UUID | None, step: str) -> AIJob | None:
+def latest_job(s: Session, case_id: UUID, round_id: UUID | None, step: str,
+               document_id: UUID | None = None) -> AIJob | None:
     q = select(AIJob).where(AIJob.case_id == case_id, AIJob.step == step)
     q = q.where(AIJob.round_id == round_id) if round_id is not None else q.where(AIJob.round_id.is_(None))
+    if document_id is not None:  # 辨識工作掛在文件上
+        q = q.where(AIJob.document_id == document_id)
     return s.scalars(q.order_by(AIJob.started_at.desc()).limit(1)).first()
 
 
@@ -64,7 +70,8 @@ def job_json(job: AIJob | None) -> dict | None:
     if job is None:
         return None
     return {"id": str(job.id), "status": job.status, "error": job.error,
-            "started_at": job.started_at.isoformat(), "stale": _stale(job)}
+            "started_at": job.started_at.isoformat(), "stale": _stale(job),
+            "document_id": str(job.document_id) if job.document_id else None}
 
 
 def _precheck(s: Session, step: str, case_id: UUID, round_id: UUID | None) -> None:
@@ -90,20 +97,27 @@ def _body_for(step: str) -> Callable[[AIJob, AIProvider, "JobContext"], None]:
     if step == "health":
         from app.pipeline.health import run_health_check
         return run_health_check
+    if step == "ocr":
+        from app.ocr.job import run_ocr_document
+        return run_ocr_document
     raise ValueError(f"unknown AI job step {step}")
 
 
-def start_job(s: Session, case_id: UUID, round_id: UUID | None, step: str, member_id: UUID | None) -> AIJob:
+def start_job(s: Session, case_id: UUID, round_id: UUID | None, step: str, member_id: UUID | None,
+              document_id: UUID | None = None, status: str = "running") -> AIJob:
+    """辨識（ocr）依文件判斷是否已有一筆在跑；等待確認（waiting）不算在跑。"""
     case = s.get(Case, case_id, with_for_update=True)  # 鎖住案件列：同時按兩次只會有一個開始
-    last = latest_job(s, case_id, round_id, step)
+    last = latest_job(s, case_id, round_id, step, document_id)
     if last is not None and last.status == "running":
         if not _stale(last):
             raise JobBusy(BUSY)
         last.status, last.error, last.finished_at = "failed", TAKEN_OVER, _now()
+    elif last is not None and last.status == "waiting":
+        last.status, last.error, last.finished_at = "failed", TAKEN_OVER, _now()
     _precheck(s, step, case_id, round_id)
     now = _now()
-    job = AIJob(firm_id=case.firm_id, case_id=case_id, round_id=round_id, step=step, status="running",
-                member_id=member_id, started_at=now, heartbeat_at=now)
+    job = AIJob(firm_id=case.firm_id, case_id=case_id, round_id=round_id, step=step, status=status,
+                member_id=member_id, started_at=now, heartbeat_at=now, document_id=document_id)
     s.add(job)
     s.flush()
     return job

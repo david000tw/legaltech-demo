@@ -139,16 +139,18 @@ def test_package_contains_generated_pdf_not_photo(db):
     from app.models import Citation, PageText
     from tests.test_ocr_images import photo
 
+    from tests.test_ingest import use_fake_ocr
+
     ctx, cs = ready(db)
+    use_fake_ocr(cs["lawyer"], EVIDENCE_TEXT)
     r = cs["lawyer"].post(f"/api/cases/{ctx['case_id']}/documents", data={"kind": "evidence"},
                           files=[("files", ("收據.jpg", photo(exif_orientation=6)))])
     assert r.status_code == 200, r.text
     with tenant_session(ctx["firm"]) as s:
         page = s.scalars(select(Page).where(Page.document_id == r.json()["id"])).one()
-        pt = PageText(firm_id=ctx["firm"], page_id=page.id, version=1, source="ai_ocr", text=EVIDENCE_TEXT,
-                      verified_against_image=True)
-        s.add(pt)
-        s.flush()
+        pt = current_page_text(s, page.id)
+        assert pt.source == "ai_ocr"
+        pt.verified_against_image = True
         for c in s.scalars(select(Candidate).where(Candidate.round_id == ctx["round_id"], Candidate.code == "E1")):
             c.page_text_id = pt.id
         for c in s.scalars(select(Citation).where(Citation.page_text_id.is_not(None))):
