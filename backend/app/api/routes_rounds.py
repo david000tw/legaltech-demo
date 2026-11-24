@@ -13,7 +13,9 @@ from app.models import RUNNING_STATUSES, Claim, Draft, Firm, Page, Paragraph, Ro
 from app.pipeline.copy_round import copy_round
 from app.pipeline.drafting import ParagraphChanged, rewrite_paragraph
 from app.pipeline.jobs import job_json, latest_job
+from app.ocr.gates import opponent_ocr_problem, page_needs_check
 from app.pipeline.requests import amount_note, pending_ocr_pages
+from app.sources import page_label
 from app.statements import AMOUNT_MARKER, round_total, statement_template
 from app.pipeline.run import (STALE_AFTER, RoundBusy, RoundRule, reset_round, run_draft, run_extract,
                               settings_editable, start_stage)
@@ -172,6 +174,12 @@ def confirm_claim(claim_id: UUID, m: CurrentMember = Depends(current_member)) ->
         require_lawyer(m)
         if claim.request_type == "monetary" and claim.amount is None:
             raise HTTPException(422, "請先填寫金額")
+        # 依據是辨識文字：律師要先對照原圖，金額才會進訴之聲明（設計 6.4）
+        unchecked = list(dict.fromkeys(e["page_id"] for e in claim.evidence or []
+                                       if e.get("found") and e.get("page_id") and page_needs_check(s, e["page_id"])))
+        if unchecked:
+            labels = "、".join(page_label(s, UUID(pid)) for pid in unchecked)
+            raise HTTPException(409, {"code": "image_unverified", "message": f"請先對照原圖：{labels}"})
         claim.confirmed_by, claim.confirmed_at = m.id, datetime.now(timezone.utc)
         return claim_json(s, claim)
 
@@ -214,11 +222,14 @@ def claim_json(s, c: Claim) -> dict:
     out = {"id": str(c.id), "seq": c.seq, "kind": c.kind, "selected": c.selected, "summary": c.summary,
            "quote": c.quote, "quote_verified": c.quote_verified,
            "page_no": s.get(Page, c.page_id).page_no if c.page_id else None,
+           "page_id": str(c.page_id) if c.page_id else None,
+           "ocr_unverified": page_needs_check(s, c.page_id),  # 出處是還沒對照原圖的辨識文字
            "references": (c.selection or {}).get("references", [])}
     if c.kind == "request":
         out.update({"request_type": c.request_type, "amount": c.amount, "amount_note": c.amount_note,
                     "basis_text": c.basis_text, "confirmed": c.confirmed_by is not None,
-                    "evidence": [{k: e.get(k) for k in ("exhibit", "page_no", "quote", "found")}
+                    "evidence": [{**{k: e.get(k) for k in ("exhibit", "page_no", "quote", "found", "page_id")},
+                                  "ocr_unverified": page_needs_check(s, e.get("page_id"))}
                                  for e in c.evidence or []]})
     return out
 
@@ -253,6 +264,8 @@ def get_round(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
             "statement_variant": rnd.statement_variant, "total_amount": round_total(s, rnd.id),
             "statement_preview": _statement_preview(s, rnd),
             "pending_ocr_pages": pending_ocr_pages(s, rnd.case_id) if rnd.brief_kind == "complaint" else [],
+            # 對造書狀還有頁沒辨識完（或失敗、空白頁未確認）：「拆解」停用並顯示原因（設計 6.4）
+            "extract_blocked": opponent_ocr_problem(s, rnd.id) if rnd.brief_kind != "complaint" else None,
         }
 
 

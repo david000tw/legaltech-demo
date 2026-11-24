@@ -297,4 +297,4 @@ def test_notes_no_readable_evidence_message(lawyer_client):
         ingest_document(s, firm, case_id, "evidence", "01_掃描.pdf", blank_pdf())
     r = client.post(f"/api/cases/{case_id}/evidence-notes")
     assert r.status_code == 409
-    assert r.json()["detail"] == {"code": "no_text", "message": "還沒有可讀文字的卷證：請上傳文字檔或可選取文字的 PDF；掃描檔要等辨識功能完成"}
+    assert r.json()["detail"] == {"code": "no_text", "message": "還沒有可讀文字的卷證：請等辨識完成，或上傳文字檔"}

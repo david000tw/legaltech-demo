@@ -24,8 +24,8 @@ from app.pipeline.requests import evidence_pages, extract_requests
 
 log = logging.getLogger(__name__)
 STALE_AFTER = timedelta(minutes=45)  # 須大於單一步驟最長時間（逾時 600 秒 × 重試）
-NO_TEXT = "no_text: 對造書狀沒有可讀文字（可能是掃描檔），請改上傳文字檔，或等計畫 2 的辨識功能"
-NO_EVIDENCE_TEXT = "no_text: 我方卷證沒有可讀文字（可能都是掃描檔），請改上傳文字檔，或等計畫 2 的辨識功能"
+NO_TEXT = "no_text: 對造書狀沒有可讀文字，請等辨識完成，或手動輸入辨識失敗的頁"
+NO_EVIDENCE_TEXT = "no_text: 我方卷證還沒有可讀文字，請等辨識完成"
 Stage = Literal["extract", "draft"]
 _RUNNING = {"extract": "extracting", "draft": "drafting"}
 
@@ -87,9 +87,15 @@ def _check_draft_ready(s: Session, rnd: Round) -> None:
         raise RoundRule("no_selection", "沒有勾選任何主張")
 
 
-def _check_extract_ready(rnd: Round) -> None:
-    if rnd.brief_kind == "complaint" and not (rnd.narrative or "").strip():
-        raise RoundRule("no_narrative", "請先填寫案情說明")
+def _check_extract_ready(s: Session, rnd: Round) -> None:
+    if rnd.brief_kind == "complaint":
+        if not (rnd.narrative or "").strip():
+            raise RoundRule("no_narrative", "請先填寫案情說明")
+        return
+    from app.ocr.gates import opponent_ocr_problem
+    problem = opponent_ocr_problem(s, rnd.id)  # 對造書狀還有頁沒辨識完：拆不出完整的主張（設計 6.4）
+    if problem is not None:
+        raise RoundRule("ocr_pending", problem)
 
 
 def start_stage(s: Session, round_id: UUID, stage: Stage) -> None:
@@ -98,7 +104,7 @@ def start_stage(s: Session, round_id: UUID, stage: Stage) -> None:
     if stage == "draft":
         _check_draft_ready(s, rnd)
     else:
-        _check_extract_ready(rnd)
+        _check_extract_ready(s, rnd)
     models = (Draft, Claim, Candidate) if stage == "extract" else (Draft, Candidate)
     for model in models:
         s.execute(delete(model).where(model.round_id == round_id))

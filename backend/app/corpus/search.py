@@ -84,11 +84,11 @@ def search_articles(s: Session, query: str, k: int, case_type: str | None = None
 
 
 def search_pages(s: Session, case_id: UUID, query: str, k: int) -> list[PageText]:
-    """只搜本案卷證、有文字層（needs_ocr=False）的頁，且只看目前版本。"""
+    """只搜本案卷證目前有文字的頁（含辨識文字），且只看目前版本。"""
     q = bigrams(query)
     pages = s.scalars(
         select(Page).join(Document, Document.id == Page.document_id)
-        .where(Document.case_id == case_id, Document.kind == "evidence", Page.needs_ocr.is_(False))
+        .where(Document.case_id == case_id, Document.kind == "evidence")
     ).all()
     current = [pt for pt in (current_page_text(s, p.id) for p in pages) if pt is not None]
     return _top([(score(q, pt.text), pt) for pt in current], k)

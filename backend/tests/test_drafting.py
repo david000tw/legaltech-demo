@@ -135,11 +135,24 @@ def test_scanned_opponent_brief_fails_no_text(db):
     from app.ingest.service import ingest_document
     from tests.test_ingest import blank_pdf
     with tenant_session(firm) as s:
-        ingest_document(s, firm, case_id, "opponent_brief", "掃描答辯狀.pdf", blank_pdf(), round_id)
+        doc = ingest_document(s, firm, case_id, "opponent_brief", "掃描答辯狀.pdf", blank_pdf(), round_id)
     fake = fake_all()
+    # 計畫 2A：還沒辨識的對造書狀在開始前就擋下（不再跑到一半才失敗）
+    from app.pipeline.run import RoundRule
+    with pytest.raises(RoundRule) as e:
+        run_two_stage(firm, round_id, db, provider=fake)
+    assert (e.value.code, e.value.message) == ("ocr_pending", "對造書狀第 1 頁尚未辨識，完成後才能拆解")
+    # 辨識出來是空白頁、律師也確認了：拆解時仍因沒有可讀文字而失敗
+    from datetime import datetime, timezone
+
+    from app.models import Page, PageText
+    with tenant_session(firm) as s:
+        page = s.scalars(select(Page).where(Page.document_id == doc.id)).one()
+        s.add(PageText(firm_id=firm, page_id=page.id, version=1, source="ai_ocr", text="", needs_image_check=True))
+        page.ocr_state, page.blank_confirmed_at = "done", datetime.now(timezone.utc)
     run_two_stage(firm, round_id, db, provider=fake)
     status, error = status_of(firm, round_id)
-    assert status == "failed" and error.startswith("no_text")
+    assert status == "failed" and error == "no_text: 對造書狀沒有可讀文字，請等辨識完成，或手動輸入辨識失敗的頁"
     assert fake.calls == []
 
 

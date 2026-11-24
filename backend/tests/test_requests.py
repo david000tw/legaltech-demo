@@ -128,8 +128,10 @@ def test_round_shows_requests_total_and_preview(api):
     body = client.get(f"/api/rounds/{rid}").json()
     first = body["claims"][0]
     assert first["request_type"] == "monetary" and first["amount"] == 45000 and first["confirmed"] is False
-    assert first["evidence"] == [{"exhibit": "原證1", "page_no": 1, "quote": "醫療費用合計新臺幣45,000元",
-                                  "found": True}]
+    (ev,) = first["evidence"]
+    assert {k: ev[k] for k in ("exhibit", "page_no", "quote", "found", "ocr_unverified")} == {
+        "exhibit": "原證1", "page_no": 1, "quote": "醫療費用合計新臺幣45,000元", "found": True, "ocr_unverified": False}
+    assert ev["page_id"]
     assert body["total_amount"] == 0  # 還沒確認任何項目
     assert body["narrative"] == "原告請求醫療費、慰撫金與車輛修復費。" and body["provisional_execution"] is True
     for item in body["claims"]:

@@ -26,24 +26,24 @@ from app.text_norm import normalize_text, source_found
 class EvidencePage:
     exhibit: str  # 例：原證1
     page: Page
-    text: PageText | None  # None＝掃描頁，待辨識
+    text: PageText | None  # None＝還沒有文字（待辨識、辨識失敗）
 
 
 def evidence_pages(s: Session, case_id: UUID) -> list[EvidencePage]:
-    """本案我方卷證的每一頁（含待辨識的掃描頁），依原證號、頁碼排序。"""
+    """本案我方卷證的每一頁（含還沒有文字的頁），依原證號、頁碼排序。"""
     rows = s.execute(
         select(Page, Exhibit).join(Document, Document.id == Page.document_id)
         .join(Exhibit, Exhibit.document_id == Document.id)
         .where(Document.case_id == case_id, Document.kind == "evidence")
         .order_by(Exhibit.prefix, Exhibit.number, Page.page_no)
     ).all()
-    return [EvidencePage(f"{ex.prefix}{ex.number}", p, None if p.needs_ocr else current_page_text(s, p.id))
-            for p, ex in rows]
+    return [EvidencePage(f"{ex.prefix}{ex.number}", p, current_page_text(s, p.id)) for p, ex in rows]
 
 
 def pending_ocr_pages(s: Session, case_id: UUID) -> list[str]:
-    """還沒有文字層、所以沒送給 AI 的頁（辨識是計畫 2）。"""
-    return [f"{ep.exhibit} 第{ep.page.page_no}頁" for ep in evidence_pages(s, case_id) if ep.text is None]
+    """要辨識、但還沒有文字，所以沒送給 AI 的頁。"""
+    return [f"{ep.exhibit} 第{ep.page.page_no}頁" for ep in evidence_pages(s, case_id)
+            if ep.text is None and ep.page.ocr_state != "none"]
 
 
 def amount_note(request_type: str, amount: int | None, no_receipt: bool, evidence: list[dict]) -> str | None:

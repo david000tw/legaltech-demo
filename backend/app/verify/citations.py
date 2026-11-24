@@ -27,6 +27,8 @@ from app.statements import (
     AMOUNT_MARKER, amount_marker_allowed, confirmed_requests, draft_reasons, round_of, round_total,
     statement_of, statement_reasons,
 )
+from app.ocr.state import UNREADABLE, needs_check
+from app.sources import page_label
 from app.text_norm import find_quote, normalize_text, quote_length
 
 MARKER_RE = re.compile(r"\{\{(cite|quote):([A-Z]\d+)\}\}")
@@ -157,7 +159,8 @@ def scan_numbered_cross_references(text: str) -> list[str]:
     return out
 
 
-def scan_inline_quotes(text: str, opponent_texts: list[str]) -> list[str]:
+def _quote_groups(text: str) -> list[list[tuple[str, str]]]:
+    """段落裡自行加引號、合計 15 字以上的引文段；每段是 [(原樣, 去掉內層引號)]。"""
     t = _scan_form(text)
     groups: list[list[tuple[int, int, int]]] = []
     for span in _outer_quotes(t):
@@ -167,14 +170,37 @@ def scan_inline_quotes(text: str, opponent_texts: list[str]) -> list[str]:
             groups.append([span])
     out = []
     for g in groups:
-        parts = [(t[a:b], _ANY_QUOTE.sub("", t[a:b])) for a, b, _ in g]  # (原樣, 去掉內層引號)
-        if sum(quote_length(bare) for _, bare in parts) < MIN_QUOTE:
-            continue
-        ok = all(any(find_quote(op, raw) or find_quote(op, bare) for op in opponent_texts)
-                 for raw, bare in parts if quote_length(bare) > 0)
-        if not ok:
-            out.append(normalize_text("".join(bare for _, bare in parts))[:10])
+        parts = [(t[a:b], _ANY_QUOTE.sub("", t[a:b])) for a, b, _ in g]
+        if sum(quote_length(bare) for _, bare in parts) >= MIN_QUOTE:
+            out.append(parts)
     return out
+
+
+def _quote_head(parts: list[tuple[str, str]]) -> str:
+    return normalize_text("".join(bare for _, bare in parts))[:10]
+
+
+def _found_in(parts: list[tuple[str, str]], texts: list[str]) -> bool:
+    return all(any(find_quote(op, raw) or find_quote(op, bare) for op in texts)
+               for raw, bare in parts if quote_length(bare) > 0)
+
+
+def scan_inline_quotes(text: str, opponent_texts: list[str]) -> list[str]:
+    return [_quote_head(parts) for parts in _quote_groups(text) if not _found_in(parts, opponent_texts)]
+
+
+def scan_inline_quotes_split(text: str, verified_texts: list[str],
+                             unverified_texts: list[str]) -> tuple[list[str], list[str]]:
+    """（在任何對造頁都找不到的引文開頭, 只在還沒對照原圖的辨識頁找得到的引文開頭）。"""
+    missing, unverified = [], []
+    for parts in _quote_groups(text):
+        if _found_in(parts, verified_texts):
+            continue
+        if _found_in(parts, verified_texts + unverified_texts):
+            unverified.append(_quote_head(parts))
+        else:
+            missing.append(_quote_head(parts))
+    return missing, unverified
 
 
 def _round_id_for(s: Session, p: Paragraph) -> UUID:
@@ -266,6 +292,8 @@ def verify_citation(s: Session, c: Citation) -> list[str]:
     elif c.kind == "evidence":
         pt = s.get(PageText, c.page_text_id)
         reasons = _quote_reasons(pt.text, c.quote)
+        if UNREADABLE in (c.quote or ""):  # 辨識時看不清楚的字：要先修正辨識文字，不能寫進書狀
+            reasons.append("quote_unreadable")
         latest = current_page_text(s, pt.page_id)
         if latest is not None and latest.id != pt.id:  # 該頁文字已校正成新版本，舊版引用要重新確認
             reasons.append("source_superseded")
@@ -304,35 +332,67 @@ def paragraph_citations(s: Session, paragraph_id: UUID) -> list[Citation]:
     return list(s.scalars(select(Citation).where(Citation.paragraph_id == paragraph_id).order_by(Citation.code)))
 
 
-def allowed_amounts(s: Session, p: Paragraph, cache: dict | None = None) -> set[int]:
-    """書狀裡可以直接寫的金額（設計 5.5）。cache 讓一次匯出檢查只查一次（以輪次 id 為鍵）。"""
+def _amounts_cached(s: Session, p: Paragraph, cache: dict | None) -> tuple[set[int], dict[int, str]]:
     rnd = round_of(s, p)
     if cache is None:
         return _amount_sources(s, rnd)
-    if rnd.id not in cache:
-        cache[rnd.id] = _amount_sources(s, rnd)
-    return cache[rnd.id]
+    if rnd.id not in cache:  # 一次算出兩組，各自以不同的鍵存
+        cache[rnd.id], cache[("unverified", rnd.id)] = _amount_sources(s, rnd)
+    return cache[rnd.id], cache[("unverified", rnd.id)]
 
 
-def _amount_sources(s: Session, rnd: Round) -> set[int]:
-    """起訴狀確認過的請求項目與加總、本案卷證、本輪對造書狀、本輪主張原文裡的金額。"""
-    out: set[int] = set()
+def allowed_amounts(s: Session, p: Paragraph, cache: dict | None = None) -> set[int]:
+    """書狀裡可以直接寫的金額（設計 5.5）。cache 讓一次匯出檢查只查一次（以輪次 id 為鍵）。"""
+    return _amounts_cached(s, p, cache)[0]
+
+
+def unverified_amounts(s: Session, p: Paragraph, cache: dict | None = None) -> dict[int, str]:
+    """只出現在還沒對照原圖的辨識文字裡的金額 → 第一個出處的頁標籤（計畫 2A）。"""
+    return _amounts_cached(s, p, cache)[1]
+
+
+def _amount_sources(s: Session, rnd: Round) -> tuple[set[int], dict[int, str]]:
+    """起訴狀確認過的請求項目與加總、本案卷證、本輪對造書狀、本輪主張原文裡的金額。
+    回傳（可以直接寫的金額, 只出現在未對照原圖辨識文字裡的金額 → 頁標籤）。"""
+    allowed: set[int] = set()
+    unverified: dict[int, str] = {}
+    current: dict = {}
+
+    def add(text: str, page_id, pt=None) -> None:
+        if pt is None and page_id:
+            key = str(page_id)
+            if key not in current:
+                current[key] = current_page_text(s, UUID(key))
+            pt = current[key]
+        if needs_check(pt):
+            label = page_label(s, pt.page_id)
+            for n in parse_amounts(text):
+                unverified.setdefault(n, label)
+        else:
+            allowed.update(parse_amounts(text))
+
     if rnd.brief_kind == "complaint":
         items = confirmed_requests(s, rnd.id)
-        out |= {c.amount for c in items if c.request_type == "monetary" and c.amount is not None}
-        out.add(round_total(s, rnd.id))
+        allowed.update(c.amount for c in items if c.request_type == "monetary" and c.amount is not None)
+        allowed.add(round_total(s, rnd.id))
     pages = s.scalars(select(Page).join(Document, Document.id == Page.document_id)
-                      .where(Document.case_id == rnd.case_id, Document.kind == "evidence")).all()
-    texts = [pt.text for pt in (current_page_text(s, pg.id) for pg in pages) if pt is not None]
-    texts += [op.text.text for op in opponent_pages(s, rnd.id) if op.text is not None]
+                      .where(Document.case_id == rnd.case_id, Document.kind == "evidence")
+                      .order_by(Document.created_at, Page.page_no)).all()
+    for pg in pages:
+        pt = current_page_text(s, pg.id)
+        if pt is not None:
+            add(pt.text, pg.id, pt)
+    for op in opponent_pages(s, rnd.id):
+        if op.text is not None:
+            add(op.text.text, op.page.id, op.text)
     # 原文摘錄只算「確實在原文找到」的（設計 5.1）：畫面標紅「未找到原文」的摘錄可能是 AI 編的，不能拿來放行金額
-    for c in s.scalars(select(Claim).where(Claim.round_id == rnd.id)):
+    for c in s.scalars(select(Claim).where(Claim.round_id == rnd.id).order_by(Claim.seq)):
         if c.quote_verified:
-            texts.append(c.quote or "")
-        texts += [e.get("quote") or "" for e in c.evidence or [] if e.get("found")]
-    for t in texts:
-        out.update(parse_amounts(t))
-    return out
+            add(c.quote or "", c.page_id)
+        for e in c.evidence or []:
+            if e.get("found"):
+                add(e.get("quote") or "", e.get("page_id"))
+    return allowed, {n: label for n, label in unverified.items() if n not in allowed}
 
 
 def amount_reasons(s: Session, p: Paragraph, text: str, cache: dict | None = None) -> list[str]:
@@ -343,7 +403,9 @@ def amount_reasons(s: Session, p: Paragraph, text: str, cache: dict | None = Non
     if not found:
         return []
     allowed = allowed_amounts(s, p, cache) | set(p.amounts_confirmed or [])
-    return [f"amount_unverified:{n}" for n in found if n not in allowed]
+    pending = unverified_amounts(s, p, cache)
+    return [f"amount_image_unverified:{n}:{pending[n]}" if n in pending else f"amount_unverified:{n}"
+            for n in found if n not in allowed]
 
 
 def verify_paragraph(s: Session, p: Paragraph, cache: dict | None = None) -> list[str]:
@@ -377,9 +439,13 @@ def verify_paragraph(s: Session, p: Paragraph, cache: dict | None = None) -> lis
         reason = f"numbered_cross_reference:{hit}"
         if reason not in reasons:
             reasons.append(reason)
-    opp = [op.text.text for op in opponent_pages(s, _round_id_for(s, p)) if op.text is not None]
-    for head in scan_inline_quotes(p.heading, opp) + scan_inline_quotes(p.text, opp):
-        reasons.append(f"inline_quote_unverified:{head}")
+    ops = [op.text for op in opponent_pages(s, _round_id_for(s, p)) if op.text is not None]
+    checked = [pt.text for pt in ops if not needs_check(pt)]
+    pending = [pt.text for pt in ops if needs_check(pt)]
+    for part in (p.heading, p.text):
+        missing, unverified = scan_inline_quotes_split(part, checked, pending)
+        reasons += [f"inline_quote_unverified:{head}" for head in missing]
+        reasons += [f"inline_quote_image_unverified:{head}" for head in unverified]
     reasons.extend(amount_reasons(s, p, f"{p.heading or ''}\n{body}", cache))  # 標題也會印進書狀，金額一起核對
     if p.kind == "statement":
         reasons.extend(statement_reasons(s, p))
@@ -408,6 +474,8 @@ def paragraph_blockers(s: Session, p: Paragraph, cache: dict | None = None) -> l
     for c in paragraph_citations(s, p.id):
         if c.verify_status not in ("ok", "warn"):
             out.append(f"citation_failed:{c.code}")
+        elif c.kind == "evidence" and c.page_text_id and needs_check(s.get(PageText, c.page_text_id)):
+            out.append(f"image_unverified:{c.code}")  # 引用的是辨識文字：律師要先對照原圖（設計 6.4）
         elif c.verify_status == "warn" and not c.court_confirmed:
             out.append(f"party_claim_unconfirmed:{c.code}")
         elif c.kind == "judgment" and not c.lawyer_confirmed:

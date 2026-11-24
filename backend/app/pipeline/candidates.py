@@ -42,11 +42,11 @@ def _claims(s: Session, round_id: UUID) -> list[Claim]:
 
 
 def _evidence_pages(s: Session, case_id: UUID) -> list[PageText]:
-    """本案卷證中有文字層的頁（目前版本），依原證號、頁碼排序。"""
+    """本案卷證中目前有文字的頁（文字層、辨識或手動輸入的目前版本），依原證號、頁碼排序。"""
     pages = s.scalars(
         select(Page).join(Document, Document.id == Page.document_id)
         .join(Exhibit, Exhibit.document_id == Document.id)
-        .where(Document.case_id == case_id, Document.kind == "evidence", Page.needs_ocr.is_(False))
+        .where(Document.case_id == case_id, Document.kind == "evidence")
         .order_by(Exhibit.prefix, Exhibit.number, Page.page_no)
     ).all()
     return [pt for pt in (current_page_text(s, p.id) for p in pages) if pt is not None]

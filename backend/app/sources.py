@@ -17,6 +17,7 @@ from app.amounts import parse_amounts
 from app.dates import PartialDate, date_in_text, month_day_in_text
 from app.ingest.service import current_page_text
 from app.models import Document, Exhibit, Page
+from app.ocr.state import needs_check
 from app.text_norm import normalize_text, source_found
 
 REASON_LABEL = {
@@ -45,7 +46,8 @@ class SourcePage:
     page_no: int  # 該份文件內的頁碼
     kind: Literal["evidence", "opponent"]
     document_id: UUID
-    text: str | None  # None＝掃描頁，還沒有文字層
+    text: str | None  # None＝還沒有文字（待辨識、辨識失敗）
+    needs_check: bool = False  # 目前版本是辨識或手動輸入的文字、還沒對照原圖（計畫 2A）
 
 
 def code_key(code: str) -> str:
@@ -84,7 +86,8 @@ def _pages(s: Session, code: str, doc: Document, kind: str) -> list[SourcePage]:
     out = []
     for page in s.scalars(select(Page).where(Page.document_id == doc.id).order_by(Page.page_no)):
         pt = current_page_text(s, page.id)
-        out.append(SourcePage(page.id, code, page.page_no, kind, doc.id, pt.text if pt is not None else None))
+        out.append(SourcePage(page.id, code, page.page_no, kind, doc.id, pt.text if pt is not None else None,
+                              needs_check(pt)))
     return out
 
 
@@ -157,5 +160,7 @@ def check_source(page: SourcePage | None, quote: str, *, dates: Iterable[Partial
 
 
 def source_view(s: Session, page_id: UUID | None, quote: str, status: str, reasons: list[str]) -> dict:
+    from app.ocr.gates import page_needs_check
     return {"page_id": str(page_id) if page_id else None, "label": page_label(s, page_id), "quote": quote,
-            "status": status, "reasons": list(reasons)}
+            "status": status, "reasons": list(reasons),
+            "ocr_unverified": page_needs_check(s, page_id)}  # 出處標「辨識文字，未對照原圖」

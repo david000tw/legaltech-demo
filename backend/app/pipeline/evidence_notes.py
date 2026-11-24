@@ -51,7 +51,7 @@ def documents_needing_notes(s: Session, case_id: UUID) -> list[Document]:
             if _has_text(pages) and doc.notes_fingerprint != document_fingerprint(s, doc.id)]
 
 
-NO_TEXT = "還沒有可讀文字的卷證：請上傳文字檔或可選取文字的 PDF；掃描檔要等辨識功能完成"
+NO_TEXT = "還沒有可讀文字的卷證：請等辨識完成，或上傳文字檔"
 
 
 def ready(s: Session, case_id: UUID) -> None:

@@ -27,6 +27,9 @@ from app.review.insert import InsertRejected, insert_pin
 from app.text_norm import find_quote
 from app.statements import BODY_LABEL, STATEMENT_LABEL, claim_value, statement_of
 from app.storage import LocalStorage
+from app.ingest.extract import file_ext
+from app.ocr.drafts import unverified_ocr_pages
+from app.ocr.state import needs_check
 from app.verify.citations import body_paragraphs, export_blockers, is_removed, paragraph_citations
 
 router = APIRouter(prefix="/api")
@@ -99,17 +102,24 @@ def get_draft(draft_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
                 "claim_value": (dict(zip(("label", "value"), claim_value(s, rnd)))
                                 if rnd.brief_kind == "complaint" else None),
                 "paragraphs": [paragraph_json(s, p, n) for n, p in enumerate(body_paragraphs(s, draft_id), start=1)],
-                "blockers": [blocker_json(b) for b in blockers]}
+                "blockers": [blocker_json(b) for b in blockers],
+                # 本輪資料來源中還沒對照原圖的辨識頁（草稿頁上方提醒；計畫 2A Ruling：不逐段標）
+                "unverified_ocr_pages": unverified_ocr_pages(s, rnd)}
 
 
 @router.get("/citations/{citation_id}/source")
 def citation_source(citation_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
         c = _get_or_404(s, Citation, citation_id, "引用")
+        image = {}
         if c.kind == "evidence" and c.page_text_id:
             pt = s.get(PageText, c.page_text_id)
-            doc = s.get(Document, s.get(Page, pt.page_id).document_id)
+            page = s.get(Page, pt.page_id)
+            doc = s.get(Document, page.document_id)
             title, text = f"{evidence_label(s, pt.id)}（{doc.filename}）", pt.text
+            # 原文卡片並排原圖：辨識頁要律師對照後才能標記已審（設計 6.5）
+            image = {"page_id": str(page.id), "version": pt.version, "needs_check": needs_check(pt),
+                     "has_image": bool(page.image_key) or file_ext(doc.filename) == ".pdf"}
         elif c.kind == "judgment" and c.judgment_passage_id:
             p = s.get(JudgmentPassage, c.judgment_passage_id)
             title = f"{s.get(Judgment, p.judgment_id).citation}（{PASSAGE_LABEL[p.passage_type]}）"
@@ -121,7 +131,7 @@ def citation_source(citation_id: UUID, m: CurrentMember = Depends(current_member
             return {"kind": c.kind, "title": f"找不到 {c.code} 的來源（不在候選清單）", "text": "", "span": None}
         span = find_quote(text, c.quote) if c.quote.strip() else None
         return {"kind": c.kind, "title": title, "text": text, "span": list(span) if span else None,
-                "annotation": _annotation(s, c)}
+                "annotation": _annotation(s, c), **image}
 
 
 class CitationBody(BaseModel):
