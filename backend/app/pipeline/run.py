@@ -216,3 +216,22 @@ def run_draft(firm_id: UUID, round_id: UUID, member_id: UUID | None, settings: S
         rnd.status, rnd.error = "drafted", None
 
     _run("draft", body, firm_id, round_id, settings, provider, provider_factory)
+    _check_support(firm_id, round_id, member_id, settings, provider, provider_factory)
+
+
+def _check_support(firm_id: UUID, round_id: UUID, member_id: UUID | None, settings: Settings,
+                   provider: AIProvider | None, provider_factory: Callable[[Settings, Firm], AIProvider]) -> None:
+    """起草完成後檢查整份的支持度（設計 7.2）。已在背景執行緒、輪次已是 drafted，不會拖住起草狀態。"""
+    from app.support import job as support_job
+    from app.support import service as support
+    try:
+        with tenant_session(firm_id) as s:
+            if s.get(Round, round_id).status != "drafted":
+                return
+            draft = s.scalars(select(Draft).where(Draft.round_id == round_id)
+                              .order_by(Draft.created_at.desc())).first()
+            ids = support.request_checks(s, draft.id) if draft is not None else []
+        support_job.run_support_checks(firm_id, ids, settings, member_id, provider=provider,
+                                       provider_factory=provider_factory)
+    except Exception:  # 檢查失敗不影響起草結果；之後打開草稿會重新排入
+        log.exception("support checks after drafting round %s failed", round_id)

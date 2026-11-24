@@ -17,6 +17,8 @@ from app.ocr.gates import opponent_ocr_problem, page_needs_check
 from app.pipeline.requests import amount_note, pending_ocr_pages
 from app.sources import page_label
 from app.statements import AMOUNT_MARKER, round_total, statement_template
+from app.support import schedule as support_schedule
+from app.support import service as support
 from app.pipeline.run import (STALE_AFTER, RoundBusy, RoundRule, reset_round, run_draft, run_extract,
                               settings_editable, start_stage)
 
@@ -274,9 +276,9 @@ class RewriteBody(BaseModel):
 
 
 @router.post("/paragraphs/{paragraph_id}/rewrite")
-def rewrite(paragraph_id: UUID, body: RewriteBody, request: Request,
+def rewrite(paragraph_id: UUID, body: RewriteBody, request: Request, background: BackgroundTasks,
             m: CurrentMember = Depends(current_member)) -> dict:
-    conflict = None
+    conflict, ids = None, []
     with tenant_session(m.firm_id) as s:
         para = s.get(Paragraph, paragraph_id)
         if para is None:
@@ -286,6 +288,7 @@ def rewrite(paragraph_id: UUID, body: RewriteBody, request: Request,
         try:
             provider = request.app.state.provider_factory(request.app.state.settings, s.get(Firm, m.firm_id))
             p = rewrite_paragraph(s, paragraph_id, body.instruction, provider, m.id)
+            ids = support.request_checks(s, p.draft_id, [p.id])  # 改完段落後排入支持度檢查
             out = {"id": str(p.id), "status": p.status, "text": p.text, "verify_reasons": p.verify_reasons}
         except (ProviderNotAllowed, ProviderNotEnabled) as e:
             raise HTTPException(403, str(e))
@@ -295,4 +298,5 @@ def rewrite(paragraph_id: UUID, body: RewriteBody, request: Request,
             conflict = str(e)  # 在交易內攔下：段落不動，但 AI 用量照樣提交
     if conflict:
         raise HTTPException(409, conflict)
+    support_schedule.schedule_support(request, background, m.firm_id, ids, m.id)
     return out
