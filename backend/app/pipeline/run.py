@@ -190,6 +190,8 @@ def run_extract(firm_id: UUID, round_id: UUID, member_id: UUID | None, settings:
                 raise _NoText()
             extract_claims(s, round_id, provider, member_id)
         _still_current(s, round_id, token)
+        from app.ocr import service as ocr_service
+        ocr_service.refresh_round_sources(s, round_id)  # 拆解期間有頁被修正：改指目前版本、依據重算
         rnd = s.get(Round, round_id)
         rnd.status, rnd.error = "extracted", None
 
@@ -208,6 +210,8 @@ def run_draft(firm_id: UUID, round_id: UUID, member_id: UUID | None, settings: S
         s.commit()
         draft_round(s, round_id, provider, member_id)
         _still_current(s, round_id, token)
+        from app.ocr import service as ocr_service
+        ocr_service.refresh_round_sources(s, round_id)  # 起草期間有頁被修正：引用改指目前版本
         rnd = s.get(Round, round_id)
         rnd.status, rnd.error = "drafted", None
 

@@ -22,6 +22,12 @@ _CLAIM_FIELDS = ("seq", "summary", "quote", "quote_verified", "selected", "kind"
                  "amount_note", "basis_text", "evidence", "confirmed_by", "confirmed_at")
 
 
+_PAGE_OCR_FIELDS = ("image_key", "ocr_state", "ocr_error", "proof", "blank_confirmed_by", "blank_confirmed_at")
+_TEXT_OCR_FIELDS = ("verified_against_image", "needs_image_check", "verified_by", "verified_at", "created_by",
+                    "alerts")
+OCR_BUSY = "對造書狀還在辨識或校對中，完成後才能重新起草"
+
+
 def _latest_statement_text(s: Session, source: Round) -> str | None:
     draft = s.scalars(select(Draft).where(Draft.round_id == source.id).order_by(Draft.created_at.desc())).first()
     st = statement_of(s, draft.id) if draft else None
@@ -40,14 +46,15 @@ def _copy_briefs(s: Session, source: Round, target: Round) -> dict[UUID, UUID]:
         s.add(nd)
         s.flush()
         for p in s.scalars(select(Page).where(Page.document_id == d.id).order_by(Page.page_no)):
-            np_ = Page(firm_id=p.firm_id, document_id=nd.id, page_no=p.page_no, needs_ocr=p.needs_ocr)
+            np_ = Page(firm_id=p.firm_id, document_id=nd.id, page_no=p.page_no, needs_ocr=p.needs_ocr,
+                       **{f: getattr(p, f) for f in _PAGE_OCR_FIELDS})
             s.add(np_)
             s.flush()
             page_map[p.id] = np_.id
             pt = current_page_text(s, p.id)
             if pt is not None:
                 s.add(PageText(firm_id=pt.firm_id, page_id=np_.id, version=pt.version, source=pt.source,
-                               text=pt.text, verified_against_image=pt.verified_against_image))
+                               text=pt.text, **{f: getattr(pt, f) for f in _TEXT_OCR_FIELDS}))
     s.flush()
     return page_map
 
@@ -56,6 +63,10 @@ def copy_round(s: Session, round_id: UUID) -> Round:
     source = s.get(Round, round_id)
     if source.status != "drafted":
         raise RoundRule("not_drafted", "只有已起草的輪次可以重新起草")
+    if s.scalar(select(Page.id).join(Document, Document.id == Page.document_id)
+                .where(Document.round_id == source.id, Document.kind == "opponent_brief",
+                       Page.ocr_state.in_(("pending", "read"))).limit(1)) is not None:
+        raise RoundRule("ocr_pending", OCR_BUSY)
     s.get(Case, source.case_id, with_for_update=True)  # 鎖住案件列，避免同時建輪次撞號
     seq = (s.scalar(select(func.max(Round.seq)).where(Round.case_id == source.case_id)) or 0) + 1
     target = Round(firm_id=source.firm_id, case_id=source.case_id, seq=seq, status="extracted",
@@ -64,9 +75,14 @@ def copy_round(s: Session, round_id: UUID) -> Round:
     s.add(target)
     s.flush()
     page_map = _copy_briefs(s, source, target)
+    from app.ocr.service import _texts, recheck_claim
+    text_of = _texts(s)
     for c in s.scalars(select(Claim).where(Claim.round_id == source.id).order_by(Claim.seq)):
         # 對造書狀的頁換成新輪次的頁；請求項目指向案件的卷證頁，維持原樣
-        s.add(Claim(firm_id=c.firm_id, round_id=target.id, page_id=page_map.get(c.page_id, c.page_id),
-                    selection=None, **{f: getattr(c, f) for f in _CLAIM_FIELDS}))
+        nc = Claim(firm_id=c.firm_id, round_id=target.id, page_id=page_map.get(c.page_id, c.page_id),
+                   selection=None, **{f: getattr(c, f) for f in _CLAIM_FIELDS})
+        if nc.kind == "request":  # 依據頁可能已被修正：以目前文字重算，找不到的取消確認
+            recheck_claim(nc, text_of)
+        s.add(nc)
     s.flush()
     return target

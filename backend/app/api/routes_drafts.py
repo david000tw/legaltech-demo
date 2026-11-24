@@ -75,6 +75,7 @@ def paragraph_json(s, p: Paragraph, n: int | None = None) -> dict:
             "heading_text": strip_heading_number(p.heading),
             "rendered_text": rendered, "version": paragraph_version(s, p, rendered),
             "status": p.status, "verify_reasons": p.verify_reasons,
+            "source_notice": p.source_notice,  # 例：「依據頁已修正」
             "reviewed_bar_number": p.reviewed_bar_number,
             "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
             "citations": [citation_json(s, c) for c in paragraph_citations(s, p.id)]}

@@ -108,6 +108,7 @@ def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version
         raise ReviewRuleError("尚有未解決的問題：" + "、".join(blockers))
     p.status, p.reviewed_by, p.reviewed_bar_number = "reviewed", member.id, member.bar_number
     p.reviewed_at = datetime.now(timezone.utc)
+    p.source_notice = None  # 律師重新審過「依據頁已修正」的段落
     _event(s, p, member, "mark_reviewed", after=rendered)  # 留下律師審過、也會匯出的那一版
     s.flush()
     return p

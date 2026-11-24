@@ -195,6 +195,9 @@ def _save_read(s: Session, page_id: UUID, text: str) -> None:
     s.add(pt)
     page.ocr_state, page.ocr_error = "read", None
     s.flush()
+    if old is not None:  # 原本已有文字（例：改用辨識）：引用它的地方改指新版本並退回未審
+        from app.ocr.service import after_text_change
+        after_text_change(s, page, pt, None)
 
 
 def _mark_failed(s: Session, page_id: UUID, error: str) -> None:

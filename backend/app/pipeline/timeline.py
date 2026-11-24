@@ -21,7 +21,8 @@ from app.db import tenant_session
 from app.models import AIJob, Case, TimelineEvent
 from app.pipeline.case_context import case_context
 from app.pipeline.jobs import JobContext, JobRule
-from app.text_norm import normalize_text
+from app.ingest.service import current_page_text
+from app.text_norm import normalize_text, source_found
 from app.sources import (
     MAX_AMOUNT, OPPONENT_PREFIX, SourcePage, check_source, code_key, page_chars, soften, source_pages, source_view,
     split_pages,
@@ -144,9 +145,14 @@ def _label(e: TimelineEvent) -> str | None:
 def event_json(s: Session, e: TimelineEvent) -> dict:
     # AI 事件一律有出處標示：沒有頁碼也沒有摘錄就是「未找到原文」（設計 5.7 任何一項沒過就標紅）；律師事件可以沒有出處
     has_source = e.origin == "ai" or e.page_id is not None or bool((e.quote or "").strip())
+    status, reasons = e.status, e.reasons or []
+    if e.origin != "lawyer" and status == "found":  # 出處頁之後被修正：用目前文字重新確認摘錄還在
+        pt = current_page_text(s, e.page_id) if e.page_id else None
+        if pt is None or not source_found(pt.text, e.quote or "", min_chars=6):
+            status, reasons = "not_found", ["quote_not_found"]
     return {"id": str(e.id), "date": _iso(e), "date_label": _label(e), "description": e.description,
             "amount": e.amount, "source_kind": e.source_kind, "origin": e.origin,
-            "source": source_view(s, e.page_id, e.quote, e.status, e.reasons or []) if has_source else None}
+            "source": source_view(s, e.page_id, e.quote, status, reasons) if has_source else None}
 
 
 def timeline_view(s: Session, case_id: UUID) -> list[dict]:

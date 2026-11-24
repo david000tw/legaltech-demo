@@ -6,9 +6,12 @@ from pydantic import BaseModel
 
 from app.auth import CurrentMember, current_member
 from app.db import tenant_session
-from app.models import AIJob, Case, Document
+from app.models import AIJob, Case, Document, Page
 from app.ocr.job import (
     confirm_message, ocr_progress, pending_without_job, queue_ocr, queued_pages, retry_failed, work_pages,
+)
+from app.ocr.service import (
+    OcrRuleError, confirm_blank, page_ocr_json, reocr_document, save_page_text, verify_page,
 )
 from app.ocr.state import AUTO_OCR_PAGE_LIMIT, estimate_minutes
 from app.pipeline.jobs import BUSY, JobBusy, JobRule, job_json, run_job
@@ -86,3 +89,84 @@ def ocr_upload_summary(s, document_id: UUID, member_id: UUID) -> tuple[AIJob | N
     n = work_pages(s, document_id)
     return job, {"status": job.status, "pages": n, "minutes": estimate_minutes(n)}
 
+
+
+# ---- 對照原圖面板（計畫 2A，設計 6.3）----
+
+NO_PAGE = "找不到頁面"
+
+
+class TextBody(BaseModel):
+    text: str
+    base_version: int | None = None
+    verify: bool = False
+
+
+class VerifyBody(BaseModel):
+    version: int
+
+
+class ReocrBody(BaseModel):
+    confirm: bool = False
+
+
+def _page_or_404(s, page_id: UUID) -> Page:
+    page = s.get(Page, page_id)
+    if page is None:
+        raise HTTPException(404, NO_PAGE)
+    return page
+
+
+def _page_action(m: CurrentMember, page_id: UUID, action) -> dict:
+    with tenant_session(m.firm_id) as s:
+        _page_or_404(s, page_id)
+        try:
+            action(s)
+        except LookupError:
+            raise HTTPException(404, NO_PAGE)
+        except OcrRuleError as e:
+            raise HTTPException(e.status, e.message)
+        except PermissionError:
+            raise HTTPException(403, "限已驗證律師")
+        return page_ocr_json(s, s.get(Page, page_id), m)
+
+
+@router.get("/pages/{page_id}/ocr")
+def get_page_ocr(page_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    with tenant_session(m.firm_id) as s:
+        return page_ocr_json(s, _page_or_404(s, page_id), m)
+
+
+@router.put("/pages/{page_id}/text")
+def put_page_text(page_id: UUID, body: TextBody, m: CurrentMember = Depends(current_member)) -> dict:
+    """修正辨識文字或手動輸入；律師可以同時標為已對照原圖。"""
+    return _page_action(m, page_id, lambda s: save_page_text(s, page_id, body.text, m, base_version=body.base_version,
+                                                             verify=body.verify))
+
+
+@router.post("/pages/{page_id}/verify")
+def post_page_verify(page_id: UUID, body: VerifyBody, m: CurrentMember = Depends(current_member)) -> dict:
+    return _page_action(m, page_id, lambda s: verify_page(s, page_id, body.version, m))
+
+
+@router.post("/pages/{page_id}/blank-confirm")
+def post_blank_confirm(page_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    return _page_action(m, page_id, lambda s: confirm_blank(s, page_id, m))
+
+
+@router.post("/documents/{document_id}/reocr")
+def post_reocr(document_id: UUID, request: Request, background: BackgroundTasks, body: ReocrBody | None = None,
+               m: CurrentMember = Depends(current_member)) -> dict:
+    """改用辨識：PDF 的文字層頁改成待辨識並排入辨識（頁數超過上限要確認）。"""
+    body = body or ReocrBody()
+    with tenant_session(m.firm_id) as s:
+        if s.get(Document, document_id) is None:
+            raise HTTPException(404, "找不到文件")
+        try:
+            pages = reocr_document(s, document_id, m)
+        except OcrRuleError as e:
+            raise HTTPException(e.status, e.message)
+        job = _queue(s, document_id, m.id, confirm=body.confirm)
+        out = {"job": job_json(job), "progress": ocr_progress(s, document_id), "pages": pages}
+    schedule(request, background, m.firm_id, [job])
+    return out
