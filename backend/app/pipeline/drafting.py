@@ -7,7 +7,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.ai.prompts import load_prompt
-from app.ai.provider import AIProvider, record_usage
+from app.ai.provider import AIProvider
+from app.ai.usage import call_ai
 from app.ai.schemas import DRAFT_SCHEMA, REWRITE_SCHEMA
 from app.models import Case, Citation, Claim, Draft, Paragraph, ReviewEvent, Round
 from app.numbering import strip_heading_number
@@ -72,9 +73,8 @@ def _items(data: dict) -> list[tuple[str, str]]:
 def draft_round(s: Session, round_id: UUID, provider: AIProvider, member_id: UUID | None) -> Draft:
     rnd = s.get(Round, round_id)
     user = draft_context(s, round_id) + "\n\n" + DRAFT_INSTRUCTION[rnd.brief_kind]
-    result = provider.run(step="draft", system=load_prompt(DRAFT_PROMPT[rnd.brief_kind]), user=user, schema=DRAFT_SCHEMA,
-                          effort="high")
-    record_usage(s, rnd.firm_id, rnd.case_id, member_id, "draft", result)
+    result = call_ai(provider, firm_id=rnd.firm_id, case_id=rnd.case_id, member_id=member_id, step="draft",
+                     system=load_prompt(DRAFT_PROMPT[rnd.brief_kind]), user=user, schema=DRAFT_SCHEMA, effort="high")
     draft = Draft(firm_id=rnd.firm_id, round_id=round_id)
     s.add(draft)
     s.flush()
@@ -122,9 +122,8 @@ def rewrite_paragraph(s: Session, paragraph_id: UUID, instruction: str, provider
     used = [code for _, code in MARKER_RE.findall(p.text or "")]
     user = (draft_context(s, rnd.id, used) + f"\n\n【要重寫的段落】\n標題：{p.heading}\n內文（含引用標記）：\n{p.text}"
             f"\n\n【律師指示】\n{instruction}")
-    result = provider.run(step="rewrite", system=load_prompt("rewrite"), user=user, schema=REWRITE_SCHEMA,
-                          effort="high")
-    record_usage(s, rnd.firm_id, rnd.case_id, member_id, "rewrite", result)
+    result = call_ai(provider, firm_id=rnd.firm_id, case_id=rnd.case_id, member_id=member_id, step="rewrite",
+                     system=load_prompt("rewrite"), user=user, schema=REWRITE_SCHEMA, effort="high")
     before = p.text
     p = s.get(Paragraph, paragraph_id, with_for_update=True, populate_existing=True)  # AI 可能跑了好幾分鐘
     if p is None or p.text != before:

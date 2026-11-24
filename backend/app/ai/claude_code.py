@@ -55,15 +55,25 @@ def classify_failure(payload: dict | None, stderr: str) -> AIError:
     return AIError(kind, text)
 
 
-def _usage(payload: dict) -> Usage:
-    u = payload.get("usage") or {}
+def _usage(payload: dict | None) -> Usage:
+    u = (payload or {}).get("usage") or {}
+    split = u.get("cache_creation")  # 有回報時分 5 分鐘與 1 小時兩種快取寫入，單價不同
+    split = split if isinstance(split, dict) else None
     return Usage(input_tokens=int(u.get("input_tokens") or 0),
                  output_tokens=int(u.get("output_tokens") or 0),
                  cache_read_tokens=int(u.get("cache_read_input_tokens") or 0),
-                 cache_write_tokens=int(u.get("cache_creation_input_tokens") or 0))
+                 cache_write_tokens=int(u.get("cache_creation_input_tokens") or 0),
+                 cache_write_5m=int(split.get("ephemeral_5m_input_tokens") or 0) if split else None,
+                 cache_write_1h=int(split.get("ephemeral_1h_input_tokens") or 0) if split else None)
+
+
+def _with_attempts(e: AIError, attempts: list[Usage]) -> AIError:
+    return AIError(e.kind, e.message, attempts=tuple(attempts))
 
 
 class ClaudeCodeLocalProvider:
+    name = PROVIDER_NAME
+
     def __init__(self, cmd: list[str], model: str):
         self.cmd = list(cmd)
         self.model = model
@@ -101,16 +111,22 @@ class ClaudeCodeLocalProvider:
     def run(self, *, step: str, system: str, user: str, schema: dict, effort: str,
             timeout_s: int = 600) -> AIResult:
         last = AIError("other", "未知錯誤")
+        attempts: list[Usage] = []  # 每次失敗嘗試的用量（輸出不合格也已經花了 token）
         for _ in range(2):  # 輸出不合法或拒答時重試一次
-            payload, stderr, code = self._call(system=system, user=user, schema=schema, effort=effort,
-                                               timeout_s=timeout_s)
+            try:
+                payload, stderr, code = self._call(system=system, user=user, schema=schema, effort=effort,
+                                                   timeout_s=timeout_s)
+            except AIError as e:  # 逾時、找不到執行檔：這次沒有用量資訊
+                raise _with_attempts(e, [*attempts, _usage(None)]) from e
             if payload is None and code != 0:  # CLI 本身出錯（參數不認得、當掉）：保留原始訊息，不重試
-                raise classify_failure(None, stderr.strip() or f"Claude Code 異常結束（結束碼 {code}）")
+                e = classify_failure(None, stderr.strip() or f"Claude Code 異常結束（結束碼 {code}）")
+                raise _with_attempts(e, [*attempts, _usage(None)])
+            attempts.append(_usage(payload))
             if payload is None:
                 last = AIError("invalid_output", f"步驟 {step}：Claude Code 輸出不是 JSON")
                 continue
             if payload.get("is_error"):
-                raise classify_failure(payload, stderr)
+                raise _with_attempts(classify_failure(payload, stderr), attempts)
             if payload.get("stop_reason") == "refusal":
                 last = AIError("refusal", f"步驟 {step}：模型拒絕回答")
                 continue
@@ -118,5 +134,6 @@ class ClaudeCodeLocalProvider:
             if not isinstance(data, dict):
                 last = AIError("invalid_output", f"步驟 {step}：缺少結構化輸出")
                 continue
-            return AIResult(data=data, usage=_usage(payload), provider=PROVIDER_NAME, model=self.model)
-        raise last
+            return AIResult(data=data, usage=attempts[-1], provider=PROVIDER_NAME, model=self.model,
+                            retried=tuple(attempts[:-1]))
+        raise _with_attempts(last, attempts)

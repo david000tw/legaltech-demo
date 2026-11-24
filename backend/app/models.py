@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
-    Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String,
+    Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, Numeric, String,
     Text, UniqueConstraint, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -443,6 +444,7 @@ class UsageRecord(Base):
     __table_args__ = (
         _tfk("case_id", "cases"),
         _tfk("member_id", "members"),
+        _enum("result", ("ok", "failed"), "ck_usage_result"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
@@ -454,8 +456,41 @@ class UsageRecord(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0)  # 快取寫入合計
+    # 來源分開回報時才有值（5 分鐘與 1 小時的單價不同）；沒分開時是 NULL，以 1 小時單價計
+    cache_write_5m_tokens: Mapped[int | None] = mapped_column(Integer)
+    cache_write_1h_tokens: Mapped[int | None] = mapped_column(Integer)
+    result: Mapped[str] = mapped_column(String(10), default="ok", server_default="ok")  # 失敗與內部重試也記
     created_at: Mapped[datetime] = _created()
+
+
+class AIPrice(Base):
+    """AI 單價（每百萬 token，美元），事務所自己的資料；只有事務所管理員能改（設計 5.12）。"""
+    __tablename__ = "ai_prices"
+    __table_args__ = (
+        UniqueConstraint("firm_id", "source", "model", name="uq_ai_price"),
+        _enum("billing", ("metered", "unmetered"), "ck_ai_price_billing"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    firm_id: Mapped[uuid.UUID] = _firm()
+    source: Mapped[str] = mapped_column(String(50))
+    model: Mapped[str] = mapped_column(String(100))
+    input_usd: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    output_usd: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    cache_read_usd: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    cache_write_5m_usd: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    cache_write_1h_usd: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    billing: Mapped[str] = mapped_column(String(10))
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
+class CostSetting(Base):
+    """美元兌新台幣匯率（每家事務所一列）；律師與事務所管理員可以改。"""
+    __tablename__ = "cost_settings"
+    firm_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("firms.id"), primary_key=True)
+    usd_twd: Mapped[Decimal] = mapped_column(Numeric(10, 4))
+    rate_set_on: Mapped[date] = mapped_column(Date)
+    is_default: Mapped[bool] = mapped_column(Boolean)
 
 
 class ExportRecord(Base):

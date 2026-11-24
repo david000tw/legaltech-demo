@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.prompts import load_prompt
-from app.ai.provider import AIProvider, record_usage
+from app.ai.provider import AIProvider
+from app.ai.usage import call_ai
 from app.ai.schemas import CLAIMS_SCHEMA
 from app.ingest.service import current_page_text
 from app.models import Case, CaseParty, Claim, Document, Page, PageText, Round
@@ -103,9 +104,8 @@ def extract_claims(s: Session, round_id: UUID, provider: AIProvider, member_id: 
     user = (case_context(s, case, rnd.brief_kind) + "\n\n"
             f"我方立場：{SIDE_LABEL[case.our_side]}。以下是對造書狀全文，請拆成主張清單。\n\n"
             + format_pages([(op.page_no, filers.get(op.page.document_id, "") + op.text.text) for op in pages]))
-    result = provider.run(step="claims", system=load_prompt("claims"), user=user, schema=CLAIMS_SCHEMA,
-                          effort="medium")
-    record_usage(s, rnd.firm_id, case.id, member_id, "claims", result)
+    result = call_ai(provider, firm_id=rnd.firm_id, case_id=case.id, member_id=member_id, step="claims",
+                     system=load_prompt("claims"), user=user, schema=CLAIMS_SCHEMA, effort="medium")
     by_no = {op.page_no: op for op in pages}
     claims: list[Claim] = []
     for seq, item in enumerate(result.data.get("claims", []), start=1):

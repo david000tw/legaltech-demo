@@ -4,13 +4,13 @@ import sys
 from pathlib import Path
 
 import pytest
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select
 
 from app.ai.claude_code import ClaudeCodeLocalProvider, build_args, child_env
 from app.ai.provider import (
     AIError, AIResult, ProviderNotAllowed, ProviderNotEnabled, Usage, check_startup, get_provider,
-    record_usage,
 )
+from app.ai.usage import call_ai
 from app.ai.tokens import estimate_tokens
 from app.db import tenant_session
 from app.main import create_app
@@ -179,16 +179,25 @@ def test_bedrock_not_enabled(tmp_path):
 
 
 def test_record_usage_stores_no_content(db):
+    """子專案丙改用 call_ai 記用量（record_usage 已移除）；欄位多了成功／失敗與快取寫入分項，仍不存任何內容。"""
     firm_id = create_firm("甲事務所")
     result = AIResult(data={"secret": "對造書狀內容"}, usage=Usage(1, 2, 3, 4), provider="claude_code_local",
                       model="opus")
+
+    class Once:
+        def run(self, **kw):
+            return result
+
+    call_ai(Once(), firm_id=firm_id, case_id=None, member_id=None, step="draft", system="s", user="對造書狀內容",
+            schema={}, effort="low")
     with tenant_session(firm_id) as s:
-        rec = record_usage(s, firm_id, None, None, "draft", result)
-        s.flush()
+        rec = s.scalars(select(UsageRecord)).one()
         assert (rec.input_tokens, rec.output_tokens, rec.cache_read_tokens, rec.cache_write_tokens) == (1, 2, 3, 4)
+        assert rec.result == "ok"
     cols = {c.key for c in inspect(UsageRecord).columns}
     assert cols == {"id", "firm_id", "case_id", "member_id", "step", "provider", "model", "input_tokens",
-                    "output_tokens", "cache_read_tokens", "cache_write_tokens", "created_at"}
+                    "output_tokens", "cache_read_tokens", "cache_write_tokens", "cache_write_5m_tokens",
+                    "cache_write_1h_tokens", "result", "created_at"}
 
 
 def test_estimate_tokens():

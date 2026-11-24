@@ -306,3 +306,37 @@ def test_0011_round_trip(db):
     finally:
         command.upgrade(cfg, "head")
     assert kinds()[1] == ["docx"]
+
+
+def test_0012_round_trip(db):
+    """子專案丙：用量紀錄加成功／失敗與快取寫入分項、單價表、匯率表；舊紀錄升級後是 ok。"""
+    from alembic import command
+
+    from app.db import admin_session
+    from app.models import UsageRecord
+    from tests.helpers import create_firm
+    cfg = _cfg()
+    firm = create_firm("甲事務所")
+    with admin_session() as s:
+        s.add(UsageRecord(firm_id=firm, step="draft", provider="fake", model="fake"))
+
+    def state():
+        eng = create_engine(TEST_ADMIN_DB)
+        try:
+            with eng.connect() as c:
+                tables = set(c.execute(text("select tablename from pg_tables where schemaname='public'")).scalars())
+                cols = set(c.execute(text("select column_name from information_schema.columns "
+                                          "where table_name='usage_records'")).scalars())
+                results = c.execute(text("select result from usage_records")).scalars().all() if "result" in cols else None
+                return tables, cols, results
+        finally:
+            eng.dispose()
+
+    command.downgrade(cfg, "0011")
+    try:
+        tables, cols, _ = state()
+        assert not {"ai_prices", "cost_settings"} & tables and "cache_write_5m_tokens" not in cols
+    finally:
+        command.upgrade(cfg, "head")
+    tables, cols, results = state()
+    assert {"ai_prices", "cost_settings"} <= tables and results == ["ok"]

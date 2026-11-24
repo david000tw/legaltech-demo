@@ -44,9 +44,10 @@ def _use_body(monkeypatch, body):
     monkeypatch.setattr(jobs, "_body_for", lambda step: body)
 
 
-def _usage(firm):
+def _usage(firm, result=None):
     with tenant_session(firm) as s:
-        return s.scalar(select(func.count()).select_from(UsageRecord).where(UsageRecord.step == STEP))
+        q = select(func.count()).select_from(UsageRecord).where(UsageRecord.step == STEP)
+        return s.scalar(q if result is None else q.where(UsageRecord.result == result))
 
 
 def test_job_double_start_refused(case, lawyer_client):
@@ -130,7 +131,8 @@ def test_usage_kept_when_later_batch_fails(case, monkeypatch, db):
     _use_body(monkeypatch, body)
     job_id = _start(firm, case_id)
     jobs.run_job(firm, job_id, db, provider=FakeProvider({STEP: respond}))
-    assert _usage(firm) == 1
+    # 子專案丙：失敗的那一批也記一列 failed（設計 5.12）；成功的第 1 批那列仍在
+    assert _usage(firm) == 2 and _usage(firm, "ok") == 1 and _usage(firm, "failed") == 1
     j = _job(firm, job_id)
     assert j.status == "failed" and j.error.startswith("timeout:")
 
@@ -142,7 +144,7 @@ def test_job_failure_message(case, monkeypatch, db):
     jobs.run_job(firm, job_id, db, provider=FakeProvider({STEP: AIError("usage_limit", "已達用量上限")}))
     j = _job(firm, job_id)
     assert j.status == "failed" and j.error.startswith("usage_limit:") and j.finished_at is not None
-    assert _usage(firm) == 0
+    assert _usage(firm) == 1 and _usage(firm, "failed") == 1  # 子專案丙：失敗的呼叫也記一列 failed
 
 
 def test_job_unexpected_error_is_generic(case, monkeypatch, db):

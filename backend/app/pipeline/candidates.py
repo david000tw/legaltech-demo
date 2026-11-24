@@ -12,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.prompts import load_prompt
-from app.ai.provider import AIError, AIProvider, record_usage
+from app.ai.provider import AIError, AIProvider
+from app.ai.usage import call_ai
 from app.ai.schemas import select_schema
 from app.ai.tokens import estimate_tokens
 from app.corpus.pins import pinned_passages
@@ -228,9 +229,8 @@ def select_for_claims(s: Session, round_id: UUID, provider: AIProvider, member_i
         raise AIError("other", f"對應步驟的輸入過長（約 {estimate_tokens(user):,} token），請減少卷證或拆成多輪")
     codes = {field: sorted((c.code for c in cands.values() if c.kind == kind), key=lambda x: int(x[1:]))
              for field, kind in (("evidence", "evidence"), ("judgments", "judgment"), ("statutes", "statute"))}
-    result = provider.run(step="select", system=load_prompt("select"), user=user, schema=select_schema(codes),
-                          effort="medium")
-    record_usage(s, rnd.firm_id, case.id, member_id, "select", result)
+    result = call_ai(provider, firm_id=rnd.firm_id, case_id=case.id, member_id=member_id, step="select",
+                     system=load_prompt("select"), user=user, schema=select_schema(codes), effort="medium")
 
     by_seq = {c.seq: c for c in claims}
     chosen: dict[int, dict] = {}

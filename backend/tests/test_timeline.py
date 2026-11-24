@@ -255,7 +255,10 @@ def test_timeline_written_once_after_all_batches(db, firm, case_id, monkeypatch)
     view = generate(firm, case_id, FakeProvider({"timeline": respond}), db, status="failed")
     assert [e["description"] for e in view] == ["原告支付醫療費用"]  # 舊事件原封不動
     with tenant_session(firm) as s:
-        assert s.scalar(select(func.count()).select_from(UsageRecord).where(UsageRecord.step == "timeline")) == 2
+        # 子專案丙：第 2 批逾時也記一列 failed（設計 5.12）→ 先前 1 列＋第 1 批 1 列＋第 2 批失敗 1 列
+        assert s.scalar(select(func.count()).select_from(UsageRecord).where(UsageRecord.step == "timeline")) == 3
+        assert s.scalar(select(func.count()).select_from(UsageRecord).where(
+            UsageRecord.step == "timeline", UsageRecord.result == "failed")) == 1
         assert s.scalar(select(func.count()).select_from(TimelineEvent)) == 1
 
 

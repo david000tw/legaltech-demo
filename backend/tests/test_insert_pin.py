@@ -1,6 +1,8 @@
 """子專案丙 Task 3：把釘選的判決插進草稿段落（設計 5.9）。插入一律走 edit_paragraph，現行審核規則全部適用。"""
+import itertools
 import re
 import threading
+from datetime import date
 
 from sqlalchemy import func, select, update
 
@@ -21,16 +23,26 @@ J1_TEXT = "{{quote:J1}}（{{cite:J1}}）"
 _CJK20 = re.compile(r"[一-鿿]{20}")
 
 
+SYNTH = ("本院審酌被告駕駛自用小客車行經交岔路口時未減速慢行致生本件事故應負過失責任。",
+         "本院認系爭車輛之維修費用應扣除零件折舊後始為必要之修復費用故予准許。")
+_seq = itertools.count(1)
+
+
 def _other_reasoning(ctx, skip=()) -> tuple[str, str]:
-    """回傳（段落 id, 取自原文的 20 字）：一段不在本輪候選裡的法院判斷段。"""
+    """回傳（段落 id, 取自原文的 20 字）：建一則合成判決的法院判斷段（不在本輪候選裡）。
+    不從種子隨機挑：有些段落的句子會被驗證判成「可能是當事人主張」（warn），結果不固定。"""
+    n = next(_seq)
+    text = SYNTH[len(skip) % len(SYNTH)]
     with admin_session() as s:
-        used = {str(ctx["j1"]), *skip}
-        for p in s.scalars(select(JudgmentPassage).where(JudgmentPassage.passage_type == "court_reasoning")
-                           .order_by(JudgmentPassage.id)):
-            m = _CJK20.search(p.text)
-            if str(p.id) not in used and m:
-                return str(p.id), m.group(0)
-    raise AssertionError("種子沒有可用的法院判斷段")
+        j = Judgment(citation=f"測試法院113年度插字第{n}號民事判決", court="測試法院", court_level="district",
+                     decided_on=date(2024, 1, 1), source_url="https://example.invalid/", full_text=text,
+                     status="active", curated=False)
+        s.add(j)
+        s.flush()
+        p = JudgmentPassage(judgment_id=j.id, seq=1, passage_type="court_reasoning", text=text, status="active")
+        s.add(p)
+        s.flush()
+        return str(p.id), _CJK20.search(text).group(0)
 
 
 def _pin(firm, case_id, passage_id) -> str:

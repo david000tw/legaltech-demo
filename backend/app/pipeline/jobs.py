@@ -16,8 +16,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.provider import (
-    AIError, AIProvider, AIResult, ProviderNotAllowed, ProviderNotEnabled, get_provider, record_usage,
+    AIError, AIProvider, AIResult, ProviderNotAllowed, ProviderNotEnabled, get_provider,
 )
+from app.ai.usage import call_ai
 from app.config import Settings
 from app.db import tenant_session
 from app.models import AIJob, Case, Firm
@@ -126,9 +127,9 @@ class JobContext:
     def call(self, step: str, system: str, user: str, schema: dict, effort: str) -> AIResult:
         with tenant_session(self.firm_id) as s:  # 已被接手就不再花錢呼叫
             self._running(s)
-        result = self.provider.run(step=step, system=system, user=user, schema=schema, effort=effort)
-        with tenant_session(self.firm_id) as s:  # 獨立交易：之後失敗也不會把用量一起復原
-            record_usage(s, self.firm_id, self.case_id, self.member_id, step, result)
+        result = call_ai(self.provider, firm_id=self.firm_id, case_id=self.case_id, member_id=self.member_id,
+                         step=step, system=system, user=user, schema=schema, effort=effort)  # 用量在獨立交易記錄
+        with tenant_session(self.firm_id) as s:
             job = s.get(AIJob, self.job_id)
             if job is not None and job.status == "running":
                 job.heartbeat_at = _now()

@@ -1,7 +1,7 @@
 """開發用指令（以超級使用者連線，只在開發者本機使用）。
 
 python -m app.cli create-firm --name NAME [--internal]
-python -m app.cli create-member --firm NAME --email E --password P --role lawyer|assistant
+python -m app.cli create-member --firm NAME --email E --password P --role lawyer|assistant|firm_admin
                                 [--bar-number N --bar-verified]
 python -m app.cli import-testcase <dir> --firm NAME
 python -m app.cli load-seed [--resplit]
@@ -124,7 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--firm", required=True)
     m.add_argument("--email", required=True)
     m.add_argument("--password", required=True)
-    m.add_argument("--role", choices=["lawyer", "assistant"], required=True)
+    m.add_argument("--role", choices=["lawyer", "assistant", "firm_admin"], required=True)
     m.add_argument("--display-name")
     m.add_argument("--bar-number")
     m.add_argument("--bar-verified", action="store_true")

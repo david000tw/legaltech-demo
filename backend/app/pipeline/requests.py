@@ -12,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.prompts import load_prompt
-from app.ai.provider import AIProvider, record_usage
+from app.ai.provider import AIProvider
+from app.ai.usage import call_ai
 from app.ai.schemas import REQUESTS_SCHEMA
 from app.amounts import parse_amounts
 from app.ingest.service import current_page_text
@@ -70,9 +71,8 @@ def extract_requests(s: Session, round_id: UUID, provider: AIProvider, member_id
     body = "\n\n".join(f"【{ep.exhibit} 第{ep.page.page_no}頁】\n{ep.text.text}" for ep in pages)
     user = (case_context(s, case, rnd.brief_kind) + "\n\n【案情說明】\n" + (rnd.narrative or "") +
             "\n\n【我方卷證】\n" + body + "\n\n請依規則整理起訴狀要請求的項目。")
-    result = provider.run(step="requests", system=load_prompt("requests"), user=user, schema=REQUESTS_SCHEMA,
-                          effort="medium")
-    record_usage(s, rnd.firm_id, case.id, member_id, "requests", result)
+    result = call_ai(provider, firm_id=rnd.firm_id, case_id=case.id, member_id=member_id, step="requests",
+                     system=load_prompt("requests"), user=user, schema=REQUESTS_SCHEMA, effort="medium")
     by_key = {(normalize_text(ep.exhibit), ep.page.page_no): ep for ep in pages}
     claims: list[Claim] = []
     for seq, item in enumerate(result.data.get("items", []), start=1):
