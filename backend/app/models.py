@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.case_types import ALIGNMENTS, CASE_TYPES, PARTY_ROLES
+from app.ocr.state import OCR_STATES
 
 ROUND_STATUSES = ("created", "extracting", "extracted", "drafting", "drafted", "failed")
 RUNNING_STATUSES = ("extracting", "drafting")
@@ -62,6 +63,15 @@ def _created() -> Mapped[datetime]:
 def _tags() -> Mapped[list]:
     """案型標籤（JSONB 字串陣列，可多個；沒有標籤＝空陣列）。"""
     return mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+
+
+def _jsonb_list() -> Mapped[list]:
+    return mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+
+
+def _flag() -> Mapped[bool]:
+    """預設 False 的布林欄位（類別裡有 text 欄位時不能直接呼叫 sqlalchemy.text）。"""
+    return mapped_column(Boolean, default=False, server_default=text("false"))
 
 
 def _enum(col: str, values: tuple[str, ...], name: str) -> CheckConstraint:
@@ -198,20 +208,30 @@ class Document(Base):
     created_at: Mapped[datetime] = _created()
     # 這份卷證最後一次送 AI 產生說明時的原文指紋；與目前指紋不同＝要重新處理（設計 5.6）
     notes_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    source_images: Mapped[list | None] = mapped_column(JSONB)  # 照片原檔 [{"key","filename"}]（計畫 2A）
+    scan_hint: Mapped[bool] = _flag()  # 看起來是掃描後加文字層
 
 
 class Page(Base):
     __tablename__ = "pages"
     __table_args__ = (
         UniqueConstraint("document_id", "page_no", name="uq_page_doc_no"),
+        _enum("ocr_state", OCR_STATES, "ck_page_ocr_state"),
         _tenant_key("pages"),
         _tfk("document_id", "documents", "CASCADE"),
+        _tfk("blank_confirmed_by", "members"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
     document_id: Mapped[uuid.UUID] = _ref()
     page_no: Mapped[int] = mapped_column(Integer)
-    needs_ocr: Mapped[bool] = mapped_column(Boolean, default=False)
+    needs_ocr: Mapped[bool] = mapped_column(Boolean, default=False)  # 上傳時沒有文字層
+    image_key: Mapped[str | None] = mapped_column(String(300))  # 原圖 PNG（第一次需要時產生）
+    ocr_state: Mapped[str] = mapped_column(String(10), default="none", server_default="none")
+    ocr_error: Mapped[str | None] = mapped_column(Text)
+    proof: Mapped[list | None] = mapped_column(JSONB)  # 校對員結果 [{"text","score","box"}]
+    blank_confirmed_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    blank_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class PageText(Base):
@@ -221,6 +241,8 @@ class PageText(Base):
         UniqueConstraint("page_id", "version", name="uq_page_text_version"),
         _tenant_key("page_texts"),
         _tfk("page_id", "pages", "CASCADE"),
+        _tfk("verified_by", "members"),
+        _tfk("created_by", "members"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
@@ -230,6 +252,12 @@ class PageText(Base):
     text: Mapped[str] = mapped_column(Text)
     verified_against_image: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = _created()
+    # 辨識或手動輸入的文字：寫進書狀前要律師對照原圖（計畫 2A）
+    needs_image_check: Mapped[bool] = _flag()
+    verified_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    alerts: Mapped[list] = _jsonb_list()
 
 
 class Exhibit(Base):
@@ -390,6 +418,7 @@ class Paragraph(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     kind: Mapped[str] = mapped_column(String(20), default="body", server_default="body")  # statement＝訴之聲明、答辯聲明
     amounts_confirmed: Mapped[list] = _tags()  # 律師按「已核對金額」放行的金額（欄位名 text 遮蔽了 sqlalchemy.text，借用 _tags）
+    source_notice: Mapped[str | None] = mapped_column(Text)  # 例：「依據頁已修正」（計畫 2A）
 
 
 class Citation(Base):
@@ -510,11 +539,8 @@ class ExportRecord(Base):
     created_at: Mapped[datetime] = _created()
 
 
-AI_JOB_STEPS = ("evidence_notes", "timeline", "health")
-
-
-def _jsonb_list() -> Mapped[list]:
-    return mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+AI_JOB_STEPS = ("evidence_notes", "timeline", "health", "ocr")
+AI_JOB_STATUSES = ("running", "done", "failed", "waiting")  # waiting＝辨識頁數超過上限，等律師確認
 
 
 class AIJob(Base):
@@ -522,15 +548,17 @@ class AIJob(Base):
     __tablename__ = "ai_jobs"
     __table_args__ = (
         _enum("step", AI_JOB_STEPS, "ck_ai_job_step"),
-        _enum("status", ("running", "done", "failed"), "ck_ai_job_status"),
+        _enum("status", AI_JOB_STATUSES, "ck_ai_job_status"),
         _tfk("case_id", "cases", "CASCADE"),
         _tfk("round_id", "rounds", "CASCADE"),
         _tfk("member_id", "members"),
+        _tfk("document_id", "documents", "CASCADE"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
     case_id: Mapped[uuid.UUID] = _ref()
     round_id: Mapped[uuid.UUID | None] = _ref(nullable=True)  # 健檢才有輪次
+    document_id: Mapped[uuid.UUID | None] = _ref(nullable=True)  # 辨識工作掛在文件上
     step: Mapped[str] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(String(10), default="running")
     member_id: Mapped[uuid.UUID | None] = _ref(nullable=True)

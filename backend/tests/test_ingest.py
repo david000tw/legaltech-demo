@@ -218,3 +218,21 @@ def test_create_round_locks_case_row(lawyer_client):
     case_id = new_case(client)
     stmts = _capture_sql(lambda: client.post(f"/api/cases/{case_id}/rounds"))
     assert any("FROM cases" in st and "FOR UPDATE" in st for st in stmts)
+
+
+def test_ingest_sets_ocr_state(lawyer_client):
+    """計畫 2A：沒有文字的頁待辨識（pending），有文字的頁不用辨識（none）。"""
+    client, firm_id, _ = lawyer_client
+    case_id = new_case(client)
+    d = docx.Document()
+    d.add_paragraph("診斷：右腕骨折。")
+    buf = io.BytesIO()
+    d.save(buf)
+    ids = [upload(client, case_id, name, data).json()["id"] for name, data in (
+        ("掃描檔.pdf", blank_pdf(1)),
+        ("判決.pdf", (FIXTURES / "tcev_113_3946.pdf").read_bytes()),
+        ("診斷.docx", buf.getvalue()),
+    )]
+    with tenant_session(firm_id) as s:
+        states = [{p.ocr_state for p in s.scalars(select(Page).where(Page.document_id == i))} for i in ids]
+    assert states == [{"pending"}, {"none"}, {"none"}]

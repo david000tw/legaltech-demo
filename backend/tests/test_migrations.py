@@ -340,3 +340,91 @@ def test_0012_round_trip(db):
         command.upgrade(cfg, "head")
     tables, cols, results = state()
     assert {"ai_prices", "cost_settings"} <= tables and results == ["ok"]
+
+
+def _cols(table: str) -> set[str]:
+    eng = create_engine(TEST_ADMIN_DB)
+    try:
+        with eng.connect() as c:
+            return set(c.execute(text("select column_name from information_schema.columns where table_name=:t"),
+                                 {"t": table}).scalars())
+    finally:
+        eng.dispose()
+
+
+def test_0013_round_trip(db):
+    """計畫 2A：頁的辨識狀態、頁文字的對照欄位、AI 工作掛在文件上。"""
+    from alembic import command
+    cfg = _cfg()
+    command.downgrade(cfg, "0012")
+    try:
+        assert "ocr_state" not in _cols("pages")
+        assert "needs_image_check" not in _cols("page_texts")
+        assert "document_id" not in _cols("ai_jobs")
+    finally:
+        command.upgrade(cfg, "head")
+    assert {"ocr_state", "image_key", "ocr_error", "proof", "blank_confirmed_by", "blank_confirmed_at"} <= _cols("pages")
+    assert {"needs_image_check", "verified_by", "verified_at", "created_by", "alerts"} <= _cols("page_texts")
+    assert {"source_images", "scan_hint"} <= _cols("documents")
+    assert "source_notice" in _cols("paragraphs")
+    assert "document_id" in _cols("ai_jobs")
+
+
+def _ocr_case():
+    from app.db import admin_session
+    from app.models import Case, Document
+    from tests.helpers import create_firm
+    firm = create_firm("甲事務所")
+    with admin_session() as s:
+        case = Case(firm_id=firm, title="林大明車禍案", our_side="plaintiff", case_type="traffic_tort")
+        s.add(case)
+        s.flush()
+        doc = Document(firm_id=firm, case_id=case.id, kind="evidence", filename="掃描.pdf", storage_key="k",
+                       sha256="0" * 64, page_count=2)
+        s.add(doc)
+        s.flush()
+        return firm, case.id, doc.id
+
+
+def test_0013_backfills_ocr_state(db):
+    """舊資料升級：沒有文字層、也還沒有頁文字的頁是 pending，其餘是 none。"""
+    from alembic import command
+
+    from app.db import admin_session
+    from app.models import Page, PageText
+    firm, _, doc = _ocr_case()
+    with admin_session() as s:
+        scanned = Page(firm_id=firm, document_id=doc, page_no=1, needs_ocr=True)
+        texted = Page(firm_id=firm, document_id=doc, page_no=2, needs_ocr=False)
+        s.add_all([scanned, texted])
+        s.flush()
+        s.add(PageText(firm_id=firm, page_id=texted.id, version=1, source="text_layer", text="診斷證明書"))
+        ids = {"scanned": scanned.id, "texted": texted.id}
+    cfg = _cfg()
+    command.downgrade(cfg, "0012")
+    command.upgrade(cfg, "head")
+    with admin_session() as s:
+        assert s.get(Page, ids["scanned"]).ocr_state == "pending"
+        assert s.get(Page, ids["texted"]).ocr_state == "none"
+
+
+def test_0013_job_step_and_status(db):
+    """0013 之後可以寫入 step='ocr'、status='waiting'；降版時先刪掉這些列。"""
+    from alembic import command
+
+    from app.db import admin_session
+    from app.models import AIJob
+    firm, case, doc = _ocr_case()
+    with admin_session() as s:
+        s.add(AIJob(firm_id=firm, case_id=case, document_id=doc, step="ocr", status="waiting"))
+        s.add(AIJob(firm_id=firm, case_id=case, step="timeline", status="done"))
+    cfg = _cfg()
+    command.downgrade(cfg, "0012")
+    try:
+        eng = create_engine(TEST_ADMIN_DB)
+        with eng.connect() as c:
+            steps = c.execute(text("select step from ai_jobs")).scalars().all()
+        eng.dispose()
+        assert steps == ["timeline"]
+    finally:
+        command.upgrade(cfg, "head")

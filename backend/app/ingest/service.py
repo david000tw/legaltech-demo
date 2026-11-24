@@ -28,7 +28,8 @@ def ingest_document(s: Session, firm_id: UUID, case_id: UUID, kind: str, filenam
     s.add(doc)
     s.flush()
     for pe in pages:
-        page = Page(firm_id=firm_id, document_id=doc.id, page_no=pe.page_no, needs_ocr=pe.text is None)
+        page = Page(firm_id=firm_id, document_id=doc.id, page_no=pe.page_no, needs_ocr=pe.text is None,
+                    ocr_state="pending" if pe.text is None else "none")
         s.add(page)
         s.flush()
         if pe.text is not None:

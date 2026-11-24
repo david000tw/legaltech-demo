@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 dist/
+
+# 手寫驗收照片可能含拍攝地點（計畫 2A）
+docs/acceptance/handwriting/
