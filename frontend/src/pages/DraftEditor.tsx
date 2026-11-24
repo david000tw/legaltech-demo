@@ -5,6 +5,7 @@ import AppShell from '../components/AppShell'
 import CitationTag from '../components/CitationTag'
 import EvidenceNotesSection from '../components/EvidenceNotesSection'
 import ExportButton, { reasonLabel } from '../components/ExportButton'
+import FilingPackageButton from '../components/FilingPackageButton'
 import PinnedPanel from '../components/PinnedPanel'
 import SourcePane from '../components/SourcePane'
 import StatementBlock, { AmountButtons, ClaimValueField } from '../components/StatementBlock'
@@ -210,6 +211,7 @@ export default function DraftEditor() {
             <p className="rounded bg-yellow-50 p-2 text-sm text-yellow-800">{draft.procedure_warning}</p>
           )}
           <ExportButton blockers={draft.blockers} onExport={doExport} />
+          <FilingPackageButton draftId={draftId} blockers={draft.blockers} canReview={draft.can_review} />
         </div>
       </div>
       {error && <p className="text-sm text-red-700">{error}</p>}

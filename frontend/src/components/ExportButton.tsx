@@ -36,7 +36,7 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
 }
 
 // 阻擋原因的位置：聲明與整份書狀沒有段落編號
-function blockerPlace(b: Blocker): string {
+export function blockerPlace(b: Blocker): string {
   if (b.scope === 'draft') return '整份書狀'
   if (b.scope === 'statement') return '聲明'
   return `第 ${b.paragraph_no ?? b.paragraph_seq} 段`

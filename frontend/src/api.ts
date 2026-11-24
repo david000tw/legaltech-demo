@@ -221,6 +221,23 @@ export const reviewParagraph = (id: string, version: string) =>
 export const renumberExhibit = (id: string, number: number) =>
   req<{ id: string; label: string; number: number }>(`/exhibits/${id}`, json('PATCH', { number }))
 
+// 電子遞狀包（設計 5.11）：書狀、證物清單、引用到的證物原檔、說明打包成 zip；檔名取自回應標頭
+export async function downloadFilingPackage(draftId: string): Promise<{ blob: Blob; filename: string }> {
+  const r = await fetch(`/api/drafts/${draftId}/filing-package`, { method: 'POST', credentials: 'same-origin' })
+  if (r.status === 409) throw new ExportBlockedError((await r.json()).blockers)
+  if (!r.ok) throw await apiError(r)
+  const m = /filename\*=UTF-8''([^;]+)/i.exec(r.headers.get('Content-Disposition') ?? '')
+  let filename = '遞狀包.zip'
+  if (m) {
+    try {
+      filename = decodeURIComponent(m[1])
+    } catch {
+      // 標頭編碼壞掉時用預設檔名
+    }
+  }
+  return { blob: await r.blob(), filename }
+}
+
 export async function exportDraft(draftId: string): Promise<Blob> {
   const r = await fetch(`/api/drafts/${draftId}/export`, { method: 'POST', credentials: 'same-origin' })
   if (r.status === 409) throw new ExportBlockedError((await r.json()).blockers)

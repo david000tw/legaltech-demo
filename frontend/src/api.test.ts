@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ExportBlockedError, exportDraft, patchParagraph, reviewParagraph, uploadDocument } from './api'
+import {
+  downloadFilingPackage, ExportBlockedError, exportDraft, patchParagraph, reviewParagraph, uploadDocument,
+} from './api'
 
 function respond(status: number, body: unknown) {
   const f = vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }))
@@ -9,6 +11,20 @@ function respond(status: number, body: unknown) {
 
 describe('api', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('downloads the filing package with the UTF-8 filename from the response', async () => {
+    const f = vi.fn(async () => new Response('zip', { status: 200, headers: {
+      'Content-Disposition': "attachment; filename=filing-package.zip; filename*=UTF-8''%E6%B0%91%E4%BA%8B%E8%B5%B7%E8%A8%B4%E7%8B%80_%E9%81%9E%E7%8B%80%E5%8C%85.zip" } }))
+    vi.stubGlobal('fetch', f)
+    const r = await downloadFilingPackage('dr1')
+    expect(r.filename).toBe('民事起訴狀_遞狀包.zip')
+    expect(r.blob.size).toBe(3)
+    expect(f).toHaveBeenCalledWith('/api/drafts/dr1/filing-package', expect.objectContaining({ method: 'POST' }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('x', { status: 200 })))
+    expect((await downloadFilingPackage('dr1')).filename).toBe('遞狀包.zip')
+    respond(409, { blockers: [{ paragraph_seq: 2, reason: 'unreviewed' }] })
+    await expect(downloadFilingPackage('dr1')).rejects.toBeInstanceOf(ExportBlockedError)
+  })
 
   it('exports with POST and turns 409 into ExportBlockedError with the blockers', async () => {
     const f = respond(409, { blockers: [{ paragraph_seq: 2, reason: 'unreviewed' }] })
