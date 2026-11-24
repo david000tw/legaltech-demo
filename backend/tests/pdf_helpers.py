@@ -16,11 +16,11 @@ def _jpeg(png_or_jpeg: bytes) -> tuple[bytes, int, int]:
 
 
 def image_pdf_with_text_layer(png_or_jpeg: bytes, text: str) -> bytes:
-    """一頁 A4：整頁一個 DCT 圖片物件，加上 Helvetica 的一行文字（text 只能是 ASCII）。"""
+    """一頁 A4：整頁一個 DCT 圖片物件，加上 Helvetica 的一行隱形文字（3 Tr，同掃描器的 OCR 文字層；text 只能是 ASCII）。"""
     jpg, w, h = _jpeg(png_or_jpeg)
     safe = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
     content = (f"q {PAGE_W} 0 0 {PAGE_H} 0 0 cm /Im0 Do Q\n"
-               f"BT /F1 12 Tf 40 {PAGE_H - 40} Td ({safe}) Tj ET\n").encode("ascii")
+               f"BT 3 Tr /F1 12 Tf 40 {PAGE_H - 40} Td ({safe}) Tj ET\n").encode("ascii")
     objs = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
