@@ -6,6 +6,8 @@ import CaseDetail from './pages/CaseDetail'
 import Cases from './pages/Cases'
 import DraftEditor from './pages/DraftEditor'
 import Login from './pages/Login'
+import ToolsPage from './pages/ToolsPage'
+import UsagePage from './pages/UsagePage'
 
 function RequireLogin({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<api.Me | null | 'checking' | 'out'>('checking')
@@ -24,6 +26,8 @@ export default function App() {
       <Route path="/cases" element={<RequireLogin><Cases /></RequireLogin>} />
       <Route path="/cases/:caseId" element={<RequireLogin><CaseDetail /></RequireLogin>} />
       <Route path="/drafts/:draftId" element={<RequireLogin><DraftEditor /></RequireLogin>} />
+      <Route path="/tools" element={<RequireLogin><ToolsPage /></RequireLogin>} />
+      <Route path="/usage" element={<RequireLogin><UsagePage /></RequireLogin>} />
       <Route path="*" element={<Navigate to="/cases" replace />} />
     </Routes>
   )

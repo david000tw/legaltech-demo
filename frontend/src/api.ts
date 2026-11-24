@@ -278,3 +278,42 @@ export const importJudgment = (caseId: string, url: string) =>
 export const insertPin = (paragraphId: string, pinId: string, quote: string) =>
   req<{ paragraph_id: string; code: string }>(`/paragraphs/${paragraphId}/insert-pin`,
     json('POST', { pin_id: pinId, quote }))
+
+// 裁判費與期限試算（設計 5.10）：每個結果附逐步依據；notes 一定含「試算僅供參考，律師須自行核對」
+export type ToolStep = { label: string; value: string; basis: string }
+export type FeeInput = { property: boolean; amount: number; instance: 1 | 2 | 3; appeal_amount?: number }
+export type FeeResult = { fee: number | null; steps: ToolStep[]; notes: string[] }
+export type ServiceMethod = 'direct' | 'deposit' | 'public' | 'foreign_public' | 'continued_public'
+export type ServiceInput = { who: 'party' | 'attorney'; served_on: string; method: ServiceMethod }
+export type DeadlineProcedure = 'civil' | 'family_litigation' | 'family_nonlitigation'
+export type DeadlineInput = { kind: 'appeal' | 'interlocutory' | 'custom'; procedure: DeadlineProcedure
+  services: ServiceInput[]; travel_days: number; attorney_local: boolean; custom_days?: number }
+export type DeadlineResult = { due: string; steps: ToolStep[]; notes: string[] }
+export type ToolDefaults = { amount: number | null; amount_label: string; deadline_procedure: DeadlineProcedure
+  copies: number | null; copies_steps: ToolStep[]; notes: string[] }
+export const courtFee = (body: FeeInput) => req<FeeResult>('/tools/court-fee', json('POST', body))
+export const deadline = (body: DeadlineInput) => req<DeadlineResult>('/tools/deadline', json('POST', body))
+export const toolDefaults = (caseId: string) => req<ToolDefaults>(`/cases/${caseId}/tool-defaults`)
+
+// 用量與費用（設計 5.12）：律師與事務所管理員可看、可改匯率；單價只有事務所管理員能改
+export type UsageRow = { source: string; model: string; step: string; calls: number; failed: number; input: number
+  output: number; cache_read: number; cache_write: number; usd: number | null; twd: number | null
+  billing: 'metered' | 'unmetered' | null; priced: boolean }
+export type Money = { usd: number; twd: number }
+export type RateView = { usd_twd: number; rate_set_on: string; is_default: boolean }
+export type UsageSummary = { rows: UsageRow[]; totals: { metered: Money; unmetered: Money }; notes: string[]
+  rate: RateView; filters: { months: string[]; steps: string[]; sources: string[]; models: string[]
+    cases: { id: string; title: string }[] } }
+export type UsageFilters = { month?: string; case_id?: string; step?: string; source?: string; model?: string }
+export type Price = { id: string; source: string; model: string; input_usd: number; output_usd: number
+  cache_read_usd: number; cache_write_5m_usd: number; cache_write_1h_usd: number; billing: 'metered' | 'unmetered'
+  note: string }
+export type PriceValues = Omit<Price, 'id' | 'source' | 'model'>
+export const getUsage = (filters: UsageFilters = {}) => {
+  const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v) as [string, string][]).toString()
+  return req<UsageSummary>(`/usage${qs ? `?${qs}` : ''}`)
+}
+export const getPrices = () => req<Price[]>('/usage/prices')
+export const postPrice = (body: Omit<Price, 'id'>) => req<Price>('/usage/prices', json('POST', body))
+export const putPrice = (id: string, body: PriceValues) => req<Price>(`/usage/prices/${id}`, json('PUT', body))
+export const putRate = (body: { usd_twd: number; rate_set_on: string }) => req<RateView>('/usage/rate', json('PUT', body))
