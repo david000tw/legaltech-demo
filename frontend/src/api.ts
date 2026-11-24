@@ -254,3 +254,27 @@ export const getPageSource = (pageId: string, quote: string) =>
 export const runHealthCheck = (roundId: string) => req<{ job: JobView }>(`/rounds/${roundId}/health`, json('POST'))
 export const getHealthReport = (roundId: string) =>
   req<{ report: HealthReportView | null; job: JobView | null }>(`/rounds/${roundId}/health`)
+
+// 判決檢索與釘選（設計 5.9）：只列法院判斷段；pin_id 有值＝本案已釘選
+export type PassageView = { passage_id: string; citation: string; court: string; decided_on: string; text: string
+  annotation: string | null; pin_id: string | null; note: string }
+export type ImportedJudgment = { judgment: { citation: string; court: string; decided_on: string }; created: boolean
+  passages: PassageView[] }
+export const searchJudgments = (caseId: string, q: string, scope: 'case_type' | 'all') =>
+  req<{ results: PassageView[]; terms: string[] }>(
+    `/cases/${caseId}/judgment-search?q=${encodeURIComponent(q)}&scope=${scope}`)
+export const listPins = (caseId: string) => req<PassageView[]>(`/cases/${caseId}/pins`)
+export const pinPassage = (caseId: string, passageId: string, note: string) =>
+  req<PassageView>(`/cases/${caseId}/pins`, json('POST', { passage_id: passageId, note }))
+export const patchPin = (pinId: string, note: string) => req<PassageView>(`/pins/${pinId}`, json('PATCH', { note }))
+export async function deletePin(pinId: string): Promise<void> {
+  const r = await fetch(`/api/pins/${pinId}`, { method: 'DELETE', credentials: 'same-origin' })
+  if (!r.ok) throw await apiError(r)
+}
+// 貼司法院判決網址加入判決庫：伺服器自己向司法院下載
+export const importJudgment = (caseId: string, url: string) =>
+  req<ImportedJudgment>(`/cases/${caseId}/judgments/import`, json('POST', { url }))
+// 把釘選的判決插到草稿段落結尾；引文必填（至少 15 字、取自判決原文）
+export const insertPin = (paragraphId: string, pinId: string, quote: string) =>
+  req<{ paragraph_id: string; code: string }>(`/paragraphs/${paragraphId}/insert-pin`,
+    json('POST', { pin_id: pinId, quote }))

@@ -10,7 +10,8 @@ vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
   return { ...real, getDraft: vi.fn(), getCitationSource: vi.fn(), confirmCitation: vi.fn(), confirmCourt: vi.fn(), reviewParagraph: vi.fn(),
     patchParagraph: vi.fn(), rewriteParagraph: vi.fn(), exportDraft: vi.fn(), confirmAmount: vi.fn(),
-    ackAmounts: vi.fn(), patchRound: vi.fn(), getEvidenceNotes: vi.fn(), getTimeline: vi.fn(), getPageSource: vi.fn() }
+    ackAmounts: vi.fn(), patchRound: vi.fn(), getEvidenceNotes: vi.fn(), getTimeline: vi.fn(), getPageSource: vi.fn(),
+    listPins: vi.fn(), insertPin: vi.fn() }
 })
 
 const draft: api.DraftView = {
@@ -369,5 +370,15 @@ describe('DraftEditor side tabs', () => {
     await userEvent.click(screen.getByRole('tab', { name: '卷證說明' }))
     expect(api.getEvidenceNotes).toHaveBeenCalledWith('c1')
     expect(screen.queryByRole('button', { name: '產生卷證說明' })).not.toBeInTheDocument()
+  })
+
+  it('draft page has the 已釘選判決 tab', async () => {
+    vi.mocked(api.listPins).mockResolvedValue([])
+    renderEditor()
+    const tabs = await screen.findAllByRole('tab')
+    expect(tabs.map((t) => t.textContent)).toEqual(['原文對照', '卷證說明', '大事記', '已釘選判決'])
+    await userEvent.click(screen.getByRole('tab', { name: '已釘選判決' }))
+    expect(api.listPins).toHaveBeenCalledWith('c1')
+    expect(await screen.findByText('還沒有釘選的判決：請到案件頁的「判決檢索」分頁搜尋並釘選。')).toBeInTheDocument()
   })
 })

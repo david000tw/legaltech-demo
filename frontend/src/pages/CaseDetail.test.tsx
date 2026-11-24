@@ -13,7 +13,7 @@ vi.mock('../api', async (orig) => {
     addRequest: vi.fn(), deleteClaim: vi.fn(), uploadDocument: vi.fn(),
     renumberExhibit: vi.fn(), getCaseOptions: vi.fn(), patchCase: vi.fn(), putParties: vi.fn(), setDocumentFiler: vi.fn(),
     getEvidenceNotes: vi.fn(), getTimeline: vi.fn(), getHealthReport: vi.fn(), runHealthCheck: vi.fn(),
-    getPageSource: vi.fn() }
+    getPageSource: vi.fn(), listPins: vi.fn(), searchJudgments: vi.fn() }
 })
 
 const emptyHeader: api.CaseHeader = { court: null, case_number: null, division: null, cause: null, addressee: null,
@@ -531,8 +531,9 @@ describe('CaseDetail tabs', () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [drafted('r1', 1)] })
     vi.mocked(api.getRound).mockResolvedValue(roundDetail('r1', 'drafted'))
     renderAt()
+    vi.mocked(api.listPins).mockResolvedValue([])
     const expected: Record<string, string> = { 案件資料: '修改狀頭', 卷證與時間軸: '上傳卷證', 書狀: '建立新一輪',
-      書狀健檢: '執行健檢' }
+      判決檢索: '搜尋', 書狀健檢: '執行健檢' }
     for (const [tab, primary] of Object.entries(expected)) {
       await openTab(tab)
       const panel = screen.getByRole('tabpanel')

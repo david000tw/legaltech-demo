@@ -9,6 +9,7 @@ import AppShell from '../components/AppShell'
 import CaseHeaderFields from '../components/CaseHeaderFields'
 import EvidenceNotesSection from '../components/EvidenceNotesSection'
 import HealthTab from '../components/HealthTab'
+import JudgmentSearchTab from '../components/JudgmentSearchTab'
 import PartiesEditor from '../components/PartiesEditor'
 import RequestItemsEditor from '../components/RequestItemsEditor'
 import SourcePane from '../components/SourcePane'
@@ -478,7 +479,9 @@ function ExhibitRow({ exhibit, scanned, onSaved, onError }: {
   )
 }
 
-const TABS = [['info', '案件資料'], ['evidence', '卷證與時間軸'], ['briefs', '書狀'], ['health', '書狀健檢']] as const
+const TABS = [
+  ['info', '案件資料'], ['evidence', '卷證與時間軸'], ['briefs', '書狀'], ['search', '判決檢索'], ['health', '書狀健檢'],
+] as const
 type TabKey = typeof TABS[number][0]
 
 export default function CaseDetail() {
@@ -642,6 +645,8 @@ export default function CaseDetail() {
               ))}
             </section>
           )}
+
+          {tab === 'search' && <JudgmentSearchTab caseId={caseId} />}
 
           {tab === 'health' && (
             <div className={source ? 'grid gap-4 lg:grid-cols-[1fr_24rem]' : ''}>

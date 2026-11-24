@@ -5,13 +5,14 @@ import AppShell from '../components/AppShell'
 import CitationTag from '../components/CitationTag'
 import EvidenceNotesSection from '../components/EvidenceNotesSection'
 import ExportButton, { reasonLabel } from '../components/ExportButton'
+import PinnedPanel from '../components/PinnedPanel'
 import SourcePane from '../components/SourcePane'
 import StatementBlock, { AmountButtons, ClaimValueField } from '../components/StatementBlock'
 import TimelineSection from '../components/TimelineSection'
 import { BTN_SECONDARY } from '../ui'
 
 // 草稿頁左側：原文對照（引用與出處的原文）、卷證說明、大事記（設計 5.6、5.7，只看不改）
-const SIDE_TABS = [['source', '原文對照'], ['notes', '卷證說明'], ['timeline', '大事記']] as const
+const SIDE_TABS = [['source', '原文對照'], ['notes', '卷證說明'], ['timeline', '大事記'], ['pinned', '已釘選判決']] as const
 type SideTab = typeof SIDE_TABS[number][0]
 
 function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
@@ -230,6 +231,10 @@ export default function DraftEditor() {
           )}
           {tab === 'timeline' && (
             <div className="p-3"><TimelineSection caseId={draft.case_id} compact onShowSource={showPageSource} /></div>
+          )}
+          {tab === 'pinned' && (
+            <PinnedPanel caseId={draft.case_id} onInserted={() => void load()}
+              paragraphs={draft.paragraphs.map((p, i) => ({ id: p.id, no: i + 1, heading: p.heading_text }))} />
           )}
         </aside>
         <div className="space-y-4">
