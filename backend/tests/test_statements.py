@@ -168,6 +168,26 @@ def test_estate_complaint_without_value_blocked(db):
     assert Blocker(0, "claim_value_missing", 0, "draft") not in _blockers(ctx)
 
 
+def test_draft_view_shows_claim_value(db):
+    # 草稿頁要能看到並填寫訴訟標的金額／價額（只有非金錢請求時沒有預設值，要律師填）
+    ctx, cs = make_brief(db, case_type="estate_partition", amounts=(), non_money=1)
+    url = f"/api/drafts/{ctx['draft_id']}"
+    assert cs["lawyer"].get(url).json()["claim_value"] == {"label": "訴訟標的價額", "value": None}
+    cs["lawyer"].patch(f"/api/rounds/{ctx['round_id']}", json={"claim_value": 2255150})
+    assert cs["lawyer"].get(url).json()["claim_value"] == {"label": "訴訟標的價額", "value": 2255150}
+
+
+def test_draft_view_claim_value_defaults_to_total(db):
+    ctx, cs = make_brief(db)
+    assert cs["lawyer"].get(f"/api/drafts/{ctx['draft_id']}").json()["claim_value"] == {
+        "label": "訴訟標的金額", "value": 405000}
+
+
+def test_draft_view_no_claim_value_for_other_kinds(db):
+    ctx, cs = make_brief(db, kind="answer")
+    assert cs["lawyer"].get(f"/api/drafts/{ctx['draft_id']}").json()["claim_value"] is None
+
+
 def _export_lines(ctx, cs):
     force_reviewed(ctx["firm"], ctx["draft_id"])
     r = cs["lawyer"].post(f"/api/drafts/{ctx['draft_id']}/export")

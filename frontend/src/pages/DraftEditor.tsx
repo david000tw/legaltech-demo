@@ -4,7 +4,7 @@ import * as api from '../api'
 import CitationTag from '../components/CitationTag'
 import ExportButton, { reasonLabel } from '../components/ExportButton'
 import SourcePane from '../components/SourcePane'
-import StatementBlock, { AmountButtons } from '../components/StatementBlock'
+import StatementBlock, { AmountButtons, ClaimValueField } from '../components/StatementBlock'
 
 function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
   p: api.ParagraphView
@@ -194,6 +194,9 @@ export default function DraftEditor() {
           <SourcePane source={source} citation={sourceCitation} canReview={draft.can_review} onConfirmCourt={confirmCourt} />
         </aside>
         <div className="space-y-4">
+          {draft.claim_value && (
+            <ClaimValueField key={`cv-${draft.claim_value.value}`} draft={draft} onChanged={load} onError={setError} />
+          )}
           {draft.statement && (
             <StatementBlock key={`${draft.statement.id}-${draft.statement.text}`} draft={draft} onChanged={load}
               onError={setError} />

@@ -15,7 +15,7 @@ from app.pipeline.drafting import ParagraphChanged, rewrite_paragraph
 from app.pipeline.requests import amount_note, pending_ocr_pages
 from app.statements import AMOUNT_MARKER, round_total, statement_template
 from app.pipeline.run import (STALE_AFTER, RoundBusy, RoundRule, reset_round, run_draft, run_extract,
-                              start_stage)
+                              settings_editable, start_stage)
 
 router = APIRouter(prefix="/api")
 
@@ -80,13 +80,13 @@ class RoundSettingsBody(BaseModel):
 
 @router.patch("/rounds/{round_id}")
 def patch_round(round_id: UUID, body: RoundSettingsBody, m: CurrentMember = Depends(current_member)) -> dict:
-    """輪次設定（設計 5.2）。拆解前與待確認時都能改；訴訟標的金額只影響 Word 狀頭，起草後也能補填。"""
+    """輪次設定（設計 5.2）。拆解前、待確認、拆解失敗或逾時都能改；訴訟標的金額只影響 Word 狀頭，起草後也能補填。"""
     fields = body.model_dump(exclude_unset=True)
     with tenant_session(m.firm_id) as s:
         rnd = s.get(Round, round_id, with_for_update=True)
         if rnd is None:
             raise HTTPException(404, "找不到輪次")
-        if set(fields) != {"claim_value"} and rnd.status not in ("created", "extracted"):
+        if set(fields) != {"claim_value"} and not settings_editable(rnd):
             raise HTTPException(409, "這一輪已開始起草，不能再改設定；訴訟標的金額仍可補填")
         for k, v in fields.items():
             setattr(rnd, k, v)

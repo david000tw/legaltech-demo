@@ -52,13 +52,13 @@ def test_unverified_amount_blocks_until_confirmed(db):
     assert ok
 
 
-def _plain_draft(firm, evidence, text):
+def _plain_draft(firm, evidence, text, heading="關於損害"):
     case_id, rid = make_round(firm, evidence=evidence)
     with tenant_session(firm) as s:
         draft = Draft(firm_id=firm, round_id=rid)
         s.add(draft)
         s.flush()
-        p = Paragraph(firm_id=firm, draft_id=draft.id, seq=1, heading="關於損害", text=text, status="unreviewed",
+        p = Paragraph(firm_id=firm, draft_id=draft.id, seq=1, heading=heading, text=text, status="unreviewed",
                       verify_reasons=[])
         s.add(p)
         s.flush()
@@ -143,3 +143,36 @@ def test_checked_statement_not_scanned(db):
     assert not any(r.startswith("amount_unverified") for r in statement)
     with tenant_session(ctx["firm"]) as s:
         assert s.get(Round, ctx["round_id"]).amounts_checked_by is not None
+
+
+def _add_request(firm, pid, *, quote_verified, found):
+    from app.models import Claim
+    with tenant_session(firm) as s:
+        rid = s.get(Draft, s.get(Paragraph, pid).draft_id).round_id
+        s.add(Claim(firm_id=firm, round_id=rid, seq=1, summary="醫療費用", quote="醫療費用共計48,000元",
+                    quote_verified=quote_verified, kind="request", request_type="monetary", amount=45000,
+                    evidence=[{"quote": "醫療費用支出48,000元", "found": found}]))
+
+
+def test_amount_from_unfound_quote_not_allowed(db):
+    # AI 編的原文摘錄（畫面標紅「未找到原文」）不能拿來放行正文的金額（設計 5.1、5.5）
+    from tests.helpers import create_firm
+    firm = create_firm("甲事務所")
+    pid = _plain_draft(firm, {}, "原告支出醫療費用新臺幣48,000元。")
+    _add_request(firm, pid, quote_verified=False, found=False)
+    assert _amount_reasons(firm, pid) == ["amount_unverified:48000"]
+
+
+def test_amount_from_found_quote_allowed(db):
+    from tests.helpers import create_firm
+    firm = create_firm("甲事務所")
+    pid = _plain_draft(firm, {}, "原告支出醫療費用新臺幣48,000元。")
+    _add_request(firm, pid, quote_verified=True, found=True)
+    assert _amount_reasons(firm, pid) == []
+
+
+def test_amount_in_heading_checked(db):
+    from tests.helpers import create_firm
+    firm = create_firm("甲事務所")
+    pid = _plain_draft(firm, {}, "原告受有損害。", heading="醫療費用新臺幣49,000元")
+    assert _amount_reasons(firm, pid) == ["amount_unverified:49000"]

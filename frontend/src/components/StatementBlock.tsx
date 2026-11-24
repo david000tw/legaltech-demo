@@ -23,6 +23,41 @@ export function AmountButtons({ reasons, canReview, onConfirm }: {
   )
 }
 
+// 起訴狀狀頭的訴訟標的金額／價額：只有非金錢請求時沒有預設值，要律師填才能匯出
+export function ClaimValueField({ draft, onChanged, onError }: {
+  draft: api.DraftView; onChanged: () => Promise<void>; onError: (m: string | null) => void
+}) {
+  const cv = draft.claim_value!
+  const [value, setValue] = useState(cv.value === null ? '' : String(cv.value))
+  const [busy, setBusy] = useState(false)
+  const amount = Number(value)
+  const valid = value.trim() !== '' && Number.isInteger(amount) && amount >= 0
+  async function save() {
+    setBusy(true)
+    onError(null)
+    try {
+      await api.patchRound(draft.round_id, { claim_value: amount })
+      await onChanged()
+    } catch (e) {
+      onError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm">
+      <label className="text-slate-700">
+        {cv.label}（新臺幣元）
+        <input type="number" min={0} step={1} value={value} onChange={(e) => setValue(e.target.value)}
+          aria-label={`${cv.label}（新臺幣元）`} className="ml-2 w-40 rounded border border-slate-300 px-2 py-1" />
+      </label>
+      <button type="button" disabled={busy || !valid} onClick={save} aria-label={`儲存${cv.label}`}
+        className="rounded border px-3 py-1 disabled:opacity-50">儲存</button>
+      <span className="text-xs text-slate-500">印在 Word 狀頭；有金錢請求時預設為請求項目加總</span>
+    </div>
+  )
+}
+
 export default function StatementBlock({ draft, onChanged, onError }: {
   draft: api.DraftView; onChanged: () => Promise<void>; onError: (m: string | null) => void
 }) {

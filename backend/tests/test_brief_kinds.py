@@ -1,4 +1,5 @@
 """子專案甲 Task 3：書狀名稱、聲明範本、建立輪次時選書狀種類、輪次設定（設計 5.1～5.3）。"""
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import pytest
@@ -141,6 +142,24 @@ def test_patch_round_settings_only_before_draft(lawyer_client):
     with tenant_session(firm) as s:
         assert s.get(Round, rid).claim_value == 500000
     assert client.patch(f"/api/rounds/{rid}", json={"statement_variant": "other"}).status_code == 422
+
+
+@pytest.mark.parametrize("status,failed_stage,minutes_ago,expected", [
+    ("failed", "extract", 0, 200),      # 拆解失敗（例如卷證都是掃描檔）：補上卷證後要能改案情說明再拆解
+    ("extracting", None, 46, 200),      # 拆解逾時：畫面的「重新開始」會先存設定
+    ("extracting", None, 1, 409),       # 正在拆解中
+    ("failed", "draft", 0, 409),        # 起草失敗：重新起草不用改設定
+])
+def test_patch_round_settings_when_extract_can_restart(lawyer_client, status, failed_stage, minutes_ago, expected):
+    client, firm, _ = lawyer_client
+    cid = _case(client, "plaintiff")
+    rid = client.post(f"/api/cases/{cid}/rounds", json={}).json()["id"]
+    with tenant_session(firm) as s:
+        rnd = s.get(Round, rid)
+        rnd.status, rnd.failed_stage = status, failed_stage
+        rnd.started_at = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    r = client.patch(f"/api/rounds/{rid}", json={"narrative": "補充：請求醫療費"})
+    assert r.status_code == expected, r.text
 
 
 def _answer_round(firm):

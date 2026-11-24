@@ -316,9 +316,11 @@ def allowed_amounts(s: Session, p: Paragraph) -> set[int]:
                       .where(Document.case_id == rnd.case_id, Document.kind == "evidence")).all()
     texts = [pt.text for pt in (current_page_text(s, pg.id) for pg in pages) if pt is not None]
     texts += [op.text.text for op in opponent_pages(s, rnd.id) if op.text is not None]
+    # 原文摘錄只算「確實在原文找到」的（設計 5.1）：畫面標紅「未找到原文」的摘錄可能是 AI 編的，不能拿來放行金額
     for c in s.scalars(select(Claim).where(Claim.round_id == rnd.id)):
-        texts.append(c.quote or "")
-        texts += [e.get("quote", "") for e in c.evidence or []]
+        if c.quote_verified:
+            texts.append(c.quote or "")
+        texts += [e.get("quote") or "" for e in c.evidence or [] if e.get("found")]
     for t in texts:
         out.update(parse_amounts(t))
     return out
@@ -369,7 +371,7 @@ def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
     opp = [op.text.text for op in opponent_pages(s, _round_id_for(s, p)) if op.text is not None]
     for head in scan_inline_quotes(p.heading, opp) + scan_inline_quotes(p.text, opp):
         reasons.append(f"inline_quote_unverified:{head}")
-    reasons.extend(amount_reasons(s, p, body))
+    reasons.extend(amount_reasons(s, p, f"{p.heading or ''}\n{body}"))  # 標題也會印進書狀，金額一起核對
     if p.kind == "statement":
         reasons.extend(statement_reasons(s, p))
     for c in cites.values():

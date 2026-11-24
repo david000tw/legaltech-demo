@@ -88,7 +88,9 @@ export type DraftView = { id: string; round_id: string; case_id: string; can_rev
   procedure_warning: string | null; paragraphs: ParagraphView[]; blockers: Blocker[]
   // 起訴狀、答辯狀的聲明區塊（放在內文前、不佔段落編號）；body_label＝內文標題（事實及理由／答辯理由）
   brief_kind?: BriefKind; case_type?: string; statement?: ParagraphView | null; statement_label?: string | null
-  body_label?: string | null }
+  body_label?: string | null
+  // 起訴狀狀頭的訴訟標的金額（有金錢請求，預設＝請求項目加總）或價額（只有非金錢請求，要律師填）；其他書狀為 null
+  claim_value?: { label: string; value: number | null } | null }
 export type CitationSource = { kind: string; title: string; text: string; span: [number, number] | null
   annotation?: string | null }
 export type CitationInput = { code: string; quote: string }

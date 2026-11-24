@@ -50,6 +50,14 @@ def _stale(rnd: Round) -> bool:
     return rnd.status in RUNNING_STATUSES and (rnd.started_at is None or _now() - rnd.started_at > STALE_AFTER)
 
 
+def settings_editable(rnd: Round) -> bool:
+    """輪次設定（案情說明、連帶、假執行…）能改的時機＝還沒起草，且現在能（重新）拆解或在待確認。
+    與 _check_transition 的拆解條件一致：拆解失敗、拆解逾時時，畫面會先存設定再重新拆解。"""
+    return (rnd.status in ("created", "extracted")
+            or (rnd.status == "failed" and rnd.failed_stage == "extract")
+            or (rnd.status == "extracting" and _stale(rnd)))
+
+
 def _check_transition(rnd: Round, stage: Stage) -> None:
     if rnd.status == "drafted":
         raise RoundBusy("這一輪已完成起草；要重寫請用「以這一輪為基礎重新起草」")

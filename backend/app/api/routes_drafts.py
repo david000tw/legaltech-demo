@@ -23,7 +23,7 @@ from app.review.service import (
     renumber_exhibit,
 )
 from app.text_norm import find_quote
-from app.statements import BODY_LABEL, STATEMENT_LABEL, statement_of
+from app.statements import BODY_LABEL, STATEMENT_LABEL, claim_value, statement_of
 from app.verify.citations import body_paragraphs, export_blockers, is_removed, paragraph_citations
 
 router = APIRouter(prefix="/api")
@@ -92,6 +92,9 @@ def get_draft(draft_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
                 "statement": paragraph_json(s, statement, 0) if statement is not None else None,
                 "statement_label": STATEMENT_LABEL.get(rnd.brief_kind),
                 "body_label": BODY_LABEL.get(rnd.brief_kind),
+                # 起訴狀狀頭的訴訟標的金額／價額：草稿頁要能看到並補填（只有非金錢請求時必須律師填）
+                "claim_value": (dict(zip(("label", "value"), claim_value(s, rnd)))
+                                if rnd.brief_kind == "complaint" else None),
                 "paragraphs": [paragraph_json(s, p, n) for n, p in enumerate(body_paragraphs(s, draft_id), start=1)],
                 "blockers": [blocker_json(b) for b in blockers]}
 

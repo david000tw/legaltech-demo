@@ -10,7 +10,7 @@ vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
   return { ...real, getDraft: vi.fn(), getCitationSource: vi.fn(), confirmCitation: vi.fn(), confirmCourt: vi.fn(), reviewParagraph: vi.fn(),
     patchParagraph: vi.fn(), rewriteParagraph: vi.fn(), exportDraft: vi.fn(), confirmAmount: vi.fn(),
-    ackAmounts: vi.fn() }
+    ackAmounts: vi.fn(), patchRound: vi.fn() }
 })
 
 const draft: api.DraftView = {
@@ -274,6 +274,33 @@ describe('DraftEditor procedure', () => {
     expect(api.reviewParagraph).toHaveBeenCalledWith('st1', 'sv1')
     expect(screen.getByText('整份書狀：請填寫訴訟標的價額')).toBeInTheDocument()
     expect(screen.getByText('聲明：段落尚未審核')).toBeInTheDocument()
+  })
+
+  it('complaint lets the lawyer fill in a missing claim value', async () => {
+    // 只有非金錢請求（分割遺產）時，訴訟標的價額要律師填，否則無法匯出
+    vi.mocked(api.getDraft).mockResolvedValue({ ...complaint, case_type: 'estate_partition',
+      claim_value: { label: '訴訟標的價額', value: null } })
+    vi.mocked(api.patchRound).mockResolvedValue({})
+    renderEditor()
+    const input = await screen.findByLabelText('訴訟標的價額（新臺幣元）')
+    expect(input).toHaveValue(null)
+    await userEvent.type(input, '2255150')
+    await userEvent.click(screen.getByRole('button', { name: '儲存訴訟標的價額' }))
+    expect(api.patchRound).toHaveBeenCalledWith('r1', { claim_value: 2255150 })
+    await waitFor(() => expect(api.getDraft).toHaveBeenCalledTimes(2))
+  })
+
+  it('money complaint shows the computed claim value', async () => {
+    vi.mocked(api.getDraft).mockResolvedValue({ ...complaint, claim_value: { label: '訴訟標的金額', value: 405000 } })
+    renderEditor()
+    expect(await screen.findByLabelText('訴訟標的金額（新臺幣元）')).toHaveValue(405000)
+  })
+
+  it('no claim value field for other brief kinds', async () => {
+    vi.mocked(api.getDraft).mockResolvedValue({ ...complaint, brief_kind: 'answer', claim_value: null })
+    renderEditor()
+    await screen.findByTestId('statement-block')
+    expect(screen.queryByLabelText(/訴訟標的/)).not.toBeInTheDocument()
   })
 
   it('estate answer shows the alternative-partition hint', async () => {
