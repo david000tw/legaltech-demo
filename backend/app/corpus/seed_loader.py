@@ -10,7 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.corpus.splitter import split_judgment
-from app.models import Candidate, Citation, Judgment, JudgmentPassage, Statute, StatuteArticle
+from app.models import Candidate, Citation, Judgment, JudgmentPassage, PinnedPassage, Statute, StatuteArticle
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +22,8 @@ def _opt_date(v: str | None) -> date | None:
 def _referenced(admin_s: Session, judgment_id) -> bool:
     ids = select(JudgmentPassage.id).where(JudgmentPassage.judgment_id == judgment_id)
     return bool(admin_s.scalar(select(Candidate.id).where(Candidate.judgment_passage_id.in_(ids)).limit(1))
-                or admin_s.scalar(select(Citation.id).where(Citation.judgment_passage_id.in_(ids)).limit(1)))
+                or admin_s.scalar(select(Citation.id).where(Citation.judgment_passage_id.in_(ids)).limit(1))
+                or admin_s.scalar(select(PinnedPassage.id).where(PinnedPassage.judgment_passage_id.in_(ids)).limit(1)))
 
 
 def _insert_passages(admin_s: Session, j: Judgment) -> None:

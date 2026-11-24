@@ -15,6 +15,7 @@ from app.ai.prompts import load_prompt
 from app.ai.provider import AIError, AIProvider, record_usage
 from app.ai.schemas import select_schema
 from app.ai.tokens import estimate_tokens
+from app.corpus.pins import pinned_passages
 from app.corpus.search import article_display, search_articles, search_pages, search_passages
 from app.exhibit_labels import evidence_label
 from app.ingest.service import current_page_text
@@ -71,7 +72,11 @@ def build_candidates(s: Session, round_id: UUID) -> list[Candidate]:
         hit_ids = {pt.id for q in queries for pt in search_pages(s, rnd.case_id, q, PAGES_PER_CLAIM)}
         evidence = [pt for pt in all_pages if pt.id in hit_ids]
     case_type = s.get(Case, rnd.case_id).case_type  # 同類型加權、不排除（設計 5.3）
-    passages = _unique([p for q in queries for p in search_passages(s, q, PASSAGES_PER_CLAIM, case_type=case_type)])
+    # 律師釘選的段落排最前面，一定拿到最前面的 J 代碼（設計 5.9）
+    pinned = pinned_passages(s, rnd.case_id)
+    pinned_ids = {p.id for p in pinned}
+    passages = _unique(pinned + [p for q in queries
+                                 for p in search_passages(s, q, PASSAGES_PER_CLAIM, case_type=case_type)])
     articles = _unique([a for q in queries for a in search_articles(s, q, ARTICLES_PER_CLAIM, case_type=case_type)])
 
     out: list[Candidate] = []
@@ -80,7 +85,7 @@ def build_candidates(s: Session, round_id: UUID) -> list[Candidate]:
                              page_text_id=pt.id))
     for i, p in enumerate(passages, start=1):
         out.append(Candidate(firm_id=rnd.firm_id, round_id=round_id, code=f"J{i}", kind="judgment",
-                             judgment_passage_id=p.id))
+                             judgment_passage_id=p.id, pinned=p.id in pinned_ids))
     for i, a in enumerate(articles, start=1):
         out.append(Candidate(firm_id=rnd.firm_id, round_id=round_id, code=f"S{i}", kind="statute",
                              statute_article_id=a.id))
@@ -105,7 +110,8 @@ def candidate_source(s: Session, c: Candidate) -> tuple[str, str]:
         p = s.get(JudgmentPassage, c.judgment_passage_id)
         j = s.get(Judgment, p.judgment_id)
         note = f"【註記：{j.annotation}】" if j.annotation else ""  # 少數見解等，AI 與律師都要看到
-        return f"{j.citation}（法院判斷段）{note}", p.text
+        pin = "【律師釘選】" if c.pinned else ""
+        return f"{j.citation}（法院判斷段）{note}{pin}", p.text
     a = s.get(StatuteArticle, c.statute_article_id)
     return article_display(a.statute.name, a.article_no), a.text
 

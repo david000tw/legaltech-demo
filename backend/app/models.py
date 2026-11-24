@@ -348,6 +348,8 @@ class Candidate(Base):
     page_text_id: Mapped[uuid.UUID | None] = _ref(nullable=True)
     judgment_passage_id: Mapped[uuid.UUID | None] = _public_fk("judgment_passages.id")
     statute_article_id: Mapped[uuid.UUID | None] = _public_fk("statute_articles.id")
+    # 建候選時這段是不是律師釘選；之後取消釘選不改變舊輪次的標示
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
 
 
 class Draft(Base):
@@ -496,6 +498,23 @@ class AIJob(Base):
     heartbeat_at: Mapped[datetime] = _created()
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class PinnedPassage(Base):
+    """律師在案件裡釘選的判決法院判斷段（設計 5.9）：之後每一輪建候選時排在最前面。"""
+    __tablename__ = "pinned_passages"
+    __table_args__ = (
+        UniqueConstraint("case_id", "judgment_passage_id", name="uq_pinned_passage"),
+        _tfk("case_id", "cases", "CASCADE"),
+        _tfk("pinned_by", "members"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    firm_id: Mapped[uuid.UUID] = _firm()
+    case_id: Mapped[uuid.UUID] = _ref()
+    judgment_passage_id: Mapped[uuid.UUID] = _public_fk("judgment_passages.id", nullable=False)
+    note: Mapped[str] = mapped_column(Text, default="")
+    pinned_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    created_at: Mapped[datetime] = _created()
 
 
 class EvidenceNote(Base):

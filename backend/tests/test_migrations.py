@@ -182,3 +182,29 @@ def test_0005_keeps_old_rounds_usable(db):
         eng.dispose()
     assert got[4] == "created" and got[5] == "failed" and got[6] == "failed"
     assert events == 0
+
+
+def test_0008_round_trip(db):
+    """子專案丙：釘選表與候選的「律師釘選」欄位可以降級再升級。"""
+    from alembic import command
+    cfg = _cfg()
+
+    def schema():
+        eng = create_engine(TEST_ADMIN_DB)
+        try:
+            with eng.connect() as c:
+                tables = set(c.execute(text("select tablename from pg_tables where schemaname='public'")).scalars())
+                cols = set(c.execute(text("select column_name from information_schema.columns "
+                                          "where table_name='candidates'")).scalars())
+                return tables, cols
+        finally:
+            eng.dispose()
+
+    command.downgrade(cfg, "0007")
+    try:
+        tables, cols = schema()
+        assert "pinned_passages" not in tables and "pinned" not in cols
+    finally:
+        command.upgrade(cfg, "head")
+    tables, cols = schema()
+    assert "pinned_passages" in tables and "pinned" in cols
