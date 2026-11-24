@@ -16,6 +16,7 @@ from app.db import tenant_session
 from app.ingest.extract import UnreadableFile, UnsupportedFile
 from app.ingest.service import current_page_text, ingest_document
 from app.models import Case, CaseParty, Document, Exhibit, Member, Page, Round
+from app.pipeline.jobs import job_json, latest_job
 
 router = APIRouter(prefix="/api")
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -214,6 +215,8 @@ def get_case(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
             # 建立輪次時可選的書狀種類：原告不能寫答辯狀，被告不能寫起訴狀（設計 5.1）
             "brief_kind_options": [{"code": k, "label": BRIEF_KINDS[k]} for k in allowed_brief_kinds(case.our_side)],
             "default_brief_kind": default_brief_kind(case.our_side, bool(rounds)),
+            # 卷證說明、大事記的 AI 工作狀態（前端據此輪詢；設計 5.6、5.7）
+            "jobs": {step: job_json(latest_job(s, case_id, None, step)) for step in ("evidence_notes", "timeline")},
         }
 
 

@@ -48,3 +48,18 @@ REQUESTS_SCHEMA = _obj({
         "evidence": {"type": "array", "items": _obj({"exhibit": _STR, "page_no": _INT, "quote": _STR})},
     })},
 })
+
+
+# 卷證說明（設計 5.6）：每份卷證的證明方向與注意事項，每句附頁碼與逐字摘錄；說「沒有寫、不存在」的句子標 absence
+EVIDENCE_NOTES_SCHEMA = _obj({
+    "documents": {"type": "array", "items": _obj({
+        "exhibit": _STR,
+        "notes": {"type": "array", "items": _obj({
+            "kind": {"type": "string", "enum": ["proves", "caution"]},
+            "text": _STR,
+            "absence": {"type": "boolean"},
+            "page_no": _INT,
+            "quote": _STR,
+        })},
+    })},
+})

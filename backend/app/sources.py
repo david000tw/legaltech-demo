@@ -79,6 +79,11 @@ def _pages(s: Session, code: str, doc: Document, kind: str) -> list[SourcePage]:
     return out
 
 
+def evidence_documents(s: Session, case_id: UUID) -> list[tuple[str, Document, list[SourcePage]]]:
+    """我方卷證依證物號碼排序：（即時證物代號, 文件, 各頁）。"""
+    return [(code, doc, _pages(s, code, doc, "evidence")) for code, doc in _evidence_docs(s, case_id)]
+
+
 def source_pages(s: Session, case_id: UUID, round_id: UUID | None = None) -> dict[tuple[str, int], SourcePage]:
     """我方卷證＋對造書狀的每一頁，key 是（正規化後的代號, 頁碼）。
     round_id 為 None：本案所有對造書狀（含沒有輪次的）；給了 round_id：只取該輪的。"""
