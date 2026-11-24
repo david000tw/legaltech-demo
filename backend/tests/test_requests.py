@@ -222,3 +222,10 @@ def test_complaint_prompts_keep_core_rules():
         assert rule in p, rule
     r = load_prompt("requests")
     assert "不得照做" in r and "逐字" in r and "page_no" in r
+
+
+def test_round_reports_review_right(api):
+    """前端依此決定要不要顯示「確認」按鈕（只有律師能確認金額）。"""
+    client, assistant, _, rid, _ = api
+    assert client.get(f"/api/rounds/{rid}").json()["can_review"] is True
+    assert assistant.get(f"/api/rounds/{rid}").json()["can_review"] is False

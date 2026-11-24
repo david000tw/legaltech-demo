@@ -9,7 +9,8 @@ import CaseDetail from './CaseDetail'
 vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
   return { ...real, getCase: vi.fn(), getRound: vi.fn(), createRound: vi.fn(), extractRound: vi.fn(), draftRound: vi.fn(),
-    resetRound: vi.fn(), patchClaim: vi.fn(), uploadDocument: vi.fn(),
+    resetRound: vi.fn(), patchClaim: vi.fn(), copyRound: vi.fn(), patchRound: vi.fn(), confirmClaim: vi.fn(),
+    addRequest: vi.fn(), deleteClaim: vi.fn(), uploadDocument: vi.fn(),
     renumberExhibit: vi.fn(), getCaseOptions: vi.fn(), patchCase: vi.fn(), putParties: vi.fn(), setDocumentFiler: vi.fn() }
 })
 
@@ -30,7 +31,10 @@ const baseCase: api.CaseDetail = {
     { id: 'e1', label: '原證1', prefix: '原證', number: 1, document_id: 'd1', filename: '01_研判表.txt' },
     { id: 'e2', label: '原證2', prefix: '原證', number: 2, document_id: 'd2', filename: '02_掃描收據.pdf' },
   ],
-  rounds: [{ id: 'r1', seq: 1, status: 'failed', error: "usage_limit: You've hit your session limit" }],
+  rounds: [{ id: 'r1', seq: 1, status: 'failed', error: "usage_limit: You've hit your session limit",
+    brief_kind: 'preparatory', failed_stage: 'extract', copied_from_seq: null }],
+  brief_kind_options: [{ code: 'complaint', label: '起訴狀' }, { code: 'preparatory', label: '準備書狀' }],
+  default_brief_kind: 'preparatory',
 }
 
 function renderAt(state?: unknown) {
@@ -259,7 +263,7 @@ describe('CaseDetail brief filer and notices', () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null }] })
     vi.mocked(api.getRound).mockResolvedValueOnce(extracted)
       .mockResolvedValue({ ...extracted, claims: [extracted.claims[0], { ...extracted.claims[1], selected: false }] })
-    vi.mocked(api.patchClaim).mockResolvedValue({ id: 'k2', selected: false })
+    vi.mocked(api.patchClaim).mockResolvedValue({ ...extracted.claims[1], selected: false })
     renderAt()
     const box = await screen.findByRole('checkbox', { name: '回應 主張2' })
     expect(box).toBeChecked()
@@ -306,5 +310,93 @@ describe('CaseDetail brief filer and notices', () => {
     renderAt()
     await userEvent.click(await screen.findByRole('button', { name: '重新起草' }))
     expect(api.draftRound).toHaveBeenCalledWith('r1')
+  })
+
+  // ---- 子專案甲 Task 8：書狀種類、起訴狀請求項目、重新起草 ----
+  const complaintRound: api.RoundDetail = { ...extracted, brief_kind: 'complaint', can_review: true,
+    narrative: '請求醫療費與慰撫金', joint_liability: false, provisional_execution: true, claim_value: null,
+    statement_variant: null, total_amount: 45000, pending_ocr_pages: ['原證3 第1頁'],
+    statement_preview: '一、被告應給付原告新臺幣45,000元，及自起訴狀繕本送達翌日起至清償日止，按週年利率百分之五計算之利息。',
+    claims: [
+      { id: 'q1', seq: 1, kind: 'request', selected: true, summary: '醫療費用', quote: '醫療費用合計新臺幣45,000元',
+        quote_verified: true, page_no: 1, request_type: 'monetary', amount: 45000, amount_note: null, basis_text: null,
+        confirmed: true, evidence: [{ exhibit: '原證1', page_no: 1, quote: '醫療費用合計新臺幣45,000元', found: true }] },
+      { id: 'q2', seq: 2, kind: 'request', selected: true, summary: '車輛修復費', quote: '', quote_verified: false,
+        page_no: null, request_type: 'monetary', amount: 160000, amount_note: 'amount_not_in_evidence', basis_text: null,
+        confirmed: false, evidence: [{ exhibit: '原證2', page_no: 1, quote: '修復費160,000元', found: false }] },
+    ] }
+
+  it('draft button disabled while request items are unconfirmed, with the reason', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase,
+      rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null, brief_kind: 'complaint', failed_stage: null,
+        copied_from_seq: null }] })
+    vi.mocked(api.getRound).mockResolvedValue(complaintRound)
+    vi.mocked(api.confirmClaim).mockResolvedValue(complaintRound.claims[1])
+    renderAt()
+    expect(await screen.findByText('第1輪・起訴狀')).toBeInTheDocument()
+    expect(await screen.findByText('還有 1 個請求項目尚未確認')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '起草' })).toBeDisabled()
+    expect(screen.getByText('金額未在卷證中找到')).toBeInTheDocument()
+    expect(screen.getByText('原文出處：原證1 第1頁')).toBeInTheDocument()
+    expect(screen.getByText('未找到原文')).toBeInTheDocument()
+    expect(screen.getByText('合計新臺幣45,000元')).toBeInTheDocument()
+    expect(screen.getByText(/待辨識，未處理：原證3 第1頁/)).toBeInTheDocument()
+    expect(screen.getByText(/被告應給付原告新臺幣45,000元/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '確認 請求項目2' }))
+    expect(api.confirmClaim).toHaveBeenCalledWith('q2')
+  })
+
+  it('assistants cannot confirm request items', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase,
+      rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null, brief_kind: 'complaint', failed_stage: null,
+        copied_from_seq: null }] })
+    vi.mocked(api.getRound).mockResolvedValue({ ...complaintRound, can_review: false })
+    renderAt()
+    expect(await screen.findByText('第1輪・起訴狀')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '確認 請求項目2' })).not.toBeInTheDocument()
+  })
+
+  it('complaint asks for a narrative before extracting', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase,
+      rounds: [{ id: 'r1', seq: 1, status: 'created', error: null, brief_kind: 'complaint', failed_stage: null,
+        copied_from_seq: null }] })
+    vi.mocked(api.getRound).mockResolvedValue({ ...complaintRound, status: 'created', narrative: null, claims: [] })
+    vi.mocked(api.patchRound).mockResolvedValue({})
+    vi.mocked(api.extractRound).mockResolvedValue({ status: 'extracting' })
+    renderAt()
+    await userEvent.type(await screen.findByLabelText('案情說明'), '原告請求醫療費。')
+    await userEvent.click(screen.getByRole('button', { name: '拆解' }))
+    expect(api.patchRound).toHaveBeenCalledWith('r1', expect.objectContaining({ narrative: '原告請求醫療費。' }))
+    expect(api.extractRound).toHaveBeenCalledWith('r1')
+    expect(screen.queryByLabelText('上傳對造書狀')).not.toBeInTheDocument()
+  })
+
+  it('copy button only on drafted rounds', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase,
+      rounds: [{ id: 'r1', seq: 1, status: 'drafted', error: null, brief_kind: 'preparatory', failed_stage: null,
+        copied_from_seq: null }, { id: 'r2', seq: 2, status: 'extracted', error: null, brief_kind: 'preparatory',
+        failed_stage: null, copied_from_seq: 1 }] })
+    vi.mocked(api.getRound).mockImplementation(async (id: string) => id === 'r1'
+      ? { ...extracted, id: 'r1', status: 'drafted', draft_id: 'dr1' } : { ...extracted, id: 'r2', seq: 2 })
+    vi.mocked(api.copyRound).mockResolvedValue({ id: 'r3', seq: 3 })
+    renderAt()
+    expect(await screen.findByText('（由第1輪複製）')).toBeInTheDocument()
+    const buttons = await screen.findAllByRole('button', { name: '以這一輪為基礎重新起草' })
+    expect(buttons).toHaveLength(1)
+    await userEvent.click(buttons[0])
+    expect(api.copyRound).toHaveBeenCalledWith('r1')
+  })
+
+  it('new round form offers complaint for plaintiff', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [],
+      brief_kind_options: [{ code: 'complaint', label: '起訴狀' }, { code: 'preparatory', label: '準備書狀' }],
+      default_brief_kind: 'complaint' })
+    vi.mocked(api.createRound).mockResolvedValue({ id: 'r1', seq: 1 })
+    renderAt()
+    const select = await screen.findByLabelText('書狀種類')
+    expect(select).toHaveValue('complaint')
+    await userEvent.selectOptions(select, 'preparatory')
+    await userEvent.click(screen.getByRole('button', { name: '建立新一輪' }))
+    expect(api.createRound).toHaveBeenCalledWith('c1', 'preparatory')
   })
 })

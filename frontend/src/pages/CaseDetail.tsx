@@ -6,6 +6,7 @@ import {
 } from '../caseForms'
 import CaseHeaderFields from '../components/CaseHeaderFields'
 import PartiesEditor from '../components/PartiesEditor'
+import RequestItemsEditor from '../components/RequestItemsEditor'
 
 const POLL_MS = 3000
 const STATUS_LABEL: Record<api.RoundStatus, string> = {
@@ -13,11 +14,18 @@ const STATUS_LABEL: Record<api.RoundStatus, string> = {
 }
 
 const partyLabel = (p: api.Party) => `${p.role} ${p.name}`
+const KIND_LABEL: Record<api.BriefKind, string> = { complaint: '起訴狀', answer: '答辯狀', preparatory: '準備書狀' }
 
-function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
-  caseId: string; round: api.RoundSummary; parties: api.Party[]; briefs: api.CaseDocument[]; onChanged: () => void
+function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
+  caseId: string; caseType: string; round: api.RoundSummary; parties: api.Party[]; briefs: api.CaseDocument[]
+  onChanged: () => void
 }) {
   const [detail, setDetail] = useState<api.RoundDetail | null>(null)
+  // 起訴狀的案情說明與聲明設定：律師改過的值優先，否則用後端存的值
+  const [narrative, setNarrative] = useState<string | null>(null)
+  const [joint, setJoint] = useState<boolean | null>(null)
+  const [provisional, setProvisional] = useState<boolean | null>(null)
+  const [deceased, setDeceased] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -87,7 +95,22 @@ function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
     }
   }
 
-  const extract = () => act(() => api.extractRound(round.id))
+  const kind = detail?.brief_kind ?? round.brief_kind ?? 'preparatory'
+  const complaint = kind === 'complaint'
+  const narrativeText = narrative ?? detail?.narrative ?? ''
+  const jointValue = joint ?? detail?.joint_liability ?? false
+  const provisionalValue = provisional ?? detail?.provisional_execution ?? true
+  const deceasedValue = deceased ?? detail?.statement_variant === 'deceased'
+  // 起訴狀：先存案情說明與聲明設定，再拆解（AI 依案情說明與卷證整理請求項目）
+  const extract = () => act(async () => {
+    if (complaint) {
+      await api.patchRound(round.id, { narrative: narrativeText, joint_liability: jointValue,
+        provisional_execution: provisionalValue,
+        ...(caseType === 'nominee_registration' ? { statement_variant: deceasedValue ? 'deceased' : 'alive' } : {}) })
+    }
+    await api.extractRound(round.id)
+  })
+  const copy = () => act(async () => { await api.copyRound(round.id); onChanged() })
   const draft = () => act(() => api.draftRound(round.id))
   // 重新拆解：律師改過勾選時後端要求確認，確認後再送一次
   const reset = () => act(async () => {
@@ -114,13 +137,22 @@ function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
   // 可以上傳書狀、按「拆解」：還沒拆解、拆解失敗、或拆解逾時
   const editable = status === 'created' || (status === 'failed' && failedStage !== 'draft')
     || (status === 'extracting' && stale)
-  const claims = detail?.claims ?? []
+  const claims = (detail?.claims ?? []).filter((c) => c.kind !== 'request')
+  const requests = (detail?.claims ?? []).filter((c) => c.kind === 'request')
   const unticked = claims.filter((c) => !c.selected).length
+  const unconfirmed = requests.filter((c) => !c.confirmed).length
+  // 起草前提：準備書狀、答辯狀至少勾一條主張；起訴狀每個請求項目都要律師確認
+  const draftBlockedReason = complaint
+    ? (requests.length === 0 ? '還沒有任何請求項目' : unconfirmed > 0 ? `還有 ${unconfirmed} 個請求項目尚未確認` : null)
+    : (claims.length > 0 && claims.every((c) => !c.selected) ? '沒有勾選任何主張' : null)
   const byId = new Map(parties.map((p) => [p.id, p]))
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-slate-800">第 {round.seq} 輪</h3>
+        <h3 className="font-semibold text-slate-800">
+          {`第${round.seq}輪・${KIND_LABEL[kind]}`}
+          {round.copied_from_seq ? <span className="ml-1 text-sm font-normal text-slate-500">{`（由第${round.copied_from_seq}輪複製）`}</span> : null}
+        </h3>
         <span className="text-sm text-slate-600">{STATUS_LABEL[status]}{stale ? '（逾時，可重新開始）' : ''}</span>
       </div>
       {stale && (status === 'extracting' || status === 'drafting') && (
@@ -128,6 +160,9 @@ function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
           className="mt-2 rounded border border-amber-400 px-3 py-1 text-sm text-amber-800 disabled:opacity-50">
           重新開始
         </button>
+      )}
+      {!stale && (status === 'extracting' || status === 'drafting') && (
+        <p className="mt-2 text-sm text-slate-600">AI 處理中，請稍候</p>
       )}
       {status === 'failed' && error && <p className="mt-2 rounded bg-red-50 p-2 text-sm text-red-700">{error}</p>}
       {briefs.length > 0 && (
@@ -152,7 +187,33 @@ function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
           ))}
         </ul>
       )}
-      {editable && (
+      {editable && complaint && (
+        <div className="mt-3 space-y-2 text-sm">
+          <label className="block text-slate-700">
+            案情說明
+            <textarea aria-label="案情說明" value={narrativeText} onChange={(e) => setNarrative(e.target.value)} rows={4}
+              placeholder="說明當事人要請求什麼、為什麼（AI 依此與卷證整理請求項目）"
+              className="mt-1 w-full rounded border border-slate-300 p-2" />
+          </label>
+          <div className="flex flex-wrap gap-4 text-slate-700">
+            <label><input type="checkbox" checked={jointValue} onChange={(e) => setJoint(e.target.checked)} className="mr-1" />
+              被告連帶給付</label>
+            <label><input type="checkbox" checked={provisionalValue} onChange={(e) => setProvisional(e.target.checked)}
+              className="mr-1" />聲請假執行（只適用金錢請求）</label>
+            {caseType === 'nominee_registration' && (
+              <label><input type="checkbox" checked={deceasedValue} onChange={(e) => setDeceased(e.target.checked)}
+                className="mr-1" />出名人已死亡（起訴繼承人）</label>
+            )}
+          </div>
+          {!(status === 'extracting' && stale) && (
+            <button type="button" onClick={extract} disabled={busy || !narrativeText.trim()}
+              className="rounded bg-indigo-600 px-3 py-1.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+              拆解
+            </button>
+          )}
+        </div>
+      )}
+      {editable && !complaint && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {filers.length > 0 && (
             <label className="text-sm text-slate-700">
@@ -181,7 +242,7 @@ function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
       )}
       {(status === 'extracted' || (status === 'failed' && failedStage === 'draft')) && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button type="button" onClick={draft} disabled={busy || claims.every((c) => !c.selected)}
+          <button type="button" onClick={draft} disabled={busy || !!draftBlockedReason}
             className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
             {status === 'failed' ? '重新起草' : '起草'}
           </button>
@@ -189,17 +250,25 @@ function RoundPanel({ caseId, round, parties, briefs, onChanged }: {
             className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-50">
             重新拆解
           </button>
+          {draftBlockedReason && <span className="text-xs text-amber-700">{draftBlockedReason}</span>}
           {unticked > 0 && <span className="text-xs text-amber-700">未勾選的 {unticked} 條主張不會被回應</span>}
         </div>
       )}
-      {status === 'drafted' && detail?.draft_id && (
-        <Link to={`/drafts/${detail.draft_id}`} className="mt-3 inline-block text-sm font-medium text-indigo-700 underline">
-          開啟草稿
-        </Link>
+      {status === 'extracted' && complaint && detail && (
+        <RequestItemsEditor round={detail} onChanged={refresh} onError={setMessage} />
       )}
-      {detail && detail.claims.length > 0 && (
+      {status === 'drafted' && detail?.draft_id && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Link to={`/drafts/${detail.draft_id}`} className="text-sm font-medium text-indigo-700 underline">開啟草稿</Link>
+          <button type="button" onClick={copy} disabled={busy}
+            className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 disabled:opacity-50">
+            以這一輪為基礎重新起草
+          </button>
+        </div>
+      )}
+      {claims.length > 0 && (
         <ol className="mt-3 space-y-1 text-sm text-slate-700">
-          {detail.claims.map((c) => (
+          {claims.map((c) => (
             <li key={c.seq}>
               {status === 'extracted' && (
                 <input type="checkbox" aria-label={`回應 主張${c.seq}`} checked={c.selected} className="mr-1"
@@ -394,6 +463,7 @@ export default function CaseDetail() {
   const navigate = useNavigate()
   const notice = (useLocation().state as { notice?: string } | null)?.notice
   const [data, setData] = useState<api.CaseDetail | null>(null)
+  const [newKind, setNewKind] = useState<api.BriefKind | null>(null)  // 建立新一輪時選的書狀種類（沒選＝後端預設）
   const [options, setOptions] = useState<api.CaseOptions | null>(null)
   const [error, setError] = useState<string | null>(null)
   const evidenceRef = useRef<HTMLInputElement>(null)
@@ -433,7 +503,7 @@ export default function CaseDetail() {
 
   async function newRound() {
     try {
-      await api.createRound(caseId)
+      await api.createRound(caseId, newKind ?? data?.default_brief_kind)
       await load()
     } catch (e) {
       setError((e as Error).message)
@@ -473,12 +543,21 @@ export default function CaseDetail() {
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-800">攻防輪次</h2>
-          <button type="button" onClick={newRound} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
-            建立新一輪
-          </button>
+          <div className="flex items-center gap-2">
+            {(data.brief_kind_options ?? []).length > 0 && (
+              <select aria-label="書狀種類" value={newKind ?? data.default_brief_kind ?? ''}
+                onChange={(e) => setNewKind(e.target.value as api.BriefKind)}
+                className="rounded border border-slate-300 px-2 py-1.5 text-sm">
+                {(data.brief_kind_options ?? []).map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+              </select>
+            )}
+            <button type="button" onClick={newRound} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
+              建立新一輪
+            </button>
+          </div>
         </div>
         {data.rounds.map((r) => (
-          <RoundPanel key={r.id} caseId={caseId} round={r} parties={data.parties} onChanged={load}
+          <RoundPanel key={r.id} caseId={caseId} caseType={data.case_type} round={r} parties={data.parties} onChanged={load}
             briefs={data.documents.filter((d) => d.kind === 'opponent_brief' && d.round_id === r.id)} />
         ))}
       </section>

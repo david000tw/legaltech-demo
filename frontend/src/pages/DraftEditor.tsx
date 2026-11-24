@@ -4,6 +4,7 @@ import * as api from '../api'
 import CitationTag from '../components/CitationTag'
 import ExportButton, { reasonLabel } from '../components/ExportButton'
 import SourcePane from '../components/SourcePane'
+import StatementBlock, { AmountButtons } from '../components/StatementBlock'
 
 function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
   p: api.ParagraphView
@@ -106,6 +107,8 @@ function ParagraphCard({ p, canReview, onShowSource, onChanged, onError }: {
         <button type="button" disabled={busy || !instruction.trim()}
           onClick={() => act(async () => { await api.rewriteParagraph(p.id, instruction); setInstruction('') })}
           className="rounded border px-3 py-1 text-sm disabled:opacity-50">要求重寫</button>
+        <AmountButtons reasons={p.verify_reasons} canReview={canReview}
+          onConfirm={(n) => act(() => api.confirmAmount(p.id, n))} />
         {canReview && (
           <button type="button" disabled={busy} onClick={() => act(() => api.reviewParagraph(p.id, p.version))}
             className="rounded bg-emerald-600 px-3 py-1 text-sm text-white disabled:opacity-50">標記已審</button>
@@ -191,6 +194,11 @@ export default function DraftEditor() {
           <SourcePane source={source} citation={sourceCitation} canReview={draft.can_review} onConfirmCourt={confirmCourt} />
         </aside>
         <div className="space-y-4">
+          {draft.statement && (
+            <StatementBlock key={`${draft.statement.id}-${draft.statement.text}`} draft={draft} onChanged={load}
+              onError={setError} />
+          )}
+          {draft.body_label && <h2 className="text-lg font-semibold text-slate-800">{draft.body_label}</h2>}
           {draft.paragraphs.map((p) => (
             <ParagraphCard key={`${p.id}-${p.text}`} p={p} canReview={draft.can_review} onShowSource={showSource}
               onChanged={load} onError={setError} />

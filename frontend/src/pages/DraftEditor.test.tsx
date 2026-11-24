@@ -9,11 +9,13 @@ import { reasonLabel } from '../components/ExportButton'
 vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
   return { ...real, getDraft: vi.fn(), getCitationSource: vi.fn(), confirmCitation: vi.fn(), confirmCourt: vi.fn(), reviewParagraph: vi.fn(),
-    patchParagraph: vi.fn(), rewriteParagraph: vi.fn(), exportDraft: vi.fn() }
+    patchParagraph: vi.fn(), rewriteParagraph: vi.fn(), exportDraft: vi.fn(), confirmAmount: vi.fn(),
+    ackAmounts: vi.fn() }
 })
 
 const draft: api.DraftView = {
   id: 'dr1', round_id: 'r1', case_id: 'c1', can_review: true, brief_title: '民事準備書狀', procedure_warning: null,
+  brief_kind: 'preparatory', case_type: 'traffic_tort', statement: null, statement_label: null, body_label: null,
   blockers: [{ paragraph_seq: 1, reason: 'unreviewed' }, { paragraph_seq: 1, reason: 'judgment_unconfirmed:J1' }],
   paragraphs: [{
     id: 'p1', seq: 1, heading: '㈠關於路權', display_heading: '㈡關於路權', heading_text: '關於路權',
@@ -245,5 +247,71 @@ describe('DraftEditor procedure', () => {
     renderEditor()
     expect(await screen.findByRole('heading', { name: '民事準備書狀（草稿）' })).toBeInTheDocument()
     expect(screen.queryByText(/案號字別/)).not.toBeInTheDocument()
+  })
+
+  // ---- 子專案甲 Task 8：聲明區塊與金額核對 ----
+  const statement: api.ParagraphView = {
+    id: 'st1', seq: 0, kind: 'statement', heading: '', display_heading: '', heading_text: '',
+    text: '一、被告應給付原告新臺幣{{amount}}元。\n二、訴訟費用由被告負擔。',
+    rendered_text: '一、被告應給付原告新臺幣405,000元。\n二、訴訟費用由被告負擔。',
+    version: 'sv1', status: 'unreviewed', verify_reasons: [], reviewed_bar_number: null, reviewed_at: null, citations: [] }
+  const complaint: api.DraftView = { ...draft, brief_kind: 'complaint', brief_title: '民事起訴狀', statement,
+    statement_label: '訴之聲明', body_label: '事實及理由',
+    blockers: [{ paragraph_seq: 0, paragraph_no: 0, reason: 'unreviewed', scope: 'statement' },
+      { paragraph_seq: 0, paragraph_no: 0, reason: 'claim_value_missing', scope: 'draft' }] }
+
+  it('statement block renders above body and is reviewable', async () => {
+    vi.mocked(api.getDraft).mockResolvedValue(complaint)
+    vi.mocked(api.reviewParagraph).mockResolvedValue({ ...statement, status: 'reviewed' })
+    renderEditor()
+    const block = await screen.findByTestId('statement-block')
+    expect(within(block).getByText('訴之聲明')).toBeInTheDocument()
+    expect(within(block).getByText(/被告應給付原告新臺幣405,000元/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '事實及理由' })).toBeInTheDocument()
+    const order = Array.from(document.querySelectorAll('[data-testid="statement-block"], article'))
+    expect(order[0]).toBe(block)
+    await userEvent.click(within(block).getByRole('button', { name: '標記已審' }))
+    expect(api.reviewParagraph).toHaveBeenCalledWith('st1', 'sv1')
+    expect(screen.getByText('整份書狀：請填寫訴訟標的價額')).toBeInTheDocument()
+    expect(screen.getByText('聲明：段落尚未審核')).toBeInTheDocument()
+  })
+
+  it('estate answer shows the alternative-partition hint', async () => {
+    vi.mocked(api.getDraft).mockResolvedValue({ ...complaint, brief_kind: 'answer', case_type: 'estate_partition',
+      brief_title: '家事答辯狀', statement_label: '答辯聲明', body_label: '答辯理由' })
+    renderEditor()
+    expect(await screen.findByText('如主張其他分割方法，請改寫聲明並附附表')).toBeInTheDocument()
+  })
+
+  it('estate complaint reminds the schedule is filled in Word', async () => {
+    vi.mocked(api.getDraft).mockResolvedValue({ ...complaint, case_type: 'estate_partition' })
+    renderEditor()
+    expect(await screen.findByText('附表需在 Word 填寫')).toBeInTheDocument()
+  })
+
+  it('confirm amount button visible to lawyers only and calls confirmAmount', async () => {
+    const flagged = { ...draft.paragraphs[0], verify_reasons: ['amount_unverified:406000'] }
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft, paragraphs: [flagged] })
+    vi.mocked(api.confirmAmount).mockResolvedValue(flagged)
+    const { unmount } = renderEditor()
+    expect(await screen.findByText('金額未對到請求項目或卷證：406,000元')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '已核對金額 406,000元' }))
+    expect(api.confirmAmount).toHaveBeenCalledWith('p1', 406000)
+    unmount()
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft, can_review: false, paragraphs: [flagged] })
+    renderEditor()
+    expect(await screen.findByText('金額未對到請求項目或卷證：406,000元')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '已核對金額 406,000元' })).not.toBeInTheDocument()
+  })
+
+  it('lawyer acknowledges self-written amounts in the statement', async () => {
+    const st = { ...statement, verify_reasons: ['amounts_unchecked'] }
+    vi.mocked(api.getDraft).mockResolvedValue({ ...complaint, statement: st })
+    vi.mocked(api.ackAmounts).mockResolvedValue({})
+    renderEditor()
+    const block = await screen.findByTestId('statement-block')
+    expect(within(block).getByText('多位原告或非連帶被告：請律師核對金額')).toBeInTheDocument()
+    await userEvent.click(within(block).getByRole('button', { name: '金額已自行核對' }))
+    expect(api.ackAmounts).toHaveBeenCalledWith('r1')
   })
 })

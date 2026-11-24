@@ -25,6 +25,20 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
   empty_draft: () => '草稿沒有任何段落',
   source_superseded: () => '卷證文字已更新，請重新確認這筆引用',
   numbered_cross_reference: (a) => `內文用段落編號參照其他段落「${a}」，刪段後編號會變，請改寫成該段的主題`,
+  statement_blank: () => '聲明還有○○空格',
+  statement_amount_missing: () => '金錢聲明缺少系統金額',
+  statement_missing: () => '聲明是空的，起訴狀、答辯狀一定要有聲明',
+  amounts_unchecked: () => '多位原告或非連帶被告：請律師核對金額',
+  amount_unverified: (a) => `金額未對到請求項目或卷證：${Number(a).toLocaleString('en-US')}元`,
+  amount_marker_misplaced: () => '系統金額標記只能用在起訴狀的訴之聲明',
+  claim_value_missing: () => '請填寫訴訟標的價額',
+}
+
+// 阻擋原因的位置：聲明與整份書狀沒有段落編號
+function blockerPlace(b: Blocker): string {
+  if (b.scope === 'draft') return '整份書狀'
+  if (b.scope === 'statement') return '聲明'
+  return `第 ${b.paragraph_no ?? b.paragraph_seq} 段`
 }
 
 export function reasonLabel(reason: string): string {
@@ -45,7 +59,7 @@ export default function ExportButton({ blockers, onExport }: { blockers: Blocker
       </button>
       {blocked && (
         <ul className="space-y-0.5 text-sm text-red-700">
-          {blockers.map((b, i) => <li key={i}>第 {b.paragraph_no ?? b.paragraph_seq} 段：{reasonLabel(b.reason)}</li>)}
+          {blockers.map((b, i) => <li key={i}>{blockerPlace(b)}：{reasonLabel(b.reason)}</li>)}
         </ul>
       )}
     </div>

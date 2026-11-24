@@ -241,6 +241,7 @@ def get_round(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
             "id": str(rnd.id), "seq": rnd.seq, "status": rnd.status, "error": rnd.error, "stale": stale,
             "brief_kind": rnd.brief_kind, "failed_stage": rnd.failed_stage,
             "draft_id": str(draft.id) if draft else None,
+            "can_review": m.role == "lawyer" and m.bar_verified,  # 只有律師能確認請求項目與金額
             "claims": [claim_json(s, c) for c in claims],
             # 起訴狀：案情說明、設定、確認金額的加總、訴之聲明預覽、沒送給 AI 的掃描頁
             "narrative": rnd.narrative, "joint_liability": rnd.joint_liability,

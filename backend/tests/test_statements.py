@@ -213,3 +213,10 @@ def test_preparatory_export_unchanged(db):
     lines, _ = _export_lines(ctx, cs)
     assert lines[0] == "民事準備書狀" and "為損害賠償事件，依法提出準備書狀事：" in lines
     assert "訴之聲明" not in lines and "事實及理由" not in lines
+
+
+def test_draft_reports_kind_and_case_type(db):
+    """前端依此顯示分割遺產的附表提示與答辯聲明提示（設計 5.2、5.3）。"""
+    ctx, cs = make_brief(db, kind="answer", case_type="estate_partition", amounts=())
+    body = cs["lawyer"].get(f"/api/drafts/{ctx['draft_id']}").json()
+    assert body["brief_kind"] == "answer" and body["case_type"] == "estate_partition"
