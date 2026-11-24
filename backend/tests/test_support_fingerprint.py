@@ -29,17 +29,21 @@ def test_citing_sentences_marker_after_period_and_two_sentences():
     assert citing_sentences("醫療費用5,780元。{{cite:E1}}", "E1") == ["醫療費用5,780元。{{cite:E1}}"]
 
 
-def test_marker_after_period_followed_by_more_text():
-    # 律師把出處放在句號後面、後面還有別句：出處要跟前一句（主張所在的句子）在一起
-    assert citing_sentences("原告支出醫療費5,780元。（見{{cite:E1}}）被告自應賠償。", "E1") == [
-        "原告支出醫療費5,780元。（見{{cite:E1}}）"]
-    assert citing_sentences("原告支出醫療費5,780元。（見{{cite:E1}}）\n被告自應賠償。", "E1") == [
-        "原告支出醫療費5,780元。（見{{cite:E1}}）"]
-    assert citing_sentences("原告支出5,780元。（參{{cite:E1}}、{{cite:E2}}第3頁）另查無誤。", "E2") == [
-        "原告支出5,780元。（參{{cite:E1}}、{{cite:E2}}第3頁）"]
-    # 標記緊接在上一句結尾之後、作為下一句開頭：連同上一句一起看（寧可多看，不要漏看主張）
-    assert citing_sentences("按民法規定「應負責任。」{{cite:S1}}本件被告過失。", "S1") == [
-        "按民法規定「應負責任。」", "{{cite:S1}}本件被告過失。"]
+@pytest.mark.parametrize("text,expected", [
+    # 律師把出處放在句號後面、後面還有別句：連同上一句（主張所在的句子）一起看（寧可多看，不要漏看主張）
+    ("原告支出醫療費5,780元。（見{{cite:E1}}）被告自應賠償。",
+     ["原告支出醫療費5,780元。", "（見{{cite:E1}}）被告自應賠償。"]),
+    ("原告支出醫療費5,780元。（見{{cite:E1}}）\n被告自應賠償。", ["原告支出醫療費5,780元。", "（見{{cite:E1}}）"]),
+    ("原告支出57,800元。（見{{cite:E1}}所示）被告自應賠償。", ["原告支出57,800元。", "（見{{cite:E1}}所示）被告自應賠償。"]),
+    ("原告支出57,800元。（此有{{cite:E1}}可稽）另查無誤。", ["原告支出57,800元。", "（此有{{cite:E1}}可稽）另查無誤。"]),
+    ("一、醫療費用\n（{{cite:E1}}）原告支出5,780元。", ["一、醫療費用", "（{{cite:E1}}）原告支出5,780元。"]),
+    # 標記緊接在上一句結尾之後、作為下一句開頭
+    ("按民法規定「應負責任。」{{cite:E1}}本件被告過失。", ["按民法規定「應負責任。」", "{{cite:E1}}本件被告過失。"]),
+    # 括號在句中、不是開頭：照舊只看本句
+    ("原告受傷。原告支出5,780元（見{{cite:E1}}）。", ["原告支出5,780元（見{{cite:E1}}）。"]),
+])
+def test_marker_after_period_followed_by_more_text(text, expected):
+    assert citing_sentences(text, "E1") == expected
 
 
 def test_claim_before_trailing_marker_is_in_fingerprint():

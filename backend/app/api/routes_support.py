@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api")
 
 class ReleaseBody(BaseModel):
     reason: str = ""
+    version: str  # 律師畫面上那一版的結果（support.version）；結果已變就回 409，不放行沒看過的結果
 
 
 @router.post("/citations/{citation_id}/support/release")
@@ -28,7 +29,7 @@ def release(citation_id: UUID, body: ReleaseBody, m: CurrentMember = Depends(cur
         require_lawyer(m)
         pid = c.paragraph_id
         try:
-            support.release_support(s, citation_id, m, body.reason)
+            support.release_support(s, citation_id, m, body.reason, body.version)
         except ReviewRuleError as e:
             raise HTTPException(409, str(e))
         return paragraph_json(s, s.get(Paragraph, pid))

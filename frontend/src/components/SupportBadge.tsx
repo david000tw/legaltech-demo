@@ -57,7 +57,7 @@ export default function SupportBadge({ citation, draftId, canReview, onAction }:
         : <Tag tone="red">誤用當事人主張</Tag>
 
   const send = () => onAction(async () => {
-    await api.releaseSupport(citation.id, reason.trim())
+    await api.releaseSupport(citation.id, reason.trim(), s.version ?? '')  // 帶回律師看到的那一版
     setOpen(false)
     setReason('')
   })

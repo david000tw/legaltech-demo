@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -139,24 +140,32 @@ def support_blockers(s: Session, p: Paragraph, cache: dict | None = None) -> lis
     return out
 
 
+def support_version(row: SupportCheck) -> str:
+    """律師畫面上那一版的結果：放行時帶回來比對，結果已變（例如別人按了重新檢查）就不放行。"""
+    raw = f"{row.id}|{row.status}|{row.verdict or ''}|{row.checked_at.isoformat() if row.checked_at else ''}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
 def support_json(s: Session, p: Paragraph, c: Citation, cache: dict) -> dict | None:
     inp, row = check_for(s, p, c, cache)
     if inp is None:
         return None
     if row is None:
         return {"status": "pending", "verdict": None, "explanation": None, "error": None, "blocking": True,
-                "released": None}
+                "released": None, "version": None}
     released = None
     if row.released_at is not None:
         m = s.get(Member, row.released_by) if row.released_by else None
         released = {"name": m.display_name if m else None, "bar_number": row.released_bar_number,
                     "at": row.released_at.isoformat(), "reason": row.release_reason}
     return {"status": row.status, "verdict": row.verdict, "explanation": row.explanation, "error": row.error,
-            "blocking": _reason(c, row) is not None, "released": released}
+            "blocking": _reason(c, row) is not None, "released": released, "version": support_version(row)}
 
 
-def release_support(s: Session, citation_id: UUID, member: CurrentMember, reason: str) -> SupportCheck:
-    """律師放行：紅色與尚未檢查要填理由，部分支持可以不填。記下律師、證號、時間與理由。"""
+def release_support(s: Session, citation_id: UUID, member: CurrentMember, reason: str,
+                    version: str | None = None) -> SupportCheck:
+    """律師放行：紅色與尚未檢查要填理由，部分支持可以不填。記下律師、證號、時間與理由。
+    version＝律師畫面上那一版（support_version）；放行路由一定會帶，結果已變就拒絕。"""
     _require_lawyer(member)
     pid = s.scalar(select(Citation.paragraph_id).where(Citation.id == citation_id))
     if pid is None or lock_paragraph(s, pid) is None:
@@ -172,6 +181,8 @@ def release_support(s: Session, citation_id: UUID, member: CurrentMember, reason
     row = rows[0] if rows else None
     if row is None or row.status == "pending":
         raise ReviewRuleError("支持度檢查中，請稍候再放行")
+    if version is not None and version != support_version(row):
+        raise ReviewRuleError("支持度檢查結果已更新，請重新載入後再確認")
     if _reason(c, row) is None:
         raise ReviewRuleError("這筆引用不需要放行")
     text = (reason or "").strip()

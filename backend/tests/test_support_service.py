@@ -127,6 +127,24 @@ def test_release_rules_and_record(db):
     assert [e.after_text for e in ev][-1] == f"E1｜尚未檢查｜AI 無法使用，已人工核對｜律師證號 {BAR}"
 
 
+def test_release_refused_when_result_changed(db):
+    # 律師看到「尚未檢查」正在填理由；助理按了重新檢查、AI 判不支持 → 律師送出的放行要被擋下，不能放行沒看過的結果
+    ctx, pid = _draft()
+    lawyer = _member(ctx)
+    _set(ctx, pid, "J1", status="failed", error="usage_limit: 額度用完")
+    with tenant_session(ctx["firm"]) as s:
+        seen = support.support_version(_row(s, pid, "J1"))
+        cid = _cit(s, pid, "J1").id
+    with tenant_session(ctx["firm"]) as s:
+        support.retry_support(s, ctx["draft_id"])
+    _set(ctx, pid, "J1", status="done", verdict="not_supported", explanation="原文沒有這個意思",
+         checked_at=_now())
+    with tenant_session(ctx["firm"]) as s, pytest.raises(ReviewRuleError, match="支持度檢查結果已更新"):
+        support.release_support(s, cid, lawyer, "AI 無法使用", seen)
+    with tenant_session(ctx["firm"]) as s:
+        assert _row(s, pid, "J1").released_at is None
+
+
 def test_release_after_citation_replaced(db):
     ctx, pid = _draft()
     lawyer = _member(ctx)

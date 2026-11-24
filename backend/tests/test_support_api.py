@@ -107,11 +107,16 @@ def test_open_draft_queues_and_shows_results(db):
 def test_release_route_and_review(db):
     ctx, c, pid = _setup(db, FakeProvider({"support": _support_fake(_j1_bad)}))
     _draft(c, ctx)
-    j1 = _cite(_draft(c, ctx), "J1")["id"]
-    assert c["assistant"].post(f"/api/citations/{j1}/support/release", json={"reason": "x"}).status_code == 403
-    r = c["lawyer"].post(f"/api/citations/{j1}/support/release", json={"reason": " "})
+    cite = _cite(_draft(c, ctx), "J1")
+    j1, seen = cite["id"], cite["support"]["version"]
+    url = f"/api/citations/{j1}/support/release"
+    assert c["assistant"].post(url, json={"reason": "x", "version": seen}).status_code == 403
+    assert c["lawyer"].post(url, json={"reason": "x"}).status_code == 422  # 一定要帶律師看到的那一版
+    r = c["lawyer"].post(url, json={"reason": "x", "version": "舊的一版"})
+    assert r.status_code == 409 and r.json()["detail"] == "支持度檢查結果已更新，請重新載入後再確認"
+    r = c["lawyer"].post(url, json={"reason": " ", "version": seen})
     assert r.status_code == 409 and r.json()["detail"] == "請填寫放行理由"
-    r = c["lawyer"].post(f"/api/citations/{j1}/support/release", json={"reason": "原文第二段另有說明"})
+    r = c["lawyer"].post(url, json={"reason": "原文第二段另有說明", "version": seen})
     assert r.status_code == 200, r.text
     released = next(x for x in r.json()["citations"] if x["code"] == "J1")["support"]["released"]
     assert (released["reason"], released["bar_number"], released["name"]) == ("原文第二段另有說明", BAR, "lawyer")
@@ -207,8 +212,8 @@ def test_failed_check_retry_and_release(db):
     assert _cite(body, "J1")["support"]["status"] == "failed"
     assert {"support_unchecked:J1", "support_unchecked:E1"} <= _reasons(body)
     e1 = _cite(body, "E1")["id"]
-    assert c["lawyer"].post(f"/api/citations/{e1}/support/release",
-                            json={"reason": "AI 無法使用，已人工核對"}).status_code == 200
+    assert c["lawyer"].post(f"/api/citations/{e1}/support/release", json={
+        "reason": "AI 無法使用，已人工核對", "version": _cite(body, "E1")["support"]["version"]}).status_code == 200
     _use(c, FakeProvider({"support": _support_fake(_all_supports)}))
     r = c["assistant"].post(f"/api/drafts/{ctx['draft_id']}/support/retry")
     assert r.status_code == 200 and r.json() == {"queued": 1}

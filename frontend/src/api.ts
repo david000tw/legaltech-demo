@@ -135,7 +135,8 @@ export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgm
 export type SupportVerdict = 'supports' | 'partial' | 'not_supported' | 'party_claim_misuse'
 export type SupportView = { status: 'pending' | 'done' | 'failed'; verdict: SupportVerdict | null
   explanation: string | null; error: string | null; blocking: boolean
-  released: { name: string | null; bar_number: string | null; at: string; reason: string | null } | null }
+  released: { name: string | null; bar_number: string | null; at: string; reason: string | null } | null
+  version?: string | null }  // 這一版結果的代號：放行時帶回去，結果已變（例如別人按了重新檢查）後端回 409
 // display_heading＝系統編號＋標題（顯示與匯出一致）；heading_text＝去掉編號的標題（修改表單用）
 export type ParagraphView = { id: string; seq: number; kind?: 'body' | 'statement'; heading: string
   display_heading: string; heading_text: string;
@@ -282,8 +283,8 @@ export const confirmAmount = (paragraphId: string, amount: number) =>
 // 「可能是法院轉述的當事人主張」的引用：律師讀原文後確認此句為法院判斷
 export const confirmCourt = (id: string) => req<CitationView>(`/citations/${id}/confirm-court`, json('POST'))
 // 支持度檢查（計畫 2B）：律師填理由放行；重新檢查＝整份草稿尚未檢查成功的引用合併重查
-export const releaseSupport = (citationId: string, reason: string) =>
-  req<ParagraphView>(`/citations/${citationId}/support/release`, json('POST', { reason }))
+export const releaseSupport = (citationId: string, reason: string, version: string) =>
+  req<ParagraphView>(`/citations/${citationId}/support/release`, json('POST', { reason, version }))
 export const retrySupport = (draftId: string) =>
   req<{ queued: number }>(`/drafts/${draftId}/support/retry`, json('POST'))
 // version：律師畫面上那一版的指紋；後端發現內容已變就回 409，不會把沒看過的版本記成已審

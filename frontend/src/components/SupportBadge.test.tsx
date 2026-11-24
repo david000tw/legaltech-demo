@@ -13,7 +13,7 @@ const base: api.CitationView = { id: 'c1', code: 'J1', kind: 'judgment', quote: 
   label: '臺中地院判決', verify_status: 'ok', verify_reasons: [], lawyer_confirmed: false, court_confirmed: false }
 const done = (verdict: api.SupportVerdict, extra: Partial<api.SupportView> = {}): api.SupportView => ({
   status: 'done', verdict, explanation: '原文沒有提到闖紅燈', error: null, blocking: verdict !== 'supports',
-  released: null, ...extra })
+  released: null, version: 'v1', ...extra })
 const released = { name: 'lawyer', bar_number: '(110)北律字第0001號', at: '2026-11-25T03:00:00+00:00',
   reason: '原文第二段另有說明' }
 
@@ -60,7 +60,7 @@ describe('SupportBadge', () => {
     await userEvent.type(screen.getByLabelText('放行理由'), '原文第二段另有說明')
     vi.mocked(api.releaseSupport).mockResolvedValue({} as api.ParagraphView)
     await userEvent.click(send)
-    expect(api.releaseSupport).toHaveBeenCalledWith('c1', '原文第二段另有說明')
+    expect(api.releaseSupport).toHaveBeenCalledWith('c1', '原文第二段另有說明', 'v1')
   })
 
   it('party-claim misuse is red until the court reasoning was confirmed', () => {
@@ -81,7 +81,7 @@ describe('SupportBadge', () => {
     await userEvent.click(screen.getByRole('button', { name: '確認放行' }))
     vi.mocked(api.releaseSupport).mockResolvedValue({} as api.ParagraphView)
     await userEvent.click(screen.getByRole('button', { name: '送出' }))
-    expect(api.releaseSupport).toHaveBeenCalledWith('c1', '')
+    expect(api.releaseSupport).toHaveBeenCalledWith('c1', '', 'v1')
   })
 
   it('released shows who released it, without buttons', () => {
