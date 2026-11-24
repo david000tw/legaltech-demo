@@ -16,12 +16,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Candidate, Citation, Draft, Judgment, JudgmentPassage, PageText, Paragraph, StatuteArticle,
+    Candidate, Citation, Claim, Document, Draft, Judgment, JudgmentPassage, Page, PageText, Paragraph,
+    StatuteArticle,
 )
 from app.ingest.service import current_page_text
 from app.numbering import strip_heading_number
 from app.pipeline.claims import opponent_pages
-from app.statements import AMOUNT_MARKER, amount_marker_allowed, draft_reasons, statement_of, statement_reasons
+from app.amounts import parse_amounts
+from app.statements import (
+    AMOUNT_MARKER, amount_marker_allowed, confirmed_requests, draft_reasons, round_of, round_total,
+    statement_of, statement_reasons,
+)
 from app.text_norm import find_quote, normalize_text, quote_length
 
 MARKER_RE = re.compile(r"\{\{(cite|quote):([A-Z]\d+)\}\}")
@@ -299,6 +304,37 @@ def paragraph_citations(s: Session, paragraph_id: UUID) -> list[Citation]:
     return list(s.scalars(select(Citation).where(Citation.paragraph_id == paragraph_id).order_by(Citation.code)))
 
 
+def allowed_amounts(s: Session, p: Paragraph) -> set[int]:
+    """書狀裡可以直接寫的金額（設計 5.5）：起訴狀確認過的請求項目與加總、本案卷證、本輪對造書狀、本輪主張原文。"""
+    rnd = round_of(s, p)
+    out: set[int] = set()
+    if rnd.brief_kind == "complaint":
+        items = confirmed_requests(s, rnd.id)
+        out |= {c.amount for c in items if c.request_type == "monetary" and c.amount is not None}
+        out.add(round_total(s, rnd.id))
+    pages = s.scalars(select(Page).join(Document, Document.id == Page.document_id)
+                      .where(Document.case_id == rnd.case_id, Document.kind == "evidence")).all()
+    texts = [pt.text for pt in (current_page_text(s, pg.id) for pg in pages) if pt is not None]
+    texts += [op.text.text for op in opponent_pages(s, rnd.id) if op.text is not None]
+    for c in s.scalars(select(Claim).where(Claim.round_id == rnd.id)):
+        texts.append(c.quote or "")
+        texts += [e.get("quote", "") for e in c.evidence or []]
+    for t in texts:
+        out.update(parse_amounts(t))
+    return out
+
+
+def amount_reasons(s: Session, p: Paragraph, text: str) -> list[str]:
+    """段落裡（不含引用標記展開的引文）每個對不上的金額，律師按「已核對金額」前都擋下。"""
+    if p.kind == "statement" and round_of(s, p).amounts_checked_by is not None:
+        return []  # 律師已勾「金額已自行核對」，涵蓋聲明裡自己寫的金額
+    found = list(dict.fromkeys(parse_amounts(MARKER_RE.sub("", text))))
+    if not found:
+        return []
+    allowed = allowed_amounts(s, p) | set(p.amounts_confirmed or [])
+    return [f"amount_unverified:{n}" for n in found if n not in allowed]
+
+
 def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
     """回傳段落層原因並寫入 p.verify_reasons；同時重新驗證每筆引用。"""
     cites = {c.code: c for c in paragraph_citations(s, p.id)}
@@ -333,6 +369,7 @@ def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
     opp = [op.text.text for op in opponent_pages(s, _round_id_for(s, p)) if op.text is not None]
     for head in scan_inline_quotes(p.heading, opp) + scan_inline_quotes(p.text, opp):
         reasons.append(f"inline_quote_unverified:{head}")
+    reasons.extend(amount_reasons(s, p, body))
     if p.kind == "statement":
         reasons.extend(statement_reasons(s, p))
     for c in cites.values():

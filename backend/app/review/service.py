@@ -81,6 +81,19 @@ def confirm_court_reasoning(s: Session, citation_id: UUID, member: CurrentMember
     return c
 
 
+def confirm_amount(s: Session, paragraph_id: UUID, amount: int, member: CurrentMember) -> Paragraph:
+    """律師核對過對不上請求項目或卷證的金額後放行，並留紀錄（設計 5.5）。"""
+    _require_lawyer(member)
+    p = lock_paragraph(s, paragraph_id)
+    if p is None:
+        raise ReviewRuleError("段落已不存在")
+    if amount not in (p.amounts_confirmed or []):
+        p.amounts_confirmed = [*(p.amounts_confirmed or []), amount]
+    _event(s, p, member, "confirm_amount", None, str(amount))
+    s.flush()
+    return p
+
+
 def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version: str) -> Paragraph:
     """version 是律師畫面上那一版的指紋；內容已變（別人改過、改了原證號）就不能記成已審。"""
     _require_lawyer(member)

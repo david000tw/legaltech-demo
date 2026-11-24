@@ -107,6 +107,7 @@ def replace_paragraph(s: Session, p: Paragraph, text: str, items: list[tuple[str
     """替換內文與引用、確認歸零、退回未審、重新驗證。"""
     s.execute(delete(Citation).where(Citation.paragraph_id == p.id))
     p.text = text
+    p.amounts_confirmed = []  # 內文改過，律師核對過的金額要重新核對（設計 5.5）
     reset_review(p)
     s.flush()
     attach_citations(s, p, items)

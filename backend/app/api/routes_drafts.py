@@ -19,7 +19,8 @@ from app.models import (
 from app.numbering import display_heading, strip_heading_number
 from app.render import citation_label, paragraph_version, render_text
 from app.review.service import (
-    CitationInput, ReviewRuleError, confirm_citation, confirm_court_reasoning, edit_paragraph, mark_reviewed, renumber_exhibit,
+    CitationInput, ReviewRuleError, confirm_amount, confirm_citation, confirm_court_reasoning, edit_paragraph, mark_reviewed,
+    renumber_exhibit,
 )
 from app.text_norm import find_quote
 from app.statements import BODY_LABEL, STATEMENT_LABEL, statement_of
@@ -158,6 +159,22 @@ def confirm_court(citation_id: UUID, m: CurrentMember = Depends(current_member))
         except ReviewRuleError as e:
             raise HTTPException(409, str(e))
         return citation_json(s, c)
+
+
+class AmountBody(BaseModel):
+    amount: int
+
+
+@router.post("/paragraphs/{paragraph_id}/confirm-amount")
+def confirm_paragraph_amount(paragraph_id: UUID, body: AmountBody, m: CurrentMember = Depends(current_member)) -> dict:
+    with tenant_session(m.firm_id) as s:
+        _get_or_404(s, Paragraph, paragraph_id, "段落")
+        require_lawyer(m)
+        try:
+            p = confirm_amount(s, paragraph_id, body.amount, m)
+        except ReviewRuleError as e:
+            raise HTTPException(409, str(e))
+        return paragraph_json(s, p)
 
 
 class ReviewBody(BaseModel):
