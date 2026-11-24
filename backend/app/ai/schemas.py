@@ -102,3 +102,13 @@ def health_schema(codes: list[str], with_undisputed: bool) -> dict:
             {"fact": _STR, "source": _STR, "page_no": _INT, "quote": _STR})}
     props["issues"] = {"type": "array", "items": _STR}
     return _obj(props)
+
+
+def support_schema(ids: list[str]) -> dict:
+    """支持度檢查（設計 7.1）：每筆引用一個結果，id 只能填這批的代碼。
+    不加 minItems／maxItems（結構化輸出的嚴格模式限制陣列長度條件）；缺漏的由程式記成尚未檢查。"""
+    from app.models import SUPPORT_VERDICTS
+    item = _obj({"id": {"type": "string", "enum": list(ids)},
+                 "verdict": {"type": "string", "enum": list(SUPPORT_VERDICTS)},
+                 "explanation": _STR})
+    return _obj({"items": {"type": "array", "items": item}})
