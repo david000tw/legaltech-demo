@@ -223,3 +223,48 @@ def test_assistant_can_insert(db):
     assert r.status_code == 200 and r.json()["code"] == "J3"
     with admin_session() as s:
         assert s.get(Judgment, s.get(JudgmentPassage, passage).judgment_id) is not None
+
+
+def test_concurrent_inserts_same_paragraph_keep_both(db, monkeypatch):
+    """後端階段審查 #1：兩人同時插進同一段，第二個要讀到第一個插入後的內文，兩個標記都要在。"""
+    import time
+    ctx = setup_verify_round()
+    member_id = create_member(ctx["firm"], "lawyer@a.test")
+    member = CurrentMember(id=member_id, firm_id=ctx["firm"], role="lawyer", bar_number="(110)北律字第0001號",
+                           bar_verified=True)
+    para = make_paragraph(ctx, "第一段。", [], seq=1)
+    a, qa = _other_reasoning(ctx)
+    b, qb = _other_reasoning(ctx, skip={a})
+    pin_a, pin_b = _pin(ctx["firm"], ctx["case_id"], a), _pin(ctx["firm"], ctx["case_id"], b)
+    holding = threading.Event()
+    real = insert_mod.round_candidates
+    first = {"done": False}
+
+    def gated(s, rid):
+        if not first["done"]:  # A 拿著輪次鎖時，B 先讀了段落再去排隊等鎖
+            first["done"] = True
+            holding.set()
+            time.sleep(1.5)
+        return real(s, rid)
+
+    monkeypatch.setattr(insert_mod, "round_candidates", gated)
+    codes, errors = [], []
+
+    def run(pin, q, wait):
+        try:
+            if wait:
+                holding.wait(10)
+            with tenant_session(ctx["firm"]) as s:
+                codes.append(insert_pin(s, para, pin, q, member)[1])
+        except Exception as e:  # noqa: BLE001 - 測試要看到任何例外
+            errors.append(e)
+
+    ta = threading.Thread(target=run, args=(pin_a, qa, False))
+    tb = threading.Thread(target=run, args=(pin_b, qb, True))
+    ta.start()
+    tb.start()
+    ta.join(30)
+    tb.join(30)
+    assert errors == [] and sorted(codes) == ["J3", "J4"]
+    text = _para(para)[0]
+    assert "{{cite:J3}}" in text and "{{cite:J4}}" in text, text

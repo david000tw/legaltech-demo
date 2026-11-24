@@ -101,14 +101,18 @@ class ImportBody(BaseModel):
 def import_from_url(case_id: UUID, body: ImportBody, request: Request,
                     m: CurrentMember = Depends(current_member)) -> dict:
     """貼司法院判決網址加入判決庫：先下載（不佔資料庫連線），再用 corpus_writer 寫入，最後記下是誰加的。"""
-    with tenant_session(m.firm_id) as s:
-        case_type = _case_or_404(s, case_id).case_type
     try:
-        ref = parse_judgment_url(body.url)
-        text = pdf_text(request.app.state.judgment_fetcher(pdf_url(ref)))
-        with corpus_session() as cs:
-            judgment, created = import_judgment(cs, ref, text, case_type)
-            judgment_id = judgment.id
+        with tenant_session(m.firm_id) as s:
+            case_type = _case_or_404(s, case_id).case_type
+            ref = parse_judgment_url(body.url)
+            # 判決庫已有同一件就不再向司法院下載
+            judgment_id = s.scalar(select(Judgment.id).where(Judgment.source_key == ref.key))
+        created = False
+        if judgment_id is None:
+            text = pdf_text(request.app.state.judgment_fetcher(pdf_url(ref)))
+            with corpus_session() as cs:
+                judgment, created = import_judgment(cs, ref, text, case_type)
+                judgment_id = judgment.id
     except ImportRejected as e:
         raise HTTPException(422, {"code": "import_rejected", "message": e.message})
     with tenant_session(m.firm_id) as s:

@@ -38,12 +38,12 @@ def _source_key(url: str) -> str | None:
 
 
 def upgrade() -> None:
-    # 帳號是整台資料庫伺服器共用的（開發與測試資料庫都用它），不存在才建立
+    # 帳號是整台資料庫伺服器共用的（開發與測試資料庫都用它）。開發環境由 init.sql 建立並設密碼；
+    # 這裡不寫密碼（repo 公開）：不存在時建成不能登入，部署時另以 ALTER ROLE corpus_writer LOGIN PASSWORD 設定
     op.execute("""
         DO $$ BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'corpus_writer') THEN
-                CREATE ROLE corpus_writer LOGIN PASSWORD 'corpuspass'
-                    NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+                CREATE ROLE corpus_writer NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
             END IF;
         END $$""")
     op.execute("GRANT USAGE ON SCHEMA public TO corpus_writer")

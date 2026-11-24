@@ -18,7 +18,7 @@ from app.tools import court_fee
 from app.tools.deadline import METHODS, Service, compute
 
 router = APIRouter(prefix="/api")
-CALENDAR_SPAN_DAYS = 400  # 最長期間 60＋20 日、在途與連假順延，留足夠範圍
+CALENDAR_SPAN_DAYS = 600  # 外國公示送達 60＋自訂最長 365＋在途最長 90 日，再留連假順延的餘裕
 
 
 class FeeBody(BaseModel):

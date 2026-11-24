@@ -189,12 +189,21 @@ def test_import_from_pdf_creates_judgment_and_passages(lawyer_client):
 def test_import_same_url_twice_no_duplicate(lawyer_client):
     client, firm, _ = lawyer_client
     case_id, _ = make_round(firm)
-    _fetcher(client, [])
+    calls = []
+    _fetcher(client, calls)
     first = client.post(f"/api/cases/{case_id}/judgments/import", json={"url": URL_DATA}).json()
     second = client.post(f"/api/cases/{case_id}/judgments/import", json={"url": URL_FILE}).json()
     assert first["created"] is True and second["created"] is False
     assert second["judgment"] == first["judgment"]
     assert _count(Judgment) == 1 and _count(JudgmentImport) == 2
+    assert len(calls) == 1  # 後端階段審查 #4：判決庫已有就不再向司法院下載
+
+
+def test_migrations_hold_no_corpus_password():
+    """後端階段審查 #3：migration 不寫死 corpus_writer 的密碼（公開 repo）；開發用密碼只在 init.sql。"""
+    root = Path(__file__).resolve().parent.parent
+    assert "corpuspass" not in (root / "migrations" / "versions" / "0009_judgment_import.py").read_text(encoding="utf-8")
+    assert "corpuspass" in (root.parent / "init.sql").read_text(encoding="utf-8")
 
 
 def test_concurrent_import_returns_existing(db, monkeypatch):

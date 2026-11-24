@@ -63,6 +63,18 @@ def test_deadline_api_uses_work_calendar(lawyer_client):
     assert "行事曆資料未涵蓋，只順延週末" not in r["notes"]
 
 
+def test_deadline_api_long_period_uses_whole_calendar(lawyer_client):
+    """後端階段審查 #2：自訂 365 日＋在途 50 日，屆滿日落在春節連假，要讀得到那段行事曆。"""
+    client, _, _ = lawyer_client
+    with admin_session() as s:
+        load_calendar(s, CALENDAR)
+    r = client.post("/api/tools/deadline", json={
+        "kind": "custom", "procedure": "civil", "custom_days": 365, "travel_days": 50, "attorney_local": False,
+        "services": [{"who": "party", "served_on": "2025-01-01", "method": "direct"}]}).json()
+    assert r["due"] == "2026-02-23"
+    assert "行事曆資料未涵蓋，只順延週末" not in r["notes"]
+
+
 def test_tool_defaults_from_case(lawyer_client):
     client, firm, _ = lawyer_client
     case_id, round_id = make_round(firm)

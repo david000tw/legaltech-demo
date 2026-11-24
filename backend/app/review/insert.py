@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentMember
 from app.models import Candidate, Draft, JudgmentPassage, Paragraph, PinnedPassage, Round
 from app.pipeline.candidates import round_candidates
-from app.review.service import CitationInput, edit_paragraph
+from app.review.service import CitationInput, edit_paragraph, lock_paragraph
 from app.text_norm import find_quote, quote_length
 from app.verify.citations import MIN_QUOTE, paragraph_citations
 
@@ -41,6 +41,8 @@ def insert_pin(s: Session, paragraph_id: UUID, pin_id: UUID, quote: str,
         raise InsertRejected(404, "找不到這則釘選")
     # 鎖住輪次：同一輪同時有兩個插入時，新的判決代碼不會重複
     rnd = s.get(Round, s.get(Draft, p.draft_id).round_id, with_for_update=True, populate_existing=True)
+    # 等到鎖之後重讀段落：別人剛插入同一段時，要接在他插入後的內文後面，不能用等鎖前讀到的舊內文
+    p = lock_paragraph(s, paragraph_id)
     if p.kind != "body":
         raise InsertRejected(422, "聲明不能插入判決")
     if pin.case_id != rnd.case_id:
