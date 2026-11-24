@@ -63,3 +63,16 @@ EVIDENCE_NOTES_SCHEMA = _obj({
         })},
     })},
 })
+
+
+# 大事記（設計 5.7）：date 是西元 YYYY-MM-DD、YYYY-MM 或空字串；source 是證物代號或「對造書狀A」
+TIMELINE_SCHEMA = _obj({
+    "events": {"type": "array", "items": _obj({
+        "date": _STR,
+        "description": _STR,
+        "amount": {"type": ["integer", "null"]},
+        "source": _STR,
+        "page_no": _INT,
+        "quote": _STR,
+    })},
+})

@@ -71,12 +71,18 @@ def _precheck(s: Session, step: str, case_id: UUID, round_id: UUID | None) -> No
     if step == "evidence_notes":
         from app.pipeline.evidence_notes import ready
         ready(s, case_id)
+    elif step == "timeline":
+        from app.pipeline.timeline import ready as timeline_ready
+        timeline_ready(s, case_id)
 
 
 def _body_for(step: str) -> Callable[[AIJob, AIProvider, "JobContext"], None]:
     if step == "evidence_notes":
         from app.pipeline.evidence_notes import generate_evidence_notes
         return generate_evidence_notes
+    if step == "timeline":
+        from app.pipeline.timeline import generate_timeline
+        return generate_timeline
     raise ValueError(f"unknown AI job step {step}")
 
 

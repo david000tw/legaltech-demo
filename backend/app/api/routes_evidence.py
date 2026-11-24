@@ -1,15 +1,19 @@
-"""卷證說明（設計 5.6）的 API；AI 工作的開始方式也給大事記、健檢共用。律師與助理都可以產生、修改。"""
+"""卷證說明（設計 5.6）與大事記（設計 5.7）的 API；AI 工作的開始方式也給健檢共用。
+律師與助理都可以產生、修改（設計 5.1）。"""
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.auth import CurrentMember, current_member
+from app.dates import PartialDate, parse_iso
 from app.db import tenant_session
-from app.models import Case, EvidenceNote
+from app.models import Case, Document, EvidenceNote, Page, TimelineEvent
 from app.pipeline.evidence_notes import note_json, notes_view
 from app.pipeline.jobs import BUSY, JobBusy, JobRule, job_json, latest_job, run_job, start_job
+from app.pipeline.timeline import event_json, lawyer_event, set_date, timeline_view
+from app.sources import pending_ocr, source_pages
 
 router = APIRouter(prefix="/api")
 
@@ -79,3 +83,97 @@ def delete_note(note_id: UUID, m: CurrentMember = Depends(current_member)) -> di
     with tenant_session(m.firm_id) as s:
         s.delete(_note_or_404(s, note_id))
         return {"id": str(note_id), "deleted": True}
+
+
+@router.post("/cases/{case_id}/timeline", status_code=202)
+def generate_timeline(case_id: UUID, request: Request, background: BackgroundTasks,
+                      m: CurrentMember = Depends(current_member)) -> dict:
+    with tenant_session(m.firm_id) as s:
+        _case_or_404(s, case_id)
+    return start_ai_job(request, background, m, case_id, None, "timeline")
+
+
+@router.get("/cases/{case_id}/timeline")
+def get_timeline(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    with tenant_session(m.firm_id) as s:
+        _case_or_404(s, case_id)
+        return {"events": timeline_view(s, case_id), "pending_ocr": pending_ocr(source_pages(s, case_id).values()),
+                "job": job_json(latest_job(s, case_id, None, "timeline"))}
+
+
+_Description = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+
+
+def _date_or_422(value: str | None) -> PartialDate | None:
+    if value is None or not value.strip():
+        return None
+    pd = parse_iso(value)
+    if pd is None:
+        raise HTTPException(422, "日期格式要是 YYYY-MM-DD 或 YYYY-MM（西元），且要是存在的日期")
+    return pd
+
+
+class EventBody(BaseModel):
+    date: str | None = None
+    description: _Description
+    amount: int | None = Field(default=None, ge=0)
+    page_id: UUID | None = None
+    quote: str = Field(default="", max_length=2000)
+
+
+class EventPatch(BaseModel):
+    date: str | None = None
+    description: _Description | None = None
+    amount: int | None = Field(default=None, ge=0)
+    quote: str | None = Field(default=None, max_length=2000)
+
+
+@router.post("/cases/{case_id}/timeline/events")
+def add_event(case_id: UUID, body: EventBody, m: CurrentMember = Depends(current_member)) -> dict:
+    """律師新增事件：出處頁面必須屬於本案；對造主張與否依該頁是哪一種文件決定。"""
+    with tenant_session(m.firm_id) as s:
+        _case_or_404(s, case_id)
+        pd = _date_or_422(body.date)
+        kind = None
+        if body.page_id is not None:
+            page = s.get(Page, body.page_id)
+            doc = s.get(Document, page.document_id) if page else None
+            if doc is None or doc.case_id != case_id:
+                raise HTTPException(422, "出處頁面不屬於本案")
+            kind = "evidence" if doc.kind == "evidence" else "opponent"
+        e = lawyer_event(s, case_id, event_date=pd, description=body.description, amount=body.amount,
+                         page_id=body.page_id, quote=body.quote, source_kind=kind)
+        return event_json(s, e)
+
+
+def _event_or_404(s, event_id: UUID) -> TimelineEvent:
+    e = s.get(TimelineEvent, event_id)
+    if e is None:
+        raise HTTPException(404, "找不到事件")
+    return e
+
+
+@router.patch("/timeline-events/{event_id}")
+def patch_event(event_id: UUID, body: EventPatch, m: CurrentMember = Depends(current_member)) -> dict:
+    """修改後標「律師」、不再比對原文；是否為對造主張維持原值（改錯字不會讓對造的說法變成我方事實）。"""
+    fields = body.model_dump(exclude_unset=True)
+    with tenant_session(m.firm_id) as s:
+        e = _event_or_404(s, event_id)
+        if "date" in fields:
+            set_date(e, _date_or_422(fields["date"]))
+        if fields.get("description") is not None:
+            e.description = fields["description"]
+        if "amount" in fields:
+            e.amount = fields["amount"]
+        if fields.get("quote") is not None:
+            e.quote = fields["quote"]
+        e.origin, e.status, e.reasons = "lawyer", "unchecked", []
+        s.flush()
+        return event_json(s, e)
+
+
+@router.delete("/timeline-events/{event_id}")
+def delete_event(event_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    with tenant_session(m.firm_id) as s:
+        s.delete(_event_or_404(s, event_id))
+        return {"id": str(event_id), "deleted": True}

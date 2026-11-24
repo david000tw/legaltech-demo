@@ -1,0 +1,150 @@
+"""大事記（設計 5.7）：從我方卷證與對造書狀整理「日期｜事件｜金額｜出處」。
+
+- 對造書狀來的事件標「對造主張」（依 AI 寫的來源代號判斷，頁碼對不到也一樣）；
+- 摘錄要逐字在那一頁，事件的日期與金額（欄位與描述裡寫到的）都要在摘錄裡；
+- 各批結果收齊後才一次寫入：中途失敗時舊的大事記原封不動；律師新增或修改的事件重新產生後保留。
+"""
+from __future__ import annotations
+
+from datetime import date
+from uuid import UUID
+
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
+
+from app.ai.prompts import load_prompt
+from app.ai.provider import AIProvider
+from app.ai.schemas import TIMELINE_SCHEMA
+from app.amounts import parse_amounts
+from app.dates import PartialDate, parse_dates, parse_iso, roc_label
+from app.db import tenant_session
+from app.models import AIJob, Case, TimelineEvent
+from app.pipeline.case_context import case_context
+from app.pipeline.jobs import JobContext, JobRule
+from app.sources import OPPONENT_PREFIX, SourcePage, check_source, code_key, source_pages, source_view
+
+TIMELINE_BATCH_CHARS = 60_000
+
+
+def ready(s: Session, case_id: UUID) -> None:
+    if not any(p.text is not None and p.text.strip() for p in source_pages(s, case_id).values()):
+        raise JobRule("no_text", "卷證與對造書狀都沒有可讀文字")
+
+
+def _batches(pages: list[SourcePage]) -> list[list[SourcePage]]:
+    """同一份文件的頁放同一批；累加超過上限就切下一批，單份超過上限時自成一批。"""
+    docs: dict[UUID, list[SourcePage]] = {}
+    for p in pages:
+        docs.setdefault(p.document_id, []).append(p)
+    out: list[list[SourcePage]] = []
+    size = 0
+    for doc_pages in docs.values():
+        n = sum(len(p.text or "") for p in doc_pages)
+        if not out or size + n > TIMELINE_BATCH_CHARS:
+            out.append([])
+            size = 0
+        out[-1].extend(doc_pages)
+        size += n
+    return out
+
+
+def _user(context: str, batch: list[SourcePage]) -> str:
+    body = "\n\n".join(f"【{p.code} 第{p.page_no}頁】\n{p.text}" for p in batch)
+    return f"{context}\n\n【卷證與對造書狀】\n{body}\n\n請依規則整理大事記。"
+
+
+def _event_date(pd: PartialDate | None) -> tuple[date | None, str | None]:
+    if pd is None:
+        return None, None
+    return date(pd.year, pd.month, pd.day or 1), ("day" if pd.day else "month")
+
+
+def _next_seq(s: Session, case_id: UUID) -> int:
+    return (s.scalar(select(func.max(TimelineEvent.seq)).where(TimelineEvent.case_id == case_id)) or 0) + 1
+
+
+def _save(s: Session, job: AIJob, events: list[dict], pages: dict[tuple[str, int], SourcePage]) -> None:
+    s.execute(delete(TimelineEvent).where(TimelineEvent.case_id == job.case_id, TimelineEvent.origin == "ai"))
+    s.flush()
+    seq = _next_seq(s, job.case_id)
+    for e in events:
+        description = str(e.get("description", "")).strip()
+        if not description:
+            continue
+        code = str(e.get("source", "")).strip()
+        page_no = e.get("page_no")
+        page = pages.get((code_key(code), page_no)) if isinstance(page_no, int) else None
+        quote = str(e.get("quote", ""))
+        raw_date = str(e.get("date") or "").strip()
+        pd = parse_iso(raw_date) if raw_date else None
+        raw_amount = e.get("amount")
+        amount = raw_amount if isinstance(raw_amount, int) and not isinstance(raw_amount, bool) and raw_amount >= 0 \
+            else None
+        dates = ([pd] if pd else []) + parse_dates(description)
+        amounts = ([amount] if amount is not None else []) + parse_amounts(description)
+        reasons = check_source(page, quote, dates=dates, amounts=amounts)
+        if raw_date and pd is None:
+            reasons.append("date_invalid")
+        event_date, precision = _event_date(pd)
+        kind = "opponent" if code_key(code).startswith(OPPONENT_PREFIX) else ("evidence" if code else None)
+        s.add(TimelineEvent(firm_id=job.firm_id, case_id=job.case_id, seq=seq, event_date=event_date,
+                            date_precision=precision, description=description, amount=amount,
+                            page_id=page.page_id if page else None, quote=quote, source_kind=kind, origin="ai",
+                            status="not_found" if reasons else "found", reasons=reasons))
+        seq += 1
+
+
+def generate_timeline(job: AIJob, provider: AIProvider, ctx: JobContext) -> None:
+    with tenant_session(job.firm_id) as s:
+        context = case_context(s, s.get(Case, job.case_id))
+        pages = source_pages(s, job.case_id)
+    readable = [p for p in pages.values() if p.text is not None and p.text.strip()]
+    system = load_prompt("timeline")
+    events: list[dict] = []
+    for batch in _batches(readable):
+        result = ctx.call("timeline", system, _user(context, batch), TIMELINE_SCHEMA, "medium")
+        events.extend(result.data.get("events", []) or [])
+    ctx.write(lambda s: _save(s, job, events, pages))
+
+
+def _iso(e: TimelineEvent) -> str | None:
+    if e.event_date is None:
+        return None
+    return e.event_date.isoformat() if e.date_precision == "day" else e.event_date.strftime("%Y-%m")
+
+
+def _label(e: TimelineEvent) -> str | None:
+    if e.event_date is None:
+        return None
+    d = e.event_date
+    return roc_label(PartialDate(d.year, d.month, d.day if e.date_precision == "day" else None))
+
+
+def event_json(s: Session, e: TimelineEvent) -> dict:
+    has_source = e.page_id is not None or bool((e.quote or "").strip())
+    return {"id": str(e.id), "date": _iso(e), "date_label": _label(e), "description": e.description,
+            "amount": e.amount, "source_kind": e.source_kind, "origin": e.origin,
+            "source": source_view(s, e.page_id, e.quote, e.status, e.reasons or []) if has_source else None}
+
+
+def timeline_view(s: Session, case_id: UUID) -> list[dict]:
+    """有日期的依日期升冪、同日依建立順序；沒有日期的放最後。"""
+    events = s.scalars(select(TimelineEvent).where(TimelineEvent.case_id == case_id)).all()
+    events = sorted(events, key=lambda e: (e.event_date is None, e.event_date or date.min, e.seq))
+    return [event_json(s, e) for e in events]
+
+
+def lawyer_event(s: Session, case_id: UUID, *, event_date: PartialDate | None, description: str,
+                 amount: int | None, page_id: UUID | None, quote: str, source_kind: str | None) -> TimelineEvent:
+    d, precision = _event_date(event_date)
+    e = TimelineEvent(firm_id=s.get(Case, case_id).firm_id, case_id=case_id, seq=_next_seq(s, case_id),
+                      event_date=d, date_precision=precision, description=description, amount=amount,
+                      page_id=page_id, quote=quote, source_kind=source_kind, origin="lawyer", status="unchecked",
+                      reasons=[])
+    s.add(e)
+    s.flush()
+    return e
+
+
+def set_date(e: TimelineEvent, value: PartialDate | None) -> None:
+    e.event_date, e.date_precision = _event_date(value)
