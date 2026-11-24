@@ -4,6 +4,8 @@
 會用訂閱額度（約 30 頁），預設不跑：
   LEGALTECH_TEST_DB=legaltech_test_impl PYTHONUTF8=1 uv run pytest -q -s -m real_ai tests/ocr_acceptance
 先檢查流程（不花額度）：加 OCR_ACCEPTANCE_DRY=1，改用假的 AI 回標準答案、不跑校對員，報告不寫入 docs。
+重播（不花額度）：加 OCR_ACCEPTANCE_REPLAY=1，假的 AI 依序回上次真實驗收存下的 AI 文字、校對員照跑，
+用目前的比對規則重算提醒；結果寫到 ocr_acceptance_2a_replay.json，不覆蓋真實驗收的報告（秒數、token 無意義）。
 """
 from __future__ import annotations
 
@@ -40,6 +42,7 @@ APP = Path(__file__).resolve().parents[3]
 PADDLE = [str(APP / "tools/paddle/.venv/Scripts/python.exe"), str(APP / "tools/paddle/paddle_proofread.py")]
 REPORT = APP / "docs/acceptance-plan-2a.md"
 RAW = APP / "docs/acceptance/ocr_acceptance_2a.json"
+RAW_REPLAY = APP / "docs/acceptance/ocr_acceptance_2a_replay.json"
 HANDWRITING = APP / "docs/acceptance/handwriting"
 CHECKBOX = "□■☑☐"
 AUTO_START, AUTO_END = "<!-- auto:start -->", "<!-- auto:end -->"
@@ -186,6 +189,7 @@ def write_report(summary: dict, pages: list[dict], traps: list[dict], handwritin
 
 def test_ocr_acceptance(db, tmp_path):
     dry = os.environ.get("OCR_ACCEPTANCE_DRY") == "1"
+    replay = os.environ.get("OCR_ACCEPTANCE_REPLAY") == "1" and not dry
     paddle = PADDLE if Path(PADDLE[0]).exists() and not dry else []
     settings = make_settings(tmp_path, paddle_cmd=paddle)
     dbmod.configure(settings)
@@ -196,10 +200,14 @@ def test_ocr_acceptance(db, tmp_path):
     case_id = client.post("/api/cases", json={"title": "林大明車禍案（驗收）", "our_side": "plaintiff"}).json()["id"]
 
     truth = generate(tmp_path / "set")
-    if dry:  # 依上傳順序回標準答案（看不出來的那一位寫成〔?〕）
+    if dry or replay:  # 依上傳順序回答案：檢查流程回標準答案（看不出來的那一位寫成〔?〕）；重播回上次真實的 AI 文字
         from tests.fakes.fake_provider import FakeProvider
         order = [t for kind in ("scan", "phone", "photos", "textpdf") for t in truth if t["upload"] == kind]
-        answers = iter(t["text"].replace("1□8", f"1{UNREADABLE}8") for t in order)
+        if replay:
+            saved = {p["id"]: p["text"] for p in json.loads(RAW.read_text(encoding="utf-8"))["pages"]}
+            answers = iter(saved[t["id"]] for t in order)
+        else:
+            answers = iter(t["text"].replace("1□8", f"1{UNREADABLE}8") for t in order)
         fake = FakeProvider({"ocr": lambda call: {"text": next(answers)}})
         client.app.state.provider_factory = lambda st, f: fake
     pages_dir = tmp_path / "set/pages"
@@ -296,7 +304,11 @@ def test_ocr_acceptance(db, tmp_path):
                "unflagged": unflagged, "checkbox_bad": checkbox_bad, "yellow_per_page": yellow / max(n, 1),
                "mismatch_per_page": mismatch / max(n, 1), "seconds_per_page": (job_seconds or elapsed) / max(n, 1),
                "tokens_per_page": tokens / max(n, 1)}
-    if not dry:
+    if replay:
+        summary["replay_of"] = json.loads(RAW.read_text(encoding="utf-8"))["summary"]["ran_at"]
+        RAW_REPLAY.write_text(json.dumps({"summary": summary, "pages": page_rows}, ensure_ascii=False, indent=1),
+                              encoding="utf-8")
+    elif not dry:
         write_report(summary, page_rows, trap_rows, hw_rows)
         RAW.parent.mkdir(parents=True, exist_ok=True)
         RAW.write_text(json.dumps({"summary": summary, "pages": page_rows, "traps": trap_rows}, ensure_ascii=False,
