@@ -14,6 +14,7 @@ from app.numbering import strip_heading_number
 from app.pipeline.candidates import filer_line, format_candidates, round_candidates
 from app.pipeline.case_context import case_context
 from app.pipeline.claims import SIDE_LABEL, claim_filers, selected_claims
+from app.statements import create_statement
 from app.verify.citations import MARKER_RE, attach_citations, verify_paragraph
 
 
@@ -80,6 +81,9 @@ def draft_round(s: Session, round_id: UUID, provider: AIProvider, member_id: UUI
         s.flush()
         attach_citations(s, p, _items(item))
         verify_paragraph(s, p)
+    statement = create_statement(s, draft)  # 起訴狀、答辯狀的聲明區塊（由系統產生，不經 AI）
+    if statement is not None:
+        verify_paragraph(s, statement)
     return draft
 
 

@@ -21,6 +21,7 @@ from app.models import (
 from app.ingest.service import current_page_text
 from app.numbering import strip_heading_number
 from app.pipeline.claims import opponent_pages
+from app.statements import AMOUNT_MARKER, amount_marker_allowed, draft_reasons, statement_of, statement_reasons
 from app.text_norm import find_quote, normalize_text, quote_length
 
 MARKER_RE = re.compile(r"\{\{(cite|quote):([A-Z]\d+)\}\}")
@@ -313,11 +314,15 @@ def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
             reasons.append(f"quote_marker_without_quote:{code}")
     if MARKER_RE.search(p.heading or ""):  # 標題不展開標記，有標記就會原樣印進書狀
         reasons.append("marker_in_heading")
-    if has_malformed_marker(p.heading) or has_malformed_marker(p.text):
+    # 金額標記 {{amount}} 只能在起訴狀的聲明段落；其他地方一律標錯（設計 5.2）
+    body = (p.text or "").replace(AMOUNT_MARKER, "")
+    if AMOUNT_MARKER in (p.text or "") and not amount_marker_allowed(s, p):
+        reasons.append("amount_marker_misplaced")
+    if has_malformed_marker(p.heading) or has_malformed_marker(body):
         reasons.append("malformed_marker")
     if any(INVALID_XML_CHARS.search(x or "") for x in [p.heading, p.text, *(c.quote for c in cites.values())]):
         reasons.append("control_char")
-    for hit in scan_unbound_references(p.heading) + scan_unbound_references(p.text):
+    for hit in scan_unbound_references(p.heading) + scan_unbound_references(body):
         reason = f"unbound_reference:{hit}"
         if reason not in reasons:
             reasons.append(reason)
@@ -328,6 +333,8 @@ def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
     opp = [op.text.text for op in opponent_pages(s, _round_id_for(s, p)) if op.text is not None]
     for head in scan_inline_quotes(p.heading, opp) + scan_inline_quotes(p.text, opp):
         reasons.append(f"inline_quote_unverified:{head}")
+    if p.kind == "statement":
+        reasons.extend(statement_reasons(s, p))
     for c in cites.values():
         verify_citation(s, c)
     p.verify_reasons = reasons
@@ -339,7 +346,8 @@ def verify_paragraph(s: Session, p: Paragraph) -> list[str]:
 class Blocker:
     paragraph_seq: int
     reason: str
-    paragraph_no: int = 0  # 畫面與匯出上的編號（只算未刪除的段落）；0＝整份草稿的問題
+    paragraph_no: int = 0  # 畫面與匯出上的編號（只算未刪除的內文段落）；0＝聲明或整份草稿的問題
+    scope: str = "paragraph"  # paragraph＝內文段落；statement＝聲明區塊；draft＝整份草稿
 
 
 def paragraph_blockers(s: Session, p: Paragraph) -> list[str]:
@@ -360,17 +368,28 @@ def paragraph_blockers(s: Session, p: Paragraph) -> list[str]:
 
 
 def is_removed(p: Paragraph) -> bool:
-    """標題與內文都清空的段落視為已刪除：不顯示、不審、不匯出（修改紀錄仍保留原文）。"""
+    """標題與內文都清空的內文段落視為已刪除：不顯示、不審、不匯出（修改紀錄仍保留原文）。
+    聲明段落清空也不算刪除，改由 statement_missing 擋下匯出。"""
+    if p.kind == "statement":
+        return False
     return not (p.heading or "").strip() and not (p.text or "").strip()
+
+
+def body_paragraphs(s: Session, draft_id: UUID) -> list[Paragraph]:
+    """未刪除的內文段落，依順序；編號只算這些（聲明不佔編號）。"""
+    return [p for p in s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id, Paragraph.kind == "body")
+                                 .order_by(Paragraph.seq)) if not is_removed(p)]
 
 
 def export_blockers(s: Session, draft_id: UUID) -> list[Blocker]:
     """匯出前一律重新驗證，不信任先前存的結果。"""
-    out: list[Blocker] = []
-    paragraphs = [p for p in s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id)
-                                       .order_by(Paragraph.seq)) if not is_removed(p)]
+    out: list[Blocker] = [Blocker(0, r, 0, "draft") for r in draft_reasons(s, draft_id)]
+    statement = statement_of(s, draft_id)
+    if statement is not None and (statement.text or "").strip():
+        out.extend(Blocker(0, r, 0, "statement") for r in paragraph_blockers(s, statement))
+    paragraphs = body_paragraphs(s, draft_id)
     if not paragraphs:
-        return [Blocker(0, "empty_draft")]
+        return out + [Blocker(0, "empty_draft", 0, "draft")]
     for n, p in enumerate(paragraphs, start=1):
         out.extend(Blocker(p.seq, r, n) for r in paragraph_blockers(s, p))
     return out

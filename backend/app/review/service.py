@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import CurrentMember
-from app.models import Citation, Exhibit, Page, PageText, Paragraph, ReviewEvent
+from app.models import Citation, Draft, Exhibit, Page, PageText, Paragraph, ReviewEvent, Round
 from app.pipeline.drafting import replace_paragraph, reset_review
 from app.numbering import strip_heading_number
 from app.render import paragraph_version, render_text
@@ -108,6 +108,9 @@ def edit_paragraph(s: Session, paragraph_id: UUID, text: str, citations: list[Ci
     if heading is not None:
         p.heading = strip_heading_number(heading)  # 編號由系統產生，不存
     replace_paragraph(s, p, text, [(c.code, c.quote) for c in citations])
+    if p.kind == "statement":  # 聲明改過：律師要重新核對自己寫的金額（設計 5.2）
+        rnd = s.get(Round, s.get(Draft, p.draft_id).round_id, with_for_update=True)
+        rnd.amounts_checked_by, rnd.amounts_checked_at = None, None
     _event(s, p, member, "edit", before, p.text)
     s.flush()
     return p

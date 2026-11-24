@@ -377,7 +377,7 @@ def test_draft_with_only_cleared_paragraphs_is_empty(env):
     assert lawyer.patch(f"/api/paragraphs/{env['good']}",
                         json={"heading": " ", "text": "", "citations": []}).status_code == 200
     r = lawyer.post(f"/api/drafts/{env['draft_id']}/export")
-    assert r.status_code == 409 and r.json()["blockers"] == [{"paragraph_seq": 0, "paragraph_no": 0, "reason": "empty_draft"}]
+    assert r.status_code == 409 and r.json()["blockers"] == [{"paragraph_seq": 0, "paragraph_no": 0, "reason": "empty_draft", "scope": "draft"}]
 
 
 # ---- 計畫 1B Task 3：律師確認「此句為法院判斷」（設計 5.5） ----

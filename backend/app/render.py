@@ -11,6 +11,7 @@ from app.exhibit_labels import evidence_label
 from app.models import Citation, Judgment, JudgmentPassage, Paragraph, StatuteArticle
 from app.numbering import display_heading, heading_number, strip_heading_number  # noqa: F401  對外提供
 from app.verify.citations import MARKER_RE, paragraph_citations, verify_paragraph
+from app.statements import AMOUNT_MARKER, amount_marker_allowed, round_of, round_total
 
 
 def citation_label(s: Session, c: Citation) -> str | None:
@@ -41,7 +42,11 @@ def render_text(s: Session, p: Paragraph) -> str:
             return f"「{c.quote}」" if c.quote.strip() else f"【引用錯誤：{code}】"
         return citation_label(s, c) or f"【引用錯誤：{code}】"
 
-    return MARKER_RE.sub(sub, p.text or "")
+    out = MARKER_RE.sub(sub, p.text or "")
+    if AMOUNT_MARKER in out:  # 訴之聲明的金額：系統依律師確認的請求項目加總（設計 5.2）
+        amount = f"{round_total(s, round_of(s, p).id):,}" if amount_marker_allowed(s, p) else "【金額標記位置錯誤】"
+        out = out.replace(AMOUNT_MARKER, amount)
+    return out
 
 
 def content_version(heading: str, rendered: str) -> str:

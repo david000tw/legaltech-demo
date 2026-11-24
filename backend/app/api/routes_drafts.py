@@ -22,7 +22,8 @@ from app.review.service import (
     CitationInput, ReviewRuleError, confirm_citation, confirm_court_reasoning, edit_paragraph, mark_reviewed, renumber_exhibit,
 )
 from app.text_norm import find_quote
-from app.verify.citations import export_blockers, is_removed, paragraph_citations
+from app.statements import BODY_LABEL, STATEMENT_LABEL, statement_of
+from app.verify.citations import body_paragraphs, export_blockers, is_removed, paragraph_citations
 
 router = APIRouter(prefix="/api")
 PASSAGE_LABEL = {"court_reasoning": "法院判斷段", "party_claim": "當事人主張段", "main_text": "主文",
@@ -50,16 +51,19 @@ def citation_json(s, c: Citation) -> dict:
 
 
 def _number_of(s, p: Paragraph) -> int:
-    """段落在草稿中的顯示編號：只算未刪除的段落，依 seq 排。"""
-    siblings = s.scalars(select(Paragraph).where(Paragraph.draft_id == p.draft_id).order_by(Paragraph.seq))
-    live = [x.id for x in siblings if not is_removed(x)]
+    """段落在草稿中的顯示編號：只算未刪除的內文段落，依 seq 排；聲明沒有編號。"""
+    live = [x.id for x in body_paragraphs(s, p.draft_id)]
     return live.index(p.id) + 1 if p.id in live else 0
+
+
+def blocker_json(b) -> dict:
+    return {"paragraph_seq": b.paragraph_seq, "paragraph_no": b.paragraph_no, "reason": b.reason, "scope": b.scope}
 
 
 def paragraph_json(s, p: Paragraph, n: int | None = None) -> dict:
     rendered = render_text(s, p)
     n = _number_of(s, p) if n is None else n
-    return {"id": str(p.id), "seq": p.seq, "heading": p.heading, "text": p.text,
+    return {"id": str(p.id), "seq": p.seq, "kind": p.kind, "heading": p.heading, "text": p.text,
             "display_heading": display_heading(n, p.heading) if n else strip_heading_number(p.heading),
             "heading_text": strip_heading_number(p.heading),
             "rendered_text": rendered, "version": paragraph_version(s, p, rendered),
@@ -74,18 +78,20 @@ def get_draft(draft_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
     with tenant_session(m.firm_id) as s:
         draft = _get_or_404(s, Draft, draft_id, "草稿")
         blockers = export_blockers(s, draft_id)  # 會重新驗證每一段
-        paragraphs = s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id).order_by(Paragraph.seq))
         rnd = s.get(Round, draft.round_id)
+        statement = statement_of(s, draft_id)
         case = s.get(Case, rnd.case_id)
         return {"id": str(draft.id), "round_id": str(rnd.id), "case_id": str(rnd.case_id),
                 "can_review": m.role == "lawyer" and m.bar_verified,
                 # 書狀名稱依程序；程序警示在匯出前再提示一次，但不阻擋（設計 5.6）
                 "brief_title": export_brief_title(s, draft_id),
                 "procedure_warning": procedure_warning(case.case_type, case.case_number),
-                "paragraphs": [paragraph_json(s, p, n) for n, p in
-                               enumerate((p for p in paragraphs if not is_removed(p)), start=1)],
-                "blockers": [{"paragraph_seq": b.paragraph_seq, "paragraph_no": b.paragraph_no, "reason": b.reason}
-                             for b in blockers]}
+                # 聲明區塊（起訴狀、答辯狀）放在內文之前，不佔段落編號
+                "statement": paragraph_json(s, statement, 0) if statement is not None else None,
+                "statement_label": STATEMENT_LABEL.get(rnd.brief_kind),
+                "body_label": BODY_LABEL.get(rnd.brief_kind),
+                "paragraphs": [paragraph_json(s, p, n) for n, p in enumerate(body_paragraphs(s, draft_id), start=1)],
+                "blockers": [blocker_json(b) for b in blockers]}
 
 
 @router.get("/citations/{citation_id}/source")
@@ -200,8 +206,7 @@ def export(draft_id: UUID, m: CurrentMember = Depends(current_member)):
             title = export_brief_title(s, draft_id)
         except ExportBlocked as e:
             return JSONResponse(status_code=409, content={
-                "blockers": [{"paragraph_seq": b.paragraph_seq, "paragraph_no": b.paragraph_no, "reason": b.reason}
-                             for b in e.blockers]})
+                "blockers": [blocker_json(b) for b in e.blockers]})
     name = urlquote(f"{title}.docx")
     return Response(content=data, media_type=DOCX_TYPE,
                     headers={"Content-Disposition": f"attachment; filename=draft.docx; filename*=UTF-8''{name}"})

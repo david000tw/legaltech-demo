@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.ai.provider import AIError, ProviderNotAllowed, ProviderNotEnabled
-from app.auth import CurrentMember, current_member
+from app.auth import CurrentMember, current_member, require_lawyer
 from app.db import tenant_session
 from app.models import RUNNING_STATUSES, Claim, Draft, Firm, Page, Paragraph, Round
 from app.pipeline.drafting import ParagraphChanged, rewrite_paragraph
@@ -90,6 +90,18 @@ def patch_round(round_id: UUID, body: RoundSettingsBody, m: CurrentMember = Depe
         return {"id": str(rnd.id), **{k: getattr(rnd, k) for k in fields}}
 
 
+@router.post("/rounds/{round_id}/amounts-checked")
+def amounts_checked(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    """多位原告或非連帶被告時，金錢聲明由律師自己寫，匯出前要由律師勾選「金額已自行核對」並留紀錄（設計 5.2）。"""
+    with tenant_session(m.firm_id) as s:
+        rnd = s.get(Round, round_id, with_for_update=True)
+        if rnd is None:
+            raise HTTPException(404, "找不到輪次")
+        require_lawyer(m)
+        rnd.amounts_checked_by, rnd.amounts_checked_at = m.id, datetime.now(timezone.utc)
+        return {"id": str(rnd.id), "amounts_checked_by": str(m.id)}
+
+
 class ClaimBody(BaseModel):
     selected: bool
 
@@ -140,8 +152,11 @@ def rewrite(paragraph_id: UUID, body: RewriteBody, request: Request,
             m: CurrentMember = Depends(current_member)) -> dict:
     conflict = None
     with tenant_session(m.firm_id) as s:
-        if s.get(Paragraph, paragraph_id) is None:
+        para = s.get(Paragraph, paragraph_id)
+        if para is None:
             raise HTTPException(404, "找不到段落")
+        if para.kind == "statement":
+            raise HTTPException(422, "聲明不能用 AI 重寫，請直接修改文字")
         try:
             provider = request.app.state.provider_factory(request.app.state.settings, s.get(Firm, m.firm_id))
             p = rewrite_paragraph(s, paragraph_id, body.instruction, provider, m.id)

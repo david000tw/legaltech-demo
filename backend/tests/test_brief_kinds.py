@@ -175,8 +175,12 @@ def test_export_filename_uses_kind(db):
     from tests.export_helpers import force_reviewed
     from tests.test_export import ready
     ctx, cs = ready(db)
+    from app.models import Draft
+    from app.statements import create_statement
     with tenant_session(ctx["firm"]) as s:
         s.get(Round, ctx["round_id"]).brief_kind = "answer"
+    with tenant_session(ctx["firm"]) as s:  # 答辯狀沒有答辯聲明不能匯出（子專案甲 Task 4）
+        create_statement(s, s.get(Draft, ctx["draft_id"]))
     force_reviewed(ctx["firm"], ctx["draft_id"])
     assert cs["lawyer"].get(f"/api/drafts/{ctx['draft_id']}").json()["brief_title"] == "民事答辯狀"
     r = cs["lawyer"].post(f"/api/drafts/{ctx['draft_id']}/export")

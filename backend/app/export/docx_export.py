@@ -19,7 +19,8 @@ from app.case_types import SIDE_LABEL, brief_title, default_addressee, procedure
 from app.models import Case, CaseParty, Citation, Document, Draft, Exhibit, ExportRecord, Page, PageText, Paragraph, Round
 from app.numbering import display_heading
 from app.render import render_text
-from app.verify.citations import INVALID_XML_CHARS, Blocker, export_blockers, is_removed
+from app.statements import BODY_LABEL, STATEMENT_LABEL, claim_value, statement_of
+from app.verify.citations import INVALID_XML_CHARS, Blocker, body_paragraphs, export_blockers, is_removed
 
 FONT = "標楷體"
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -99,6 +100,11 @@ def _cited_exhibits(s: Session, paragraph_ids: list[UUID]) -> list[tuple[Exhibit
     return sorted(((ex, name) for ex, name in rows), key=lambda r: (r[0].prefix, r[0].number))
 
 
+OPENING = {"complaint": "依法起訴事：", "answer": "依法提出答辯事：", "preparatory": "依法提出準備書狀事："}
+SCHEDULE_COLUMNS = ("編號", "遺產項目", "價額", "分割方法", "應繼分")
+SCHEDULE_ROWS = 4
+
+
 def export_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date | None = None) -> bytes:
     """狀頭內容與順序照設計 5.6；today 預設為台灣時區的今天（測試可指定）。"""
     # 先鎖住整份草稿的段落（依 id 排序避免互鎖），檢查到產生檔案之間別人不能改段落或確認引用
@@ -107,8 +113,10 @@ def export_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date 
     blockers = export_blockers(s, draft_id)  # 一律重新驗證
     if blockers:
         raise ExportBlocked(blockers)
-    paragraphs = [p for p in s.scalars(select(Paragraph).where(Paragraph.draft_id == draft_id).order_by(Paragraph.seq))
-                  if not is_removed(p)]
+    paragraphs = body_paragraphs(s, draft_id)  # 聲明另外處理，不佔段落編號
+    statement = statement_of(s, draft_id)
+    rnd = s.get(Round, s.get(Draft, draft_id).round_id)
+    kind = rnd.brief_kind
 
     case = _case_of(s, draft_id)
     parties = list(s.scalars(select(CaseParty).where(CaseParty.case_id == case.id).order_by(CaseParty.seq)))
@@ -120,10 +128,20 @@ def export_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date 
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = title.add_run(export_brief_title(s, draft_id))
     run.bold, run.font.size = True, Pt(18)
-    d.add_paragraph(f"案號：{_clean(case.case_number)}　股別：{_clean(case.division)}")
+    number = _clean(case.case_number) or ("（尚未分案）" if kind == "complaint" else "")  # 起訴時還沒分案
+    d.add_paragraph(f"案號：{number}　股別：{_clean(case.division)}")
     for line in _party_lines(case, parties):
         d.add_paragraph(line)
-    d.add_paragraph(f"為{_clean(case.cause) or '　　'}事件，依法提出準備書狀事：")
+    if kind == "complaint":
+        label, value = claim_value(s, rnd)
+        d.add_paragraph(f"{label}：新臺幣{value:,}元")
+    d.add_paragraph(f"為{_clean(case.cause) or '　　'}事件，{OPENING[kind]}")
+    if statement is not None:  # 訴之聲明、答辯聲明（設計 5.1）
+        d.add_paragraph(STATEMENT_LABEL[kind])
+        for line in render_text(s, statement).split("\n"):
+            d.add_paragraph(line)
+    if kind in BODY_LABEL:
+        d.add_paragraph(BODY_LABEL[kind])
     for n, p in enumerate(paragraphs, start=1):
         d.add_paragraph(display_heading(n, p.heading))  # 編號依未刪除段落的順序重排，與畫面一致
         for line in render_text(s, p).split("\n"):
@@ -131,6 +149,12 @@ def export_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date 
     d.add_paragraph("謹狀")
     addressee = _clean(case.addressee) or _clean(default_addressee(case.court, procedure))
     d.add_paragraph(f"{addressee}　公鑒")
+    if kind == "complaint" and case.case_type == "estate_partition":  # 分割遺產的附表由律師在 Word 填寫
+        d.add_paragraph("附表")
+        table = d.add_table(rows=1 + SCHEDULE_ROWS, cols=len(SCHEDULE_COLUMNS))
+        table.style = "Table Grid"
+        for cell, name in zip(table.rows[0].cells, SCHEDULE_COLUMNS):
+            cell.text = name
     exhibits = _cited_exhibits(s, [p.id for p in paragraphs])
     if exhibits:
         d.add_paragraph("證物名稱及件數")
