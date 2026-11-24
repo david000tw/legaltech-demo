@@ -28,9 +28,15 @@ from app.corpus.seed_loader import load_seed
 from app.db import admin_session, tenant_session
 from app.export.docx_export import export_brief_title, export_draft
 from app.models import (
-    Candidate, Case, Citation, Claim, Draft, Judgment, JudgmentPassage, Paragraph, Round, StatuteArticle, UsageRecord,
+    Candidate, Case, Citation, Claim, Document, Draft, Judgment, JudgmentPassage, Page, Paragraph, Round, StatuteArticle,
+    UsageRecord,
 )
 from app.pipeline.candidates import resolve_references, round_candidates
+from app.ingest.service import current_page_text
+from app.pipeline.evidence_notes import notes_view
+from app.pipeline.health import report_view
+from app.pipeline.jobs import JobRule, latest_job, run_job, start_job
+from app.pipeline.timeline import timeline_view
 from app.pipeline.run import run_draft, run_extract, start_stage
 from app.review.service import edit_paragraph
 from app.statements import STATEMENT_LABEL, statement_of
@@ -462,3 +468,272 @@ def _assert_report(report: dict) -> None:
         r = report["estate-complaint"]
         assert "假執行" not in r["statement"]["text"] and "公同共有" in r["statement"]["text"], r["statement"]
         assert r["exported_has_schedule"] in (None, True), r["exported_has_schedule"]
+
+
+# ───────────────────────── 子專案乙：卷證說明、大事記、健檢（設計 6.2） ─────────────────────────
+# 核對函式是測試程式自己寫的，不 import app.sources／app.dates／app.amounts：產品錯了，核對不會跟著錯。
+
+REPORT_B = BACKEND.parent / "docs" / "acceptance" / "e2e_report_b.json"
+FIRM_B = "內部測試所（E2E 乙）"
+FORBIDDEN_WORDS = ("已證實", "已驗證")
+_OWN_CN = {"〇": 0, "○": 0, "◯": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8,
+           "九": 9}
+_OWN_CN_CHARS = "〇○◯零一二三四五六七八九十百"
+_OWN_CJK_DATE = re.compile(
+    rf"(?<![0-9{_OWN_CN_CHARS}])([0-9]{{1,4}}|[{_OWN_CN_CHARS}]{{1,6}})年(?!度)"
+    rf"([0-9]{{1,2}}|[一二三四五六七八九十]{{1,3}}|元)月(?:([0-9]{{1,2}}|[一二三四五六七八九十]{{1,3}})日)?")
+_OWN_SEP_DATE = re.compile(r"(?<![0-9./\-])([0-9]{4}|[0-9]{2,3})([/.\-])([0-9]{1,2})\2([0-9]{1,2})(?![0-9])")
+
+
+def _own_found(page_text: str | None, quote: str) -> bool:
+    """摘錄（去空白、全形轉半形後）至少 6 字，且整段出現在該頁。掃描頁（沒有文字）一律不算。"""
+    if page_text is None:
+        return False
+    q = _flat(quote)
+    return len(q) >= 6 and q in _flat(page_text)
+
+
+def _own_number(s: str) -> int | None:
+    if s.isdigit():
+        return int(s)
+    if "十" in s or "百" in s:
+        total = cur = 0
+        for ch in s:
+            if ch == "百":
+                total, cur = total + (cur or 1) * 100, 0
+            elif ch == "十":
+                total, cur = total + (cur or 1) * 10, 0
+            elif ch in _OWN_CN:
+                cur = _OWN_CN[ch]
+            else:
+                return None
+        return total + cur
+    if all(ch in _OWN_CN for ch in s):
+        return int("".join(str(_OWN_CN[ch]) for ch in s))
+    return None
+
+
+def _own_year(y: int) -> int | None:
+    if 1 <= y <= 199:
+        return y + 1911  # 民國
+    return y if 1900 <= y <= 2100 else None
+
+
+def _own_dates(text: str) -> set[tuple[int, int, int | None]]:
+    """民國、西元、國字（含「一一○」「元月」）與 2025/03/09、114.3.9 寫法；只到月的日寫 None。"""
+    flat = _flat(text)
+    out: set[tuple[int, int, int | None]] = set()
+    for m in _OWN_CJK_DATE.finditer(flat):
+        y = _own_number(m.group(1))
+        mo = 1 if m.group(2) == "元" else _own_number(m.group(2))
+        d = _own_number(m.group(3)) if m.group(3) else None
+        y = _own_year(y) if y is not None else None
+        if y and mo and 1 <= mo <= 12 and (d is None or 1 <= d <= 31):
+            out.add((y, mo, d))
+    for m in _OWN_SEP_DATE.finditer(flat):
+        y, mo, d = _own_year(int(m.group(1))), int(m.group(3)), int(m.group(4))
+        if y and 1 <= mo <= 12 and 1 <= d <= 31:
+            out.add((y, mo, d))
+    return out
+
+
+def _date_in(d: tuple[int, int, int | None], quote_dates: set) -> bool:
+    if d[2] is None:
+        return any(q[0] == d[0] and q[1] == d[1] for q in quote_dates)
+    return d in quote_dates
+
+
+# 沒寫年份的月日（「9月25日」「09/25」）：句子寫到的也要在摘錄裡。不去空白（「09/18 19:42」去空白會黏成一串）
+_OWN_MD = re.compile(rf"(?<![0-9{_OWN_CN_CHARS}])([0-9]{{1,2}}|[一二三四五六七八九十]{{1,3}})月"
+                     rf"([0-9]{{1,2}}|[一二三四五六七八九十]{{1,3}})日")
+_OWN_MD_SLASH = re.compile(r"(?<![0-9./:\-])([0-9]{2})/([0-9]{2})(?![0-9/])")
+
+
+def _own_month_days(text: str) -> set[tuple[int, int]]:
+    """沒寫年份的月日；先拿掉有年份的完整日期。"""
+    plain = unicodedata.normalize("NFKC", text or "")
+    plain = _OWN_SEP_DATE.sub(" ", _OWN_CJK_DATE.sub(" ", plain))
+    out: set[tuple[int, int]] = set()
+    for rx in (_OWN_MD, _OWN_MD_SLASH):
+        for m in rx.finditer(plain):
+            mo, d = _own_number(m.group(1)), _own_number(m.group(2))
+            if mo and d and 1 <= mo <= 12 and 1 <= d <= 31:
+                out.add((mo, d))
+    return out
+
+
+def _month_day_in(md: tuple[int, int], quote: str) -> bool:
+    return md in _own_month_days(quote) or any((q[1], q[2]) == md for q in _own_dates(quote))
+
+
+def _iso_date(value: str) -> tuple[int, int, int | None]:
+    parts = [int(x) for x in value.split("-")]
+    return parts[0], parts[1], parts[2] if len(parts) > 2 else None
+
+
+def _assert_report_b(report: dict) -> None:
+    """子專案乙驗收條件（設計 6.2）；報告存檔後也能離線重新檢查。"""
+    for name, r in report.items():
+        assert r["round_status"] == "drafted", (name, r["round_status"])
+        for step, job in r["jobs"].items():
+            assert job and job["status"] == "done", (name, step, job)
+        pages = r["pages"]
+
+        def found_ok(src: dict, where: str) -> dict:
+            page = pages.get(src.get("page_id") or "")
+            assert page is not None and _own_found(page["text"], src["quote"]), (name, where, src)
+            return page
+
+        texts: list[str] = []
+        found_notes = 0
+        for n in r["notes"]:
+            if n["origin"] != "ai":
+                continue
+            texts.append(n["text"])
+            src = n["source"]
+            if src["status"] != "found":
+                continue
+            found_ok(src, "note")
+            quote_dates, quote_amounts = _own_dates(src["quote"]), _simple_amounts(src["quote"])
+            for d in _own_dates(n["text"]):
+                assert _date_in(d, quote_dates), (name, "note date not in quote", d, n)
+            for a in _simple_amounts(n["text"]):
+                assert a in quote_amounts, (name, "note amount not in quote", a, n)
+            for md in _own_month_days(n["text"]):
+                assert _month_day_in(md, src["quote"]), (name, "note month-day not in quote", md, n)
+            found_notes += 1
+        assert found_notes >= 1, (name, "沒有任何找到原文的卷證說明")
+
+        dated_found = 0
+        for e in r["events"]:
+            if e["origin"] != "ai":
+                continue
+            texts.append(e["description"])
+            src = e["source"]
+            if src and pages.get(src.get("page_id") or "", {}).get("kind") == "opponent":
+                assert e["source_kind"] == "opponent", (name, "對造書狀的事件沒標對造主張", e)
+            if src is None or src["status"] != "found":
+                continue
+            found_ok(src, "event")
+            dates = set(_own_dates(e["description"])) | ({_iso_date(e["date"])} if e["date"] else set())
+            quote_dates = _own_dates(src["quote"])
+            for d in dates:
+                assert _date_in(d, quote_dates), (name, "event date not in quote", d, e)
+            amounts = _simple_amounts(e["description"]) | ({e["amount"]} if e["amount"] is not None else set())
+            quote_amounts = _simple_amounts(src["quote"])
+            for a in amounts:
+                assert a in quote_amounts, (name, "event amount not in quote", a, e)
+            for md in _own_month_days(e["description"]):
+                assert _month_day_in(md, src["quote"]), (name, "event month-day not in quote", md, e)
+            dated_found += bool(e["date"])
+        assert dated_found >= 1, (name, "沒有沒標紅且有日期的事件")
+
+        h = r["health"]
+        assert h is not None, (name, "沒有健檢結果")
+        for it in h["items"]:
+            texts += [it["title"], it["explanation"]]
+            for b in it["basis"]:
+                if b["status"] == "found":
+                    found_ok(b, "health basis")
+            for ref in it["references"]:
+                assert ref["code"] in r["candidate_codes"], (name, "健檢引用不在本輪候選", ref)
+        texts += h["issues"]
+        if r["brief_kind"] == "complaint":
+            assert h["undisputed"] is None, (name, "起訴狀不應有不爭執事項")
+        else:
+            assert h["undisputed"] is not None, name
+            for u in h["undisputed"]:
+                texts.append(u["fact"])
+                if u["basis"]["status"] == "found":
+                    assert found_ok(u["basis"], "undisputed")["kind"] == "opponent", (name, "不爭執事項不是對造書狀", u)
+        for text in texts:
+            assert not any(w in text for w in FORBIDDEN_WORDS), (name, "出現已證實／已驗證", text)
+
+
+def _run_job_b(firm, member, case_id, round_id, step, settings) -> str | None:
+    """開始並執行一個 AI 工作；前提不符時回傳原因（寫進報告），不丟例外。"""
+    try:
+        with tenant_session(firm) as s:
+            job_id = start_job(s, case_id, round_id, step, member).id
+    except JobRule as e:
+        return f"{e.code}: {e.message}"
+    run_job(firm, job_id, settings)
+    return None
+
+
+def _run_case_b(firm, member, name: str, case_id, round_id, settings) -> dict:
+    _run_case(firm, member, name, round_id, _Recorder(), settings)
+    rules = {step: _run_job_b(firm, member, case_id, None, step, settings) for step in ("evidence_notes", "timeline")}
+    rules["health"] = _run_job_b(firm, member, case_id, round_id, "health", settings)
+    return rules
+
+
+def _job_view(s, case_id, round_id, step, rule: str | None) -> dict | None:
+    if rule:
+        return {"status": "rule", "error": rule}
+    job = latest_job(s, case_id, round_id, step)
+    return {"status": job.status, "error": job.error} if job else None
+
+
+def _stats_b(r: dict) -> dict:
+    events = r["events"]
+    red = [e for e in events if e["source"] and e["source"]["status"] == "not_found"]
+    items = (r["health"] or {}).get("items", [])
+    return {
+        "notes": dict(Counter(n["source"]["status"] for n in r["notes"])),
+        "events": dict(Counter(e["source"]["status"] if e["source"] else "none" for e in events)),
+        "events_opponent": sum(e["source_kind"] == "opponent" for e in events),
+        "red_ratio": round(len(red) / len(events), 3) if events else None,
+        "red_reasons": dict(Counter(x for e in red for x in e["source"]["reasons"])),
+        "health_levels": dict(Counter(i["level"] for i in items)),
+        "health_basis": dict(Counter(b["status"] for i in items for b in i["basis"])),
+        "health_absence": sum(i["absence"] for i in items),
+        "undisputed": dict(Counter(u["basis"]["status"] for u in (r["health"] or {}).get("undisputed") or [])),
+        "not_in_list": sum(len(i["not_in_list"]) for i in items),
+    }
+
+
+def _collect_b(firm, name: str, case_id, round_id, rules: dict) -> dict:
+    with tenant_session(firm) as s:
+        rnd = s.get(Round, round_id)
+        pages = {}
+        for page, doc in s.execute(select(Page, Document).join(Document, Document.id == Page.document_id)
+                                   .where(Document.case_id == case_id)).all():
+            pt = current_page_text(s, page.id)
+            pages[str(page.id)] = {"kind": "evidence" if doc.kind == "evidence" else "opponent",
+                                   "text": pt.text if pt is not None else None}
+        usage = {}
+        tokens_in = UsageRecord.input_tokens + UsageRecord.cache_read_tokens + UsageRecord.cache_write_tokens
+        for step, n, inp, out in s.execute(
+                select(UsageRecord.step, func.count(), func.sum(tokens_in), func.sum(UsageRecord.output_tokens))
+                .where(UsageRecord.case_id == case_id).group_by(UsageRecord.step)).all():
+            usage[step] = {"calls": n, "input_tokens": int(inp or 0), "output_tokens": int(out or 0)}
+        r = {
+            "brief_kind": rnd.brief_kind, "round_status": rnd.status,
+            "jobs": {"evidence_notes": _job_view(s, case_id, None, "evidence_notes", rules.get("evidence_notes")),
+                     "timeline": _job_view(s, case_id, None, "timeline", rules.get("timeline")),
+                     "health": _job_view(s, case_id, round_id, "health", rules.get("health"))},
+            "pages": pages,
+            "notes": [{"exhibit": d["exhibit"], **n} for d in notes_view(s, case_id) for n in d["notes"]],
+            "events": timeline_view(s, case_id),
+            "health": report_view(s, round_id),
+            "candidate_codes": sorted(round_candidates(s, round_id)),
+            "usage": usage,
+        }
+    r["stats"] = _stats_b(r)
+    return r
+
+
+def test_twelve_cases_evidence_timeline_health(db):
+    """子專案乙驗收（設計 6.2）：12 件各跑兩段起草，再跑卷證說明、大事記、健檢，用測試自己的核對檢查。"""
+    with admin_session() as s:
+        load_seed(s, SEED)
+    firm = create_firm(FIRM_B)
+    member = create_member(firm, "lawyer-b@e2e.test", bar_number=BAR)
+    cases = {name: import_testcase(CASES_DIR / name, FIRM_B) for name in CASES}
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        rules = dict(zip(CASES, pool.map(lambda n: _run_case_b(firm, member, n, *cases[n], db), CASES)))
+    report = {name: _collect_b(firm, name, *cases[name], rules[name]) for name in CASES}
+    REPORT_B.parent.mkdir(parents=True, exist_ok=True)
+    REPORT_B.write_text(json.dumps(report, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    _assert_report_b(report)
