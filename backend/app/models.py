@@ -607,7 +607,15 @@ class HealthReport(Base):
     issues: Mapped[list] = _jsonb_list()
 
 
-PUBLIC_TABLES = ("judgments", "judgment_passages", "statutes", "statute_articles")
+class WorkCalendarDay(Base):
+    """行政機關辦公日曆（全系統共用、唯讀）：期限屆滿日遇放假要順延（民法第122條）。"""
+    __tablename__ = "work_calendar"
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    is_holiday: Mapped[bool] = mapped_column(Boolean)
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
+PUBLIC_TABLES = ("judgments", "judgment_passages", "statutes", "statute_articles", "work_calendar")
 # 合規門檻欄位（is_internal_test、bar_verified、role）所在的表：一般請求用的帳號只能讀。
 READ_ONLY_FOR_APP = ("firms", "members")
 

@@ -248,3 +248,28 @@ def test_0009_round_trip(db):
     assert keys and all(keys.values())
     assert keys["臺灣臺南地方法院114年度訴字第1347號民事判決"] == "TNDV,114,訴,1347,20260113,1"
     assert keys["臺灣新竹地方法院114年度簡上字第17號民事判決"] == "SCDV,114,簡上,17,20251023,1"
+
+
+def test_0010_round_trip(db):
+    """子專案丙：行政機關辦公日曆表（全系統共用、唯讀）可以降級再升級。"""
+    from alembic import command
+    cfg = _cfg()
+
+    def state():
+        eng = create_engine(TEST_ADMIN_DB)
+        try:
+            with eng.connect() as c:
+                tables = set(c.execute(text("select tablename from pg_tables where schemaname='public'")).scalars())
+                can_read = "work_calendar" in tables and c.execute(
+                    text("select has_table_privilege('app_user', 'work_calendar', 'SELECT')")).scalar()
+                return tables, can_read
+        finally:
+            eng.dispose()
+
+    command.downgrade(cfg, "0009")
+    try:
+        assert "work_calendar" not in state()[0]
+    finally:
+        command.upgrade(cfg, "head")
+    tables, can_read = state()
+    assert "work_calendar" in tables and can_read is True

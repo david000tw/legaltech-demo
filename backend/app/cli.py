@@ -5,6 +5,7 @@ python -m app.cli create-member --firm NAME --email E --password P --role lawyer
                                 [--bar-number N --bar-verified]
 python -m app.cli import-testcase <dir> --firm NAME
 python -m app.cli load-seed [--resplit]
+python -m app.cli load-calendar
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from app.corpus.seed_loader import load_seed
 from app.db import admin_session
 from app.ingest.service import ingest_document
 from app.models import Case, CaseParty, Firm, Member, Round
+from app.tools.calendar_loader import load_calendar
 
 
 def _firm_by_name(s, name: str) -> Firm:
@@ -103,6 +105,12 @@ def cmd_load_seed(a) -> None:
     print(f"judgments_added={j} articles_added={art}")
 
 
+def cmd_load_calendar(a) -> None:
+    with admin_session() as s:
+        n = load_calendar(s, SEED_DIR / "calendar")
+    print(f"calendar_days={n}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -130,6 +138,9 @@ def build_parser() -> argparse.ArgumentParser:
     ls = sub.add_parser("load-seed")
     ls.add_argument("--resplit", action="store_true")
     ls.set_defaults(func=cmd_load_seed)
+
+    cal = sub.add_parser("load-calendar")
+    cal.set_defaults(func=cmd_load_calendar)
     return p
 
 

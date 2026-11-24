@@ -19,6 +19,8 @@ try {
     $env:PYTHONPATH = '.'
     uv run alembic upgrade head
     if ($LASTEXITCODE -ne 0) { throw '資料表更新失敗' }
+    uv run python -m app.cli load-calendar  # 行政機關辦公日曆（期限試算用），可重跑
+    if ($LASTEXITCODE -ne 0) { throw '辦公日曆匯入失敗' }
 } finally {
     Pop-Location
 }
