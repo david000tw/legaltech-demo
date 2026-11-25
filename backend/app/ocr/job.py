@@ -70,12 +70,15 @@ def latest_ocr_job(s: Session, document_id: UUID) -> AIJob | None:
                      .order_by(AIJob.started_at.desc()).limit(1)).first()
 
 
-def active_job(s: Session, document_id: UUID) -> AIJob | None:
+def _is_active(job: AIJob | None) -> bool:
+    """等待確認、或在跑且心跳沒過期。"""
     from app.pipeline.jobs import _stale
+    return job is not None and (job.status == "waiting" or job.status == "running" and not _stale(job))
+
+
+def active_job(s: Session, document_id: UUID) -> AIJob | None:
     job = latest_ocr_job(s, document_id)
-    if job is not None and (job.status == "waiting" or job.status == "running" and not _stale(job)):
-        return job
-    return None
+    return job if _is_active(job) else None
 
 
 def queued_pages(s: Session, case_id: UUID) -> int:
@@ -127,14 +130,22 @@ def retry_failed(s: Session, document_id: UUID) -> int:
     return len(pages)
 
 
-def ocr_progress(s: Session, document_id: UUID) -> dict:
-    states = list(s.scalars(select(Page.ocr_state).where(Page.document_id == document_id, Page.ocr_state != "none")))
+def _ocr_states(s: Session, document_id: UUID) -> list[str]:
+    return list(s.scalars(select(Page.ocr_state).where(Page.document_id == document_id, Page.ocr_state != "none")))
+
+
+def ocr_progress(s: Session, document_id: UUID, job: AIJob | None = None) -> dict:
+    """job：呼叫端已經查過的最新辨識工作（不傳就在需要時才查）。"""
+    return _progress(s, document_id, _ocr_states(s, document_id), job)
+
+
+def _progress(s: Session, document_id: UUID, states: list[str], job: AIJob | None = None) -> dict:
     total, done, failed, proofing = len(states), states.count("done"), states.count("failed"), states.count("read")
     remaining = total - done - failed
     if remaining <= 0:
         minutes = 0
     else:
-        job = latest_ocr_job(s, document_id)
+        job = job or latest_ocr_job(s, document_id)
         completed = done + failed
         if completed and job is not None and job.status == "running":
             per_page = max((_now() - job.started_at).total_seconds(), 0) / completed
@@ -142,6 +153,16 @@ def ocr_progress(s: Session, document_id: UUID) -> dict:
         else:
             minutes = estimate_minutes(remaining)
     return {"total": total, "done": done, "failed": failed, "proofing": proofing, "minutes_left": minutes}
+
+
+def document_ocr_status(s: Session, document_id: UUID) -> dict:
+    """橫幅輪詢用的輕量狀態：工作、進度、能不能繼續辨識；不含每頁細節與 can_reocr 等不會隨辨識變動的欄位。
+    只查最新的辨識工作與頁狀態各一次（整個案件回應每份文件要多次查詢）。內容與 document_ocr_json 同源。"""
+    job = latest_ocr_job(s, document_id)
+    states = _ocr_states(s, document_id)
+    from app.pipeline.jobs import job_json
+    return {"job": job_json(job), "progress": _progress(s, document_id, states, job),
+            "can_resume": not _is_active(job) and bool(set(states) & {"pending", "read"})}
 
 
 def current_texts(s: Session, page_ids: list[UUID]) -> dict[UUID, PageText]:

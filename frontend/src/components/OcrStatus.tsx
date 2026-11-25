@@ -1,7 +1,7 @@
 // 一份文件的辨識狀態（計畫 2A）：進度、每頁一個小標籤（點了開啟對照原圖面板），以及開始、繼續、重新辨識、改用辨識。
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as api from '../api'
-import { POLL_MS, useJobPolling } from '../aiJobs'
+import { POLL_MS } from '../aiJobs'
 import { ocrStateLabel } from '../labels'
 import { confirmOcr } from '../ocrConfirm'
 import { BTN_SMALL } from '../ui'
@@ -22,6 +22,32 @@ function ocrStopReason(error: string): string {
   return `辨識已停下：${error.replace(/^[a-z_]+: /, '')}`
 }
 
+// 橫幅顯示的狀態（工作、進度、能不能繼續）；整個案件回應與輕量狀態端點算出同樣的內容，用它比對有沒有變
+const signature = (o: Pick<api.DocOcr, 'job' | 'progress' | 'can_resume'> | undefined) => JSON.stringify(
+  o ? [o.job?.id, o.job?.status, o.job?.stale, o.job?.error, o.progress, o.can_resume] : null)
+
+// 工作在跑時每隔 pollMs 讀一次輕量狀態（不重讀整個案件）；狀態和畫面上的不一樣了才通知上層重讀，
+// 同一個變化只通知一次（上層重讀失敗也不會每 3 秒重試整個案件）
+function useOcrPolling(docId: string, running: boolean, shown: string, onChanged: () => Promise<void>,
+  pollMs: number) {
+  const reported = useRef(shown)  // 最後一次畫面上的或已通知過的狀態
+  const notify = useRef(onChanged)
+  useEffect(() => { reported.current = shown }, [shown])
+  useEffect(() => { notify.current = onChanged })
+  useEffect(() => {
+    if (!running) return
+    const t = setInterval(() => {
+      void api.getDocumentOcrStatus(docId).then(async (status) => {
+        const sig = signature(status)
+        if (sig === reported.current) return
+        reported.current = sig
+        await notify.current()
+      }).catch(() => { /* 下一輪再試 */ })
+    }, pollMs)
+    return () => clearInterval(t)
+  }, [docId, running, pollMs])
+}
+
 function tone(page: api.DocPage): string {
   if (page.ocr_state === 'failed') return TAG.red
   if (page.ocr_state === 'done') return page.needs_check ? TAG.amber : TAG.green
@@ -39,7 +65,7 @@ export default function OcrStatus({ doc, onChanged, onOpenPage, pollMs = POLL_MS
   const ocr = doc.ocr
   const job = ocr?.job ?? null
   const running = job?.status === 'running' && !job.stale
-  useJobPolling(running, onChanged, pollMs)
+  useOcrPolling(doc.id, running, signature(ocr), onChanged, pollMs)
   const pages = doc.pages.filter((p) => (p.ocr_state ?? 'none') !== 'none')
   if (!ocr || (pages.length === 0 && !ocr.can_reocr)) return null
   const p = ocr.progress

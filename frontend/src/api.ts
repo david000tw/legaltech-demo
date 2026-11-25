@@ -243,6 +243,9 @@ export const startDocumentOcr = (docId: string, opts: { confirm?: boolean; retry
   req<OcrStart>(`/documents/${docId}/ocr`, json('POST', { confirm: !!opts.confirm, retry_failed: !!opts.retryFailed }))
 export const reocrDocument = (docId: string, confirm: boolean) =>
   req<OcrStart & { pages: number }>(`/documents/${docId}/reocr`, json('POST', { confirm }))
+// 辨識橫幅輪詢用的輕量狀態（只有橫幅要的欄位；狀態變了才重讀整個案件）
+export type DocOcrStatus = Pick<DocOcr, 'job' | 'progress' | 'can_resume'>
+export const getDocumentOcrStatus = (docId: string) => req<DocOcrStatus>(`/documents/${docId}/ocr-status`)
 export const startCaseOcr = (caseId: string, confirm: boolean) =>
   req<{ jobs: OcrJob[]; pages: number }>(`/cases/${caseId}/ocr`, json('POST', { confirm }))
 export const getPageOcr = (pageId: string) => req<PageOcr>(`/pages/${pageId}/ocr`)
