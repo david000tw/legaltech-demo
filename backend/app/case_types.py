@@ -56,6 +56,9 @@ _WORD_SHAPE = re.compile(r"^[\u4e00-\u9fff]{1,8}$")
 # 案號前面可能帶法院名稱（「臺灣臺北地方法院113家繼訴89」「臺灣高等法院臺中分院112上易123」）：先去掉，
 # 否則法院名稱會讓字別超過 8 字，也會把「少年及家事法院」的「家」誤當成字別。
 _COURT_PREFIX = re.compile(r"^\s*[\u4e00-\u9fff]{2,12}?法院(?:\s*[\u4e00-\u9fff]{1,6}分院)?")
+# 字別不含「家」但屬家事事件（使用者 2026-11-26 決定）：監護宣告、輔助宣告、收養認可、司法事務官的繼承事件；
+# 用開頭比對，「監宣抗」這類抗告字別也算
+FAMILY_WORDS = ("監宣", "輔宣", "司養聲", "司繼")
 _WORD_CHARS = set("訴簡上抗調繼聲執全家婚親再救小促重移監輔護養財非易司債票拍消勞智國交選原金醫建審")
 
 
@@ -92,7 +95,7 @@ def procedure_for(case_type: str | None, case_number: str | None) -> str:
     """案號有填（且看得出字別）時以字別判定：含「家」就是家事；否則用案型的預設程序。"""
     word = _word(case_number)
     if word is not None:
-        return "family" if "家" in word else "civil"
+        return "family" if "家" in word or word.startswith(FAMILY_WORDS) else "civil"
     return case_type_of(case_type).procedure
 
 

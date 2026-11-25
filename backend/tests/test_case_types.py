@@ -303,3 +303,16 @@ def test_short_case_number_with_court_prefix_reads_word(number, word, procedure)
     ct = "traffic_tort" if procedure == "family" else "estate_partition"
     warning = procedure_warning(ct, number)
     assert warning is not None and "無法判讀" not in warning and f"「{word}」" in warning
+
+
+@pytest.mark.parametrize("number", ["113年度監宣字第5號", "113年度輔宣字第6號", "113年度司養聲字第7號",
+                                    "113年度司繼字第8號", "113監宣抗9", "臺灣臺北地方法院113司繼10"])
+def test_family_words_without_jia_are_family(number):
+    """使用者決定（2026-11-26）：監宣、輔宣、司養聲、司繼依家事事件法屬家事事件，書狀用家事程序。"""
+    assert procedure_for("traffic_tort", number) == "family"
+    assert procedure_warning("estate_partition", number) is None  # 分割遺產預設就是家事：不必提醒
+
+
+@pytest.mark.parametrize("number", ["113年度司促字第1號", "113年度司執字第2號", "113年度司聲字第3號"])
+def test_other_si_words_stay_civil(number):
+    assert procedure_for("estate_partition", number) == "civil"
