@@ -524,7 +524,7 @@ def test_concurrent_correction_and_proof_write(db):
         try:
             barrier.wait()
             with tenant_session(firm) as s:
-                save_page_text(s, pid, "醫療費用合計新臺幣5,870元整", who, base_version=1, proofread=False, verify=False)
+                save_page_text(s, pid, "醫療費用合計新臺幣5,870元整", who, base_version=1, proofread=True, verify=False)  # 校對員模式的併發情境
         except Exception as e:  # noqa: BLE001
             errors.append(e)
 
