@@ -30,14 +30,15 @@ describe('EvidenceNotesSection', () => {
   it('generates notes and polls until done', async () => {
     vi.mocked(api.getEvidenceNotes)
       .mockResolvedValueOnce({ documents: [doc({ notes: [], needs_notes: true })], job: null })
-      .mockResolvedValueOnce({ documents: [doc({ notes: [], needs_notes: true })], job: job('running') })
-      .mockResolvedValue({ documents: [doc({})], job: job('done') })
+      .mockResolvedValue({ documents: [doc({ notes: [], needs_notes: true })], job: job('running') })
     vi.mocked(api.generateEvidenceNotes).mockResolvedValue({ job: job('running') })
     render(<EvidenceNotesSection caseId="c1" pollMs={20} />)
     await userEvent.click(await screen.findByRole('button', { name: '產生卷證說明' }))
     expect(api.generateEvidenceNotes).toHaveBeenCalledWith('c1')
     expect(await screen.findByText('AI 處理中，約需 1 分鐘')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '產生卷證說明' })).toBeDisabled()
+    // 看到處理中之後才讓工作結束（先排好的話，電腦忙時結果會在檢查「處理中」之前就回來）
+    vi.mocked(api.getEvidenceNotes).mockResolvedValue({ documents: [doc({})], job: job('done') })
     expect(await screen.findByText('可證明原告支出醫療費用')).toBeInTheDocument()
     expect(screen.getByText('證明方向')).toBeInTheDocument()
     expect(screen.getByText('注意事項')).toBeInTheDocument()

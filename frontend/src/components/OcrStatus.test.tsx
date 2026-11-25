@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -191,5 +191,35 @@ describe('OcrStatus', () => {
     render(<OcrStatus doc={doc({}, [page('p1', 1, { needs_check: false, verified: true, alert_count: 2 })])}
       onChanged={vi.fn(async () => {})} onOpenPage={vi.fn()} />)
     expect(screen.getByRole('button', { name: '第1頁：已對照原圖' })).toBeInTheDocument()
+  })
+})
+
+// 輪詢的時間點用假時鐘控制：電腦忙的時候，真實時鐘下這兩種情況都會偶發
+describe('OcrStatus polling timing', () => {
+  afterEach(() => vi.useRealTimers())
+  const running = { job: job('running'), progress: { total: 5, done: 1, failed: 0, proofing: 0, minutes_left: 3 },
+    can_resume: false }
+  const pages = [page('p1', 1), page('p2', 2, { ocr_state: 'pending' })]
+
+  it('does not reload again before the screen has caught up with the last reload', async () => {
+    vi.useFakeTimers()
+    vi.mocked(api.getDocumentOcrStatus).mockResolvedValue({ ...running, progress: { ...running.progress, done: 2 } })
+    const onChanged = vi.fn(async () => {})  // 重讀完成了，但畫面還沒換成新資料
+    render(<OcrStatus doc={doc(running, pages)} onChanged={onChanged} onOpenPage={vi.fn()} pollMs={15} />)
+    await act(() => vi.advanceTimersByTimeAsync(15))
+    expect(onChanged).toHaveBeenCalledTimes(1)
+    await act(() => vi.advanceTimersByTimeAsync(15))
+    expect(onChanged).toHaveBeenCalledTimes(1)  // 緊接著的這次輪詢先等畫面更新，不重複重讀
+    await act(() => vi.advanceTimersByTimeAsync(15))
+    expect(onChanged).toHaveBeenCalledTimes(2)  // 畫面一直沒更新（重讀失敗）：下一輪仍會再試
+  })
+
+  it('does not send another status request while the last one is still pending', async () => {
+    vi.useFakeTimers()
+    vi.mocked(api.getDocumentOcrStatus).mockReturnValue(new Promise(() => {}))  // 後端很慢，一直沒回
+    render(<OcrStatus doc={doc(running, pages)} onChanged={vi.fn(async () => {})} onOpenPage={vi.fn()}
+      pollMs={15} />)
+    await act(() => vi.advanceTimersByTimeAsync(60))
+    expect(api.getDocumentOcrStatus).toHaveBeenCalledTimes(1)
   })
 })

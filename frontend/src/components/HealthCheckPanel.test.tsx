@@ -32,13 +32,14 @@ describe('HealthCheckPanel', () => {
   it('runs the check and polls until the report arrives', async () => {
     vi.mocked(api.getHealthReport)
       .mockResolvedValueOnce({ report: null, job: null })
-      .mockResolvedValueOnce({ report: null, job: job('running') })
-      .mockResolvedValue({ report: report({}), job: job('done') })
+      .mockResolvedValue({ report: null, job: job('running') })
     vi.mocked(api.runHealthCheck).mockResolvedValue({ job: job('running') })
     render(<HealthCheckPanel roundId="r1" briefKind="preparatory" pollMs={20} />)
     await userEvent.click(await screen.findByRole('button', { name: '執行健檢' }))
     expect(api.runHealthCheck).toHaveBeenCalledWith('r1')
     expect(await screen.findByText('AI 處理中，約需 2 分鐘')).toBeInTheDocument()
+    // 看到處理中之後才讓工作結束（先排好的話，電腦忙時報告會在檢查「處理中」之前就回來）
+    vi.mocked(api.getHealthReport).mockResolvedValue({ report: report({}), job: job('done') })
     expect(await screen.findByText('與有過失可能成立')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重新執行健檢' })).toBeEnabled()
   })

@@ -32,25 +32,31 @@ const signature = (o: Pick<api.DocOcr, 'job' | 'progress' | 'can_resume'> | unde
 }
 
 // 工作在跑時每隔 pollMs 讀一次輕量狀態（不重讀整個案件）；和畫面上的不一樣才通知上層重讀。
-// 重讀沒讓畫面更新（失敗）就下一次輪詢再試；重讀還在進行時不重複通知
+// 重讀沒讓畫面更新（失敗）就下一次輪詢再試。上一次查詢或重讀還沒結束就跳過這一次（後端慢時請求不會越積越多）；
+// 重讀剛完成、畫面還沒換成新資料時，緊接著的那一次也跳過，免得同一個變化重讀兩次（只跳一次，重讀失敗仍會再試）
 function useOcrPolling(docId: string, running: boolean, shown: string, onChanged: () => Promise<void>,
   pollMs: number) {
   const current = useRef({ shown, onChanged })
   const busy = useRef(false)
-  useEffect(() => { current.current = { shown, onChanged } })
+  const settling = useRef(false)
+  useEffect(() => {
+    current.current = { shown, onChanged }
+    settling.current = false
+  })
   useEffect(() => {
     if (!running) return
     const t = setInterval(() => {
       if (busy.current) return
-      void api.getDocumentOcrStatus(docId).then(async (status) => {
-        if (busy.current || signature(status) === current.current.shown) return
-        busy.current = true
-        try {
-          await current.current.onChanged()
-        } finally {
-          busy.current = false
-        }
-      }).catch(() => { /* 下一輪再試 */ })
+      if (settling.current) {
+        settling.current = false
+        return
+      }
+      busy.current = true
+      api.getDocumentOcrStatus(docId).then(async (status) => {
+        if (signature(status) === current.current.shown) return
+        await current.current.onChanged()
+        settling.current = true
+      }).catch(() => { /* 下一輪再試 */ }).finally(() => { busy.current = false })
     }, pollMs)
     return () => clearInterval(t)
   }, [docId, running, pollMs])
