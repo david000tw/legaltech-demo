@@ -200,6 +200,8 @@ def put_parties(case_id: UUID, body: Annotated[list[PartyBody], Field(max_length
         if case is None:
             raise HTTPException(404, "找不到案件")
         existing = {p.id: p for p in case_parties(s, case_id)}
+        from app.opponent_exhibits import cited_opponent_labels, reset_changed_labels
+        labels_before = cited_opponent_labels(s, case_id)  # 角色、姓名會影響對方證物的標籤
         unknown = [str(b.id) for b in body if b.id is not None and b.id not in existing]
         if unknown:
             raise HTTPException(422, f"當事人不屬於本案：{', '.join(unknown)}")
@@ -225,6 +227,8 @@ def put_parties(case_id: UUID, body: Annotated[list[PartyBody], Field(max_length
             p.legal_rep, p.position_note = b.legal_rep, b.position_note
             out.append(p)
         s.flush()
+        s.expire_all()  # 刪掉的當事人：遞狀人欄位由資料庫設成空白，讀新值再算標籤
+        reset_changed_labels(s, case_id, labels_before)
         return [_party_json(p) for p in out]
 
 
@@ -356,8 +360,11 @@ def set_filer(document_id: UUID, body: FilerBody, m: CurrentMember = Depends(cur
         if doc.kind != "opponent_brief":
             raise HTTPException(422, "只有對造書狀有遞狀人")
         _check_filer(s, doc.case_id, body.filed_by_party_id)
+        from app.opponent_exhibits import cited_opponent_labels, reset_changed_labels
+        before = cited_opponent_labels(s, doc.case_id)  # 遞狀人決定「原告所提」「上訴人所提」
         doc.filed_by_party_id = body.filed_by_party_id
         s.flush()
+        reset_changed_labels(s, doc.case_id, before)
         return {"id": str(doc.id), "filed_by_party_id": str(doc.filed_by_party_id) if doc.filed_by_party_id else None}
 
 

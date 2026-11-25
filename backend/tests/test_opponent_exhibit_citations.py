@@ -209,3 +209,51 @@ def test_support_prompt_explains_opponent_exhibits(ctx):
     with tenant_session(ctx["firm"]) as s:
         inputs = support_inputs(s, s.get(Paragraph, pid))
     assert inputs["E9"].label == "原告所提原證1第1頁"
+
+
+# ---- Task 4：編號變了，已審段落退回 ----
+
+def _reviewed_paragraph(ctx):
+    _cite(ctx, ctx["brief"], 3)
+    pid = make_paragraph(ctx, "該收據未記載用途（{{cite:E9}}）。", [("E9", QUOTE)])
+    with tenant_session(ctx["firm"]) as s:
+        s.get(Paragraph, pid).status = "reviewed"
+    return pid
+
+
+def _state(ctx, pid):
+    with tenant_session(ctx["firm"]) as s:
+        p = s.get(Paragraph, pid)
+        return p.status, p.source_notice
+
+
+def test_label_change_resets_review(ctx):
+    pid = _reviewed_paragraph(ctx)
+    with tenant_session(ctx["firm"]) as s:
+        page = s.scalars(select(Page).where(Page.document_id == ctx["brief"], Page.page_no == 3)).one()
+        s.add(PageText(firm_id=ctx["firm"], page_id=page.id, version=2, source="manual",
+                       text=RECEIPT.replace("原證1", "原證2")))
+    with tenant_session(ctx["firm"]) as s:
+        refresh_opponent_exhibits(s, ctx["brief"])
+    assert _state(ctx, pid) == ("unreviewed", "對方證物編號已變更")
+
+
+def test_unchanged_label_keeps_review(ctx):
+    pid = _reviewed_paragraph(ctx)
+    with tenant_session(ctx["firm"]) as s:
+        refresh_opponent_exhibits(s, ctx["brief"])
+    assert _state(ctx, pid) == ("reviewed", None)
+
+
+def test_filer_change_resets_review(ctx, db):
+    from tests.export_helpers import clients
+    pid = _reviewed_paragraph(ctx)
+    with tenant_session(ctx["firm"]) as s:
+        party = CaseParty(firm_id=ctx["firm"], case_id=ctx["case_id"], seq=9, name="林大明", role="上訴人",
+                          alignment="opposing")
+        s.add(party)
+        s.flush()
+        party_id = party.id
+    r = clients(ctx, db)["lawyer"].patch(f"/api/documents/{ctx['brief']}", json={"filed_by_party_id": str(party_id)})
+    assert r.status_code == 200, r.text
+    assert _state(ctx, pid) == ("unreviewed", "對方證物編號已變更")

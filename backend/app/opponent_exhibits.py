@@ -127,6 +127,7 @@ def refresh_opponent_exhibits(s: Session, document_id: UUID) -> list[OpponentExh
     doc = s.get(Document, document_id, with_for_update=True)
     if doc is None or doc.kind != "opponent_brief":
         return []
+    before = cited_opponent_labels(s, doc.case_id)
     pages = [(page.page_no, pt.text if pt is not None else None) for page, pt in document_page_texts(s, document_id)]
     found = find_exhibits(pages)
     s.execute(delete(OpponentExhibit).where(OpponentExhibit.document_id == document_id))
@@ -134,6 +135,7 @@ def refresh_opponent_exhibits(s: Session, document_id: UUID) -> list[OpponentExh
                             first_page_no=f.first_page, last_page_no=f.last_page) for f in found]
     s.add_all(rows)
     s.flush()
+    reset_changed_labels(s, doc.case_id, before)
     return rows
 
 
@@ -197,3 +199,39 @@ def opponent_exhibit_pages(s: Session, case_id: UUID) -> list[PageText]:
             if pt is not None and any(r.first_page_no <= page.page_no <= r.last_page_no for r in rows):
                 out.append(pt)
     return out
+
+
+# ---- 編號變了，已審段落退回（Task 4） ----
+
+LABEL_CHANGED = "對方證物編號已變更"
+
+
+def cited_opponent_labels(s: Session, case_id: UUID) -> dict[UUID, str]:
+    """本案段落引用到的對方書狀頁：page_text_id → 目前顯示的標籤。"""
+    from app.exhibit_labels import evidence_label
+    from app.models import Citation
+    ids = s.scalars(select(Citation.page_text_id).join(PageText, PageText.id == Citation.page_text_id)
+                    .join(Page, Page.id == PageText.page_id).join(Document, Document.id == Page.document_id)
+                    .where(Document.case_id == case_id, Document.kind == "opponent_brief",
+                           Citation.kind == "evidence").distinct()).all()
+    return {pt_id: evidence_label(s, pt_id) for pt_id in ids}
+
+
+def reset_changed_labels(s: Session, case_id: UUID, before: dict[UUID, str]) -> list[UUID]:
+    """標籤變了（含不再屬於任何證物）的引用：段落退回未審並提示。鎖法同 renumber_exhibit（依 id 排序）。"""
+    if not before:
+        return []
+    after = cited_opponent_labels(s, case_id)
+    changed = [pt_id for pt_id, label in before.items() if after.get(pt_id) != label]
+    if not changed:
+        return []
+    from app.models import Citation, Paragraph
+    from app.pipeline.drafting import reset_review
+    pids = s.scalars(select(Citation.paragraph_id).where(Citation.page_text_id.in_(changed)).distinct()).all()
+    locked = s.scalars(select(Paragraph).where(Paragraph.id.in_(pids)).order_by(Paragraph.id)
+                       .with_for_update().execution_options(populate_existing=True)).all()
+    for para in locked:
+        reset_review(para)
+        para.source_notice = LABEL_CHANGED
+    s.flush()
+    return [para.id for para in locked]

@@ -150,7 +150,11 @@ def apply_header_guess(s: Session, case_id: UUID, document_id: UUID) -> list[str
         filer = s.scalars(select(CaseParty).where(CaseParty.case_id == case_id, CaseParty.name == theirs[0],
                                                   CaseParty.alignment != "ours")).first()
         if filer is not None:
+            from app.opponent_exhibits import cited_opponent_labels, reset_changed_labels
+            before = cited_opponent_labels(s, case_id)
             doc.filed_by_party_id = filer.id
+            s.flush()
+            reset_changed_labels(s, case_id, before)
     return filled
 
 
