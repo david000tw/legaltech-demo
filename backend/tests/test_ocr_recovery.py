@@ -81,6 +81,19 @@ def test_app_lifespan_runs_recovery(db):
     assert job["stale"] is True and ocr["can_resume"] is True
 
 
+def test_startup_recovery_only_in_dev(db):
+    """超級使用者連線只在開發環境用：試用、正式環境啟動時不動辨識工作（維持心跳逾時的老辦法）。"""
+    firm = create_firm("甲事務所")
+    _, doc = make_doc(firm, 1)
+    job_id, _ = queue(firm, doc)
+    app = create_app(db)
+    app.state.settings = db.model_copy(update={"app_env": "pilot"})
+    with TestClient(app):
+        pass
+    ocr, job = _view(firm, doc, job_id)
+    assert job["stale"] is False and ocr["can_resume"] is False
+
+
 def test_startup_recovery_failure_does_not_block_startup(db, monkeypatch):
     import app.main as main
 
