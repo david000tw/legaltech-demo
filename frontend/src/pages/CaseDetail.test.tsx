@@ -404,6 +404,19 @@ describe('CaseDetail brief filer and notices', () => {
     expect(await screen.findByText('未勾選的 1 條主張不會被回應')).toBeInTheDocument()
   })
 
+  it('shows each claim source page and quote under its summary', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null }] })
+    vi.mocked(api.getRound).mockResolvedValue({ ...extracted, claims: [
+      { ...extracted.claims[0], quote: '原告於路口未減速慢行致生事故', page_no: 3 },
+      { ...extracted.claims[1], quote: '慰撫金請求顯屬過高', page_no: null },
+    ] })
+    renderAt()
+    await openTab('書狀')
+    const first = await screen.findByText(/出處：第 3 頁「原告於路口未減速慢行致生事故」/)
+    expect(first).toHaveAttribute('title', '原告於路口未減速慢行致生事故')
+    expect(screen.getByText('出處：「慰撫金請求顯屬過高」')).toBeInTheDocument()
+  })
+
   it('drafts after extract', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null }] })
     vi.mocked(api.getRound).mockResolvedValue(extracted)

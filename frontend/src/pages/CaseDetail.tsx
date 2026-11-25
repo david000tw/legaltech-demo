@@ -340,6 +340,11 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
               )}
               主張{c.seq}：{c.summary}
               {!c.quote_verified && <span className="ml-1 text-red-600">（原文對不上）</span>}
+              {c.quote && (
+                <div title={c.quote} className="ml-4 line-clamp-2 text-xs text-slate-500">
+                  {`出處：${c.page_no != null ? `第 ${c.page_no} 頁` : ''}「${c.quote}」`}
+                </div>
+              )}
               {c.ocr_unverified && c.page_id && (
                 <>
                   <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">{OCR_TAG}</span>
