@@ -172,6 +172,7 @@ export default function UsagePage() {
   const load = useCallback(async () => {
     try {
       setSummary(await api.getUsage(filters))
+      setError(null)  // 這次讀取成功：先前讀取失敗的訊息不再適用
     } catch (e) {
       setError((e as Error).message)
     }

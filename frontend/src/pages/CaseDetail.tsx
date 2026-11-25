@@ -565,6 +565,7 @@ export default function CaseDetail() {
   const [headerDraft, setHeaderDraft] = useState<HeaderDraft | null>(null)  // 修改中的狀頭（null＝沒在改）
   const [partyDraft, setPartyDraft] = useState<PartyDraft[] | null>(null)  // 修改中的當事人
   const evidenceRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)  // 卷證上傳處理中：再選一次檔案會多建一個證物編號
 
   const load = useCallback(async () => {
     try {
@@ -597,13 +598,15 @@ export default function CaseDetail() {
 
   async function uploadEvidence() {
     const files = Array.from(evidenceRef.current?.files ?? [])
-    if (files.length === 0) return
+    if (files.length === 0 || uploading) return
+    setUploading(true)
     try {
       await api.uploadDocuments(caseId, files, 'evidence')  // 多張照片合成一份卷證、一個證物號
       await load()
     } catch (e) {
       setError((e as Error).message)
     } finally {
+      setUploading(false)
       if (evidenceRef.current) evidenceRef.current.value = ''
     }
   }
@@ -694,12 +697,14 @@ export default function CaseDetail() {
               <div className="space-y-6">
                 <section className="space-y-2">
                   <div className="flex flex-wrap items-center gap-3">
-                    <button type="button" onClick={() => evidenceRef.current?.click()} className={BTN_PRIMARY}>
-                      上傳卷證
+                    <button type="button" onClick={() => evidenceRef.current?.click()} disabled={uploading}
+                      className={BTN_PRIMARY}>
+                      {uploading ? '上傳中…' : '上傳卷證'}
                     </button>
                     <label className="sr-only">
                       上傳卷證（依上傳順序自動編號）
-                      <input ref={evidenceRef} type="file" accept={UPLOAD_ACCEPT} multiple onChange={uploadEvidence} />
+                      <input ref={evidenceRef} type="file" accept={UPLOAD_ACCEPT} multiple disabled={uploading}
+                        onChange={uploadEvidence} />
                     </label>
                     <span className="text-xs text-slate-500">依上傳順序自動編號；多張照片會合成一份卷證</span>
                     {pendingOcr > 0 && (
