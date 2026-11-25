@@ -25,7 +25,9 @@ def test_strip_heading_number_also_strips_heading_style_numbers(h):
     assert strip_heading_number(h) == "關於路權"
 
 
-@pytest.mark.parametrize("h", ["1萬元損害之認定", "3.5倍懲罰性賠償", "一般損害賠償", "二審判決之效力", "第一項請求", "㈠1萬元之請求"])
+@pytest.mark.parametrize("h", ["1萬元損害之認定", "3.5倍懲罰性賠償", "一般損害賠償", "二審判決之效力", "第一項請求", "㈠1萬元之請求",
+                               # 頓號後面緊接中文數字：是標題本身的並列（一、二審），不是編號
+                               "一、二審判決認定事實違誤", "三、四樓間漏水之責任", "十、十一月份租金", "一、 二審判決之效力"])
 def test_strip_keeps_numbers_that_belong_to_the_text(h):
     assert strip_heading_number(h) == h.removeprefix("㈠")
 
