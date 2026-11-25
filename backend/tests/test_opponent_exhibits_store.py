@@ -130,3 +130,16 @@ def test_copy_round_documents_have_rows(env):
         target = copy_round(s, env["round_id"])
         new_doc = s.scalars(select(Document.id).where(Document.round_id == target.id)).one()
     assert _rows(env, new_doc) == [("原證", 1, 3, 3)]
+
+
+def test_case_view_lists_opponent_exhibits(env):
+    """Task 5：案件資料的對方書狀附上找到的證物；我方證據沒有這個欄位。"""
+    r = env["client"].post(f"/api/cases/{env['case_id']}/documents",
+                           data={"kind": "opponent_brief", "round_id": str(env["round_id"])},
+                           files={"file": ("起訴狀.txt", BRIEF.encode("utf-8"), "text/plain")})
+    assert r.status_code == 200, r.text
+    _ingest(env, kind="evidence", name="01_收據.txt")
+    docs = env["client"].get(f"/api/cases/{env['case_id']}").json()["documents"]
+    brief = next(d for d in docs if d["kind"] == "opponent_brief")
+    assert brief["opponent_exhibits"] == [{"label": "原證1", "first_page": 3, "last_page": 3}]
+    assert all("opponent_exhibits" not in d for d in docs if d["kind"] == "evidence")

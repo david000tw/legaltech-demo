@@ -239,6 +239,11 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
                 <span>{d.filename}：{d.filed_by_party_id && byId.get(d.filed_by_party_id)
                   ? `遞狀人 ${partyLabel(byId.get(d.filed_by_party_id)!)}` : '遞狀人未指定'}</span>
               )}
+              {(d.opponent_exhibits ?? []).length > 0 && (
+                <p className="text-xs text-slate-600">{`找到對方證物：${(d.opponent_exhibits ?? []).map((e) =>
+                  `${e.label}（第${e.first_page === e.last_page ? e.first_page : `${e.first_page}–${e.last_page}`}頁）`)
+                  .join('、')}`}</p>
+              )}
               <OcrStatus doc={d} onChanged={ocrChanged} onOpenPage={setCheckPage} />
             </li>
           ))}

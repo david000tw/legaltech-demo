@@ -124,6 +124,15 @@ def _header_auto_json(s, case: Case) -> dict:
     return out
 
 
+def _opponent_exhibits_json(s, document_id) -> list[dict]:
+    """對方書狀找到的證物（對方證物計畫）：「原證1」第幾頁到第幾頁。"""
+    from app.models import OpponentExhibit
+    rows = s.scalars(select(OpponentExhibit).where(OpponentExhibit.document_id == document_id)
+                     .order_by(OpponentExhibit.first_page_no))
+    return [{"label": f"{r.prefix}{r.number}", "first_page": r.first_page_no, "last_page": r.last_page_no}
+            for r in rows]
+
+
 def case_parties(s, case_id) -> list[CaseParty]:
     return list(s.scalars(select(CaseParty).where(CaseParty.case_id == case_id).order_by(CaseParty.seq)))
 
@@ -289,7 +298,9 @@ def get_case(case_id: UUID, request: Request, background: BackgroundTasks,
                            "round_id": str(d.round_id) if d.round_id else None,
                            "filed_by_party_id": str(d.filed_by_party_id) if d.filed_by_party_id else None,
                            "page_count": d.page_count, "pages": by_doc.get(d.id, []),
-                           "ocr": document_ocr_json(s, d, page_rows.get(d.id, []))} for d in docs],
+                           "ocr": document_ocr_json(s, d, page_rows.get(d.id, [])),
+                           **({"opponent_exhibits": _opponent_exhibits_json(s, d.id)}
+                              if d.kind == "opponent_brief" else {})} for d in docs],
             # 沒有進行中工作的待辨識頁數（「開始辨識（N 頁）」）
             "pending_ocr_pages": sum(pending_without_job(s, case_id).values()),
             "exhibits": [{"id": str(e.id), "label": f"{e.prefix}{e.number}", "prefix": e.prefix,

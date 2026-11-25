@@ -401,6 +401,19 @@ describe('CaseDetail brief filer and notices', () => {
     await waitFor(() => expect(vi.mocked(api.getCase).mock.calls.length).toBe(before + 1))
   })
 
+  it('shows the exhibits found in an opponent brief (對方證物)', async () => {
+    const brief: api.CaseDocument = { id: 'd3', kind: 'opponent_brief', filename: '答辯狀.txt', round_id: 'r1',
+      filed_by_party_id: 'pt2', page_count: 5, pages: [],
+      opponent_exhibits: [{ label: '原證1', first_page: 3, last_page: 4 }, { label: '原證2', first_page: 5, last_page: 5 }] }
+    const plain: api.CaseDocument = { ...brief, id: 'd4', filename: '準備書狀.txt', opponent_exhibits: [] }
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, parties: TWO_OPPOSING, rounds: created,
+      documents: [...baseCase.documents, brief, plain] })
+    renderAt()
+    await openTab('書狀')
+    expect(await screen.findByText('找到對方證物：原證1（第3–4頁）、原證2（第5頁）')).toBeInTheDocument()
+    expect(screen.getAllByText(/找到對方證物/)).toHaveLength(1)
+  })
+
   it('shows the filer of a drafted round without letting it change', async () => {
     const brief: api.CaseDocument = { id: 'd3', kind: 'opponent_brief', filename: '答辯狀.txt', round_id: 'r1',
       filed_by_party_id: null, page_count: 2, pages: [] }

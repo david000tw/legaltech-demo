@@ -40,8 +40,11 @@ export type OcrJob = Omit<JobView, 'status'> & { status: 'running' | 'done' | 'f
 export type DocOcr = { job: OcrJob | null; progress: OcrProgress; can_reocr: boolean; scan_hint: boolean
   can_resume: boolean }
 // filed_by_party_id：對造書狀的遞狀人（當事人被刪掉後變 null）
+// 對方書狀附的證物（對方證物計畫）：規則找出的編號與起訖頁
+export type OpponentExhibitView = { label: string; first_page: number; last_page: number }
 export type CaseDocument = { id: string; kind: 'evidence' | 'opponent_brief'; filename: string; round_id: string | null;
-  filed_by_party_id: string | null; page_count: number; pages: DocPage[]; ocr?: DocOcr }
+  filed_by_party_id: string | null; page_count: number; pages: DocPage[]; ocr?: DocOcr
+  opponent_exhibits?: OpponentExhibitView[] }
 // 對照原圖面板（計畫 2A）：一則提醒＝文字上的 [start, end) 與校對員讀到的字、圖上的框（box：x1, y1, x2, y2）
 export type OcrAlert = { kind: string; start: number; end: number; message: string; proof_text: string | null
   box: number[] | null; color: 'red' | 'yellow' }
