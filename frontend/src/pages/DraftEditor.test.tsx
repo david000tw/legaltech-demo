@@ -113,15 +113,27 @@ describe('DraftEditor', () => {
     expect(api.getCitationSource).toHaveBeenCalledWith('cj1')
   })
 
-  it('confirms a judgment citation and marks the paragraph reviewed', async () => {
-    vi.mocked(api.confirmCitation).mockResolvedValue({ ...draft.paragraphs[0].citations[0], lawyer_confirmed: true })
+  it('asks to open an unread judgment instead of a separate confirmation, then marks reviewed', async () => {
+    vi.mocked(api.getCitationSource).mockResolvedValue({ kind: 'judgment', title: '臺中地院（法院判斷段）',
+      text: '被告未在適當位置暫停禮讓幹線道之系爭車輛，有過失。', span: [2, 20] })
     vi.mocked(api.reviewParagraph).mockResolvedValue({ ...draft.paragraphs[0], status: 'reviewed' })
     renderEditor()
-    await userEvent.click(await screen.findByRole('button', { name: '已讀原文，確認' }))
-    expect(api.confirmCitation).toHaveBeenCalledWith('cj1')
+    expect(await screen.findByText(/未在適當位置暫停禮讓幹線道之系爭車輛」。/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '已讀原文，確認' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '還要先看原文：臺灣臺中地方法院113年度中簡字第3946號民事判決' }))
+    expect(api.getCitationSource).toHaveBeenCalledWith('cj1')
+    await waitFor(() => expect(api.getDraft).toHaveBeenCalledTimes(2))  // 打開原文後重新載入，「看過」才會更新
     await userEvent.click(screen.getByRole('button', { name: '標記已審' }))
     expect(api.reviewParagraph).toHaveBeenCalledWith('p1', 'v1')
-    expect(api.getDraft).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not ask to open a judgment that was already opened', async () => {
+    const p = draft.paragraphs[0]
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft,
+      paragraphs: [{ ...p, citations: [{ ...p.citations[0], opened: true }] }] })
+    renderEditor()
+    expect(await screen.findByRole('button', { name: '標記已審' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /還要先看原文/ })).not.toBeInTheDocument()
   })
 
   it('saves an edit with the existing citations', async () => {
@@ -138,7 +150,7 @@ describe('DraftEditor', () => {
 
   it('export button lists blockers', async () => {
     renderEditor()
-    expect(await screen.findByText(/判決引用尚未確認（J1）/)).toBeInTheDocument()
+    expect(await screen.findByText(/J1：打開原文後，按該段「已審」一併確認/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '匯出 Word' })).toBeDisabled()
   })
 
@@ -151,13 +163,13 @@ describe('DraftEditor', () => {
   })
 
   it('shows a conflict, reloads, and clears the message after the next success', async () => {
-    vi.mocked(api.reviewParagraph).mockRejectedValue(new api.ApiError(409, '段落內容已變更，請重新載入後再審核'))
-    vi.mocked(api.confirmCitation).mockResolvedValue({ ...draft.paragraphs[0].citations[0], lawyer_confirmed: true })
+    vi.mocked(api.reviewParagraph).mockRejectedValueOnce(new api.ApiError(409, '段落內容已變更，請重新載入後再審核'))
+      .mockResolvedValue({ ...draft.paragraphs[0], status: 'reviewed' })
     renderEditor()
     await userEvent.click(await screen.findByRole('button', { name: '標記已審' }))
     expect(await screen.findByText('段落內容已變更，請重新載入後再審核')).toBeInTheDocument()
     expect(api.getDraft).toHaveBeenCalledTimes(2)
-    await userEvent.click(screen.getByRole('button', { name: '已讀原文，確認' }))
+    await userEvent.click(screen.getByRole('button', { name: '標記已審' }))
     await waitFor(() => expect(screen.queryByText('段落內容已變更，請重新載入後再審核')).not.toBeInTheDocument())
   })
 

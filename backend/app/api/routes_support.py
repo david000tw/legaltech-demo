@@ -32,7 +32,7 @@ def release(citation_id: UUID, body: ReleaseBody, m: CurrentMember = Depends(cur
             support.release_support(s, citation_id, m, body.reason, body.version)
         except ReviewRuleError as e:
             raise HTTPException(409, str(e))
-        return paragraph_json(s, s.get(Paragraph, pid))
+        return paragraph_json(s, s.get(Paragraph, pid), member_id=m.id)
 
 
 @router.post("/drafts/{draft_id}/support/retry")

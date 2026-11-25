@@ -63,3 +63,18 @@ def test_views_are_per_member(env):
     assert env["client_for"]("a@a.test").get(f"/api/citations/{cid}/source").status_code == 200
     assert _opened(env, env["a"], passage)
     assert not _opened(env, env["b"], passage)
+
+
+def _opened_flag(client, ctx, code):
+    body = client.get(f"/api/drafts/{ctx['draft_id']}").json()
+    return next(c for c in body["paragraphs"][0]["citations"] if c["code"] == code)["opened"]
+
+
+def test_draft_view_marks_opened_judgments(env):
+    a = env["client_for"]("a@a.test")
+    assert _opened_flag(a, env, "J1") is False
+    cid, _ = _citation(env, "J1")
+    a.get(f"/api/citations/{cid}/source")
+    assert _opened_flag(a, env, "J1") is True
+    assert _opened_flag(env["client_for"]("b@a.test"), env, "J1") is False  # 依目前登入者計算
+    assert _opened_flag(a, env, "E1") is False

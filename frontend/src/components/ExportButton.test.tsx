@@ -13,12 +13,18 @@ describe('ExportButton reason labels', () => {
       .toBe('金額 5,000 出自未對照原圖的辨識文字（對造書狀「答辯狀.pdf」第2頁）')
   })
 
+  it('labels reasons that the paragraph review now settles', () => {
+    expect(reasonLabel('judgment_not_opened:J1')).toBe('還要先看原文（J1）')
+    expect(reasonLabel('judgment_unconfirmed:J1')).toBe('J1：打開原文後，按該段「已審」一併確認')
+    expect(reasonLabel('support_partial:E1')).toBe('E1 部分支持：看過說明後，按該段「已審」一併接受')
+  })
+
   it('labels the support check reasons', () => {
     expect(reasonLabel('support_pending:J1')).toBe('J1 支持度檢查中')
     expect(reasonLabel('support_unchecked:E1')).toBe('E1 支持度尚未檢查，請重新檢查或填理由放行')
     expect(reasonLabel('support_not_supported:J1')).toBe('J1 經 AI 判斷不支持這句話，請修改或填理由放行')
     expect(reasonLabel('support_misuse:J1')).toBe('J1 經 AI 判斷是把當事人主張當成法院見解，請修改或填理由放行')
-    expect(reasonLabel('support_partial:E1')).toBe('E1 只部分支持這句話，請確認後放行')
+    expect(reasonLabel('support_partial:E1')).toBe('E1 部分支持：看過說明後，按該段「已審」一併接受')
   })
 
   it('labels the same-code different-quotes conflict', () => {

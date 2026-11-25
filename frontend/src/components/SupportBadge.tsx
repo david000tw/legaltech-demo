@@ -83,10 +83,11 @@ export default function SupportBadge({ citation, draftId, canReview, busy = fals
           <button type="button" disabled={busy} onClick={() => onAction(() => api.retrySupport(draftId))}
             className="rounded border px-2 py-0.5 disabled:opacity-50">重新檢查</button>
         )}
-        {canReview && !open && (
+        {partial && <span className="text-amber-800">按「已審」即接受</span>}
+        {canReview && !open && !partial && (
           <button type="button" disabled={busy} onClick={() => setOpen(true)}
             className="rounded border border-amber-400 px-2 py-0.5 text-amber-800 disabled:opacity-50">
-            {partial ? '確認放行' : '填理由放行'}
+            填理由放行
           </button>
         )}
       </div>

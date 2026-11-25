@@ -96,13 +96,13 @@ describe('SupportBadge', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 
-  it('partial is yellow and can be released without a reason', async () => {
+  it('partial is yellow, shows the explanation and is accepted by marking the paragraph reviewed', () => {
     show(done('partial'))
     expect(screen.getByText('部分支持')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: '確認放行' }))
-    vi.mocked(api.releaseSupport).mockResolvedValue({} as api.ParagraphView)
-    await userEvent.click(screen.getByRole('button', { name: '送出' }))
-    expect(api.releaseSupport).toHaveBeenCalledWith('c1', '', 'v1')
+    expect(screen.getByText('原文沒有提到闖紅燈')).toBeInTheDocument()
+    expect(screen.getByText('按「已審」即接受')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '確認放行' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '放行理由' })).not.toBeInTheDocument()
   })
 
   it('released shows who released it, without buttons', () => {

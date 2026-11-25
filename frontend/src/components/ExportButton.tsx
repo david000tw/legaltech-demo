@@ -15,7 +15,8 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
   reviewed_text_changed: () => '審核後顯示內容有變更（例如系統調整引用格式），已退回未審，請重新檢視後標記已審',
   inline_quote_unverified: (a) => `自行加引號的文字「${a}…」不是逐字出自對造書狀`,
   citation_failed: (a) => `引用 ${a} 驗證失敗`,
-  judgment_unconfirmed: (a) => `判決引用尚未確認（${a}）`,
+  judgment_unconfirmed: (a) => `${a}：打開原文後，按該段「已審」一併確認`,
+  judgment_not_opened: (a) => `還要先看原文（${a}）`,
   unknown_code: () => '代碼不在本輪候選清單',
   quote_not_found: () => '引文不是逐字出自來源',
   quote_too_short: () => '引文少於 15 字',
@@ -51,7 +52,7 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
   support_unchecked: (a) => `${a} 支持度尚未檢查，請重新檢查或填理由放行`,
   support_not_supported: (a) => `${a} 經 AI 判斷不支持這句話，請修改或填理由放行`,
   support_misuse: (a) => `${a} 經 AI 判斷是把當事人主張當成法院見解，請修改或填理由放行`,
-  support_partial: (a) => `${a} 只部分支持這句話，請確認後放行`,
+  support_partial: (a) => `${a} 部分支持：看過說明後，按該段「已審」一併接受`,
 }
 
 // 阻擋原因的位置：聲明與整份書狀沒有段落編號

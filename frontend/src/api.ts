@@ -132,6 +132,7 @@ export type RoundSettings = { narrative?: string | null; joint_liability?: boole
   claim_value?: number | null; statement_variant?: 'alive' | 'deceased' | null }
 export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgment' | 'statute'; quote: string;
   label: string | null; verify_status: 'ok' | 'warn' | 'failed'; verify_reasons: string[]; lawyer_confirmed: boolean
+  opened?: boolean  // 判決引用：目前登入的律師在本草稿打開過被引用的那一段（設計 5.1）
   court_confirmed: boolean; annotation?: string | null  // annotation：判決的註記，例如「少數見解：否定配偶權」
   support?: SupportView | null }  // 支持度檢查（計畫 2B）；null＝這筆引用不需要檢查
 export type SupportVerdict = 'supports' | 'partial' | 'not_supported' | 'party_claim_misuse'

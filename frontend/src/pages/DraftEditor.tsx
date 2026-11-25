@@ -102,10 +102,13 @@ function ParagraphCard({ p, draftId, canReview, onShowSource, onChanged, onError
         {p.citations.map((c) => (
           <span key={c.id} className="inline-flex items-center gap-1">
             <CitationTag citation={c} onClick={() => onShowSource(c)} />
-            {canReview && c.kind === 'judgment' && !c.lawyer_confirmed
+            {canReview && c.kind === 'judgment' && !c.lawyer_confirmed && c.opened !== true
               && (c.verify_status === 'ok' || (c.verify_status === 'warn' && c.court_confirmed)) && (
-              <button type="button" disabled={busy} onClick={() => act(() => api.confirmCitation(c.id))}
-                className="rounded border border-amber-400 px-2 py-0.5 text-xs text-amber-800">已讀原文，確認</button>
+              // 按「已審」會一併確認判決引用，前提是律師本人打開過被引用的那一段（設計 5.1）
+              <button type="button" onClick={() => onShowSource(c)}
+                className="rounded border border-amber-400 px-2 py-0.5 text-xs text-amber-800">
+                {`還要先看原文：${c.label ?? c.code}`}
+              </button>
             )}
           </span>
         ))}
@@ -174,6 +177,7 @@ export default function DraftEditor({ pollMs = POLL_MS }: { pollMs?: number } = 
       setSource(await api.getCitationSource(c.id))
       setSourceCitationId(c.id)
       setTab('source')
+      if (c.kind === 'judgment' && c.opened !== true) await load()  // 打開過原文才能按「已審」：重新載入讓提示消失
     } catch (e) {
       setError((e as Error).message)
     }

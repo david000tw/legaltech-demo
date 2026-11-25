@@ -24,7 +24,7 @@ from app.review.service import (
     renumber_exhibit,
 )
 from app.review.insert import InsertRejected, insert_pin
-from app.review.views import record_judgment_view
+from app.review.views import has_opened, record_judgment_view
 from app.sources import PASSAGE_LABEL
 from app.text_norm import find_quote
 from app.statements import BODY_LABEL, STATEMENT_LABEL, claim_value, statement_of
@@ -53,12 +53,16 @@ def _annotation(s, c: Citation) -> str | None:
     return s.get(Judgment, s.get(JudgmentPassage, c.judgment_passage_id).judgment_id).annotation
 
 
-def citation_json(s, c: Citation, p: Paragraph | None = None, cache: dict | None = None) -> dict:
+def citation_json(s, c: Citation, p: Paragraph | None = None, cache: dict | None = None,
+                  member_id: UUID | None = None) -> dict:
     p = s.get(Paragraph, c.paragraph_id) if p is None else p
+    # 判決引用：目前登入的律師在本草稿打開過被引用的那一段沒有（設計 5.1；沒有成員時一律 False）
+    opened = bool(c.kind == "judgment" and c.judgment_passage_id and member_id and p is not None
+                  and has_opened(s, p.draft_id, member_id, c.judgment_passage_id))
     return {"id": str(c.id), "code": c.code, "kind": c.kind, "quote": c.quote, "label": citation_label(s, c),
             "annotation": _annotation(s, c),
             "verify_status": c.verify_status, "verify_reasons": c.verify_reasons,
-            "lawyer_confirmed": c.lawyer_confirmed, "court_confirmed": c.court_confirmed,
+            "lawyer_confirmed": c.lawyer_confirmed, "court_confirmed": c.court_confirmed, "opened": opened,
             # 支持度檢查（設計 7.3）：None＝這筆引用不需要檢查
             "support": support.support_json(s, p, c, {} if cache is None else cache) if p is not None else None}
 
@@ -73,7 +77,7 @@ def blocker_json(b) -> dict:
     return {"paragraph_seq": b.paragraph_seq, "paragraph_no": b.paragraph_no, "reason": b.reason, "scope": b.scope}
 
 
-def paragraph_json(s, p: Paragraph, n: int | None = None) -> dict:
+def paragraph_json(s, p: Paragraph, n: int | None = None, member_id: UUID | None = None) -> dict:
     rendered = render_text(s, p)
     cache: dict = {}
     n = _number_of(s, p) if n is None else n
@@ -85,7 +89,7 @@ def paragraph_json(s, p: Paragraph, n: int | None = None) -> dict:
             "source_notice": p.source_notice,  # 例：「依據頁已修正」
             "reviewed_bar_number": p.reviewed_bar_number,
             "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
-            "citations": [citation_json(s, c, p, cache) for c in paragraph_citations(s, p.id)]}
+            "citations": [citation_json(s, c, p, cache, member_id) for c in paragraph_citations(s, p.id)]}
 
 
 @router.get("/drafts/{draft_id}")
@@ -111,13 +115,14 @@ def get_draft(draft_id: UUID, request: Request, background: BackgroundTasks,
                 "brief_kind": rnd.brief_kind, "case_type": case.case_type,
                 "procedure_warning": procedure_warning(case.case_type, case.case_number, rnd.brief_kind),
                 # 聲明區塊（起訴狀、答辯狀）放在內文之前，不佔段落編號
-                "statement": paragraph_json(s, statement, 0) if statement is not None else None,
+                "statement": paragraph_json(s, statement, 0, m.id) if statement is not None else None,
                 "statement_label": STATEMENT_LABEL.get(rnd.brief_kind),
                 "body_label": BODY_LABEL.get(rnd.brief_kind),
                 # 起訴狀狀頭的訴訟標的金額／價額：草稿頁要能看到並補填（只有非金錢請求時必須律師填）
                 "claim_value": (dict(zip(("label", "value"), claim_value(s, rnd)))
                                 if rnd.brief_kind == "complaint" else None),
-                "paragraphs": [paragraph_json(s, p, n) for n, p in enumerate(body_paragraphs(s, draft_id), start=1)],
+                "paragraphs": [paragraph_json(s, p, n, m.id)
+                               for n, p in enumerate(body_paragraphs(s, draft_id), start=1)],
                 "blockers": [blocker_json(b) for b in blockers],
                 # 本輪資料來源中還沒對照原圖的辨識頁（草稿頁上方提醒；計畫 2A Ruling：不逐段標）
                 "unverified_ocr_pages": unverified_ocr_pages(s, rnd)}
@@ -172,7 +177,7 @@ def patch_paragraph(paragraph_id: UUID, body: ParagraphBody, request: Request, b
         p = edit_paragraph(s, paragraph_id, body.text, [CitationInput(c.code, c.quote) for c in body.citations], m,
                            heading=body.heading)
         ids = support.request_checks(s, p.draft_id, [p.id])  # 已鎖段落、改完之後才寫檢查列
-        out = paragraph_json(s, p)
+        out = paragraph_json(s, p, member_id=m.id)
     support_schedule.schedule_support(request, background, m.firm_id, ids, m.id)
     return out
 
@@ -234,7 +239,7 @@ def confirm_paragraph_amount(paragraph_id: UUID, body: AmountBody, m: CurrentMem
             p = confirm_amount(s, paragraph_id, body.amount, m)
         except ReviewRuleError as e:
             raise HTTPException(409, str(e))
-        return paragraph_json(s, p)
+        return paragraph_json(s, p, member_id=m.id)
 
 
 class ReviewBody(BaseModel):
@@ -258,7 +263,7 @@ def review(paragraph_id: UUID, request: Request, background: BackgroundTasks, bo
             detail = ({"code": "review_blocked", "message": str(e), "reasons": e.reasons}
                       if isinstance(e, ReviewBlocked) else str(e))  # 被問題擋下：附原因代碼，前端翻成中文
             return JSONResponse(status_code=409, content={"detail": detail})
-        return paragraph_json(s, p)
+        return paragraph_json(s, p, member_id=m.id)
 
 
 class ExhibitBody(BaseModel):
