@@ -51,6 +51,27 @@ describe('ExportButton', () => {
     expect(onExport).toHaveBeenCalled()
   })
 
+  it('is disabled while exporting, so a second click cannot start a concurrent export', async () => {
+    let release: () => void = () => {}
+    const onExport = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    render(<ExportButton blockers={[]} onExport={onExport} />)
+    await userEvent.click(screen.getByRole('button', { name: '匯出 Word' }))
+    const busy = await screen.findByRole('button', { name: '匯出中…' })
+    expect(busy).toBeDisabled()
+    await userEvent.click(busy)
+    expect(onExport).toHaveBeenCalledTimes(1)
+    release()
+    expect(await screen.findByRole('button', { name: '匯出 Word' })).toBeEnabled()
+  })
+
+  it('becomes available again after a failed export', async () => {
+    const onExport = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue(undefined)
+    render(<ExportButton blockers={[]} onExport={() => onExport().catch(() => {})} />)
+    await userEvent.click(screen.getByRole('button', { name: '匯出 Word' }))
+    await userEvent.click(await screen.findByRole('button', { name: '匯出 Word' }))
+    expect(onExport).toHaveBeenCalledTimes(2)
+  })
+
   it('has a Chinese label for every verification reason code', () => {
     for (const code of ['unreviewed', 'malformed_marker', 'unbound_reference:x', 'marker_without_citation:J1',
       'citation_without_marker:J1', 'quote_marker_without_quote:J1', 'inline_quote_unverified:x',
