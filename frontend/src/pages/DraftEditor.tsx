@@ -269,7 +269,7 @@ export default function DraftEditor({ pollMs = POLL_MS }: { pollMs?: number } = 
         <div>
           <Link to={`/cases/${draft.case_id}`} className="text-sm text-indigo-700 underline">← 回到案件</Link>
           <h1 className="mt-1 text-2xl font-bold text-slate-900">{draft.brief_title}（草稿）</h1>
-          <p className="text-xs text-amber-700">AI 產出的初稿，須由律師逐段審核；判決引用須逐筆讀原文確認。</p>
+          <p className="text-xs text-amber-700">AI 產出的初稿，須由律師逐段審核；引用的判決要先打開原文，按該段「已審」時一併確認。</p>
         </div>
         <div data-testid="export-area" className="max-w-md space-y-2">
           {draft.procedure_warning && (
