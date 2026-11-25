@@ -177,3 +177,28 @@ def test_page_image_endpoint(lawyer_client, db):
     assert login(c2, "b@other.test").status_code == 200
     r = c2.get(f"/api/pages/{page_id}/image")
     assert r.status_code == 404 and r.json()["detail"] == "找不到頁面"
+
+
+def test_first_render_is_idempotent_under_concurrent_requests(lawyer_client):
+    """C7：兩個請求同時第一次要同一頁原圖：存放鍵固定，只留下一個 PNG，資料庫指向同一把鍵。"""
+    from pathlib import Path
+
+    from app.ocr.images import ensure_page_image
+    from tests.test_ingest import FIXTURES
+    client, firm_id, _ = lawyer_client
+    case_id = new_case(client)  # 有文字層的 PDF：上傳時不辨識，所以還沒有原圖
+    doc_id = upload(client, case_id, "判決.pdf", (FIXTURES / "tcev_113_3946.pdf").read_bytes()).json()["id"]
+    storage = LocalStorage(client.app.state.settings.storage_dir)
+    with tenant_session(firm_id) as s:
+        page_id = s.scalars(select(Page.id).where(Page.document_id == doc_id, Page.page_no == 1)).one()
+        assert s.get(Page, page_id).image_key is None
+    with tenant_session(firm_id) as s1, tenant_session(firm_id) as s2:  # 兩個請求都還沒看到對方寫的鍵
+        k1 = ensure_page_image(s1, storage, s1.get(Page, page_id))
+        k2 = ensure_page_image(s2, storage, s2.get(Page, page_id))
+    assert k1 == k2
+    with tenant_session(firm_id) as s:
+        assert s.get(Page, page_id).image_key == k1
+    folder = Path(client.app.state.settings.storage_dir) / str(firm_id) / str(case_id)
+    assert len(list(folder.glob("*.png"))) == 1
+    assert Image.open(io.BytesIO(storage.get(k1))).format == "PNG"
+    assert [p.name for p in folder.iterdir() if p.name.startswith(".tmp")] == []  # 沒有留下暫存檔

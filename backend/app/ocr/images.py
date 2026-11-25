@@ -80,7 +80,8 @@ def ensure_page_image(s: Session, storage: LocalStorage, page: Page) -> str | No
     if file_ext(doc.filename) != ".pdf":
         return None
     png = render_pdf_page(storage.get(doc.storage_key), page.page_no)
-    page.image_key = storage.put(doc.firm_id, doc.case_id, ".png", png)
+    # 固定存放鍵（依頁 id）：兩個請求同時第一次轉圖時寫的是同一個檔，不會留下孤兒 PNG、資料庫也指向同一把鍵
+    page.image_key = storage.put_at(f"{doc.firm_id}/{doc.case_id}/page-{page.id}.png", png)
     return page.image_key
 
 
