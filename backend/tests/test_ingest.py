@@ -161,6 +161,50 @@ def test_unreadable_upload_422(lawyer_client, name, data):
     assert r.json()["detail"]
 
 
+def _docx_bytes(build) -> bytes:
+    d = docx.Document()
+    build(d)
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
+def _add_red_picture(d) -> None:
+    from PIL import Image
+    img = io.BytesIO()
+    Image.new("RGB", (40, 40), "red").save(img, "PNG")
+    img.seek(0)
+    d.add_picture(img)
+
+
+@pytest.mark.parametrize("name,data", [
+    ("圖片檔.docx", _docx_bytes(_add_red_picture)),
+    ("空白段落.docx", _docx_bytes(lambda d: d.add_paragraph("   "))),
+    ("空白.txt", "  \n\n \t ".encode()),
+    ("只有NUL.txt", b"\x00\x00 \x00"),
+])
+def test_blank_text_file_is_unreadable_422(lawyer_client, name, data):
+    """Word／純文字沒有文字＝讀不到內容；辨識只處理 PDF 與照片，所以直接擋下並說清楚怎麼辦，不留空白頁。"""
+    client, firm_id, _ = lawyer_client
+    case_id = new_case(client)
+    r = upload(client, case_id, name, data)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "此檔沒有可讀文字，請改上傳 PDF 或圖片"
+    with tenant_session(firm_id) as s:  # 沒有留下任何文件、頁或原證編號
+        assert s.scalars(select(Document).where(Document.case_id == case_id)).all() == []
+
+
+def test_docx_with_some_blank_pages_still_accepted():
+    """只擋「整份都沒字」；中間夾一頁空白（例如連續兩個分頁符號）是正常文件。"""
+    def build(d):
+        d.add_paragraph("第一頁有字。")
+        d.add_page_break()
+        d.add_page_break()
+        d.add_paragraph("第三頁有字。")
+    pages = extract_pages(_docx_bytes(build), "含空白頁.docx")
+    assert len(pages) == 3 and pages[1].text == ""
+
+
 def test_utf16_and_nul_in_txt():
     assert extract_pages("中文內容測試".encode("utf-16"), "a.txt")[0].text == "中文內容測試"
     assert extract_pages("中\x00文".encode("utf-8"), "a.txt")[0].text == "中文"
