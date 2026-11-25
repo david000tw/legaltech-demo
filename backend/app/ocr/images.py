@@ -22,7 +22,7 @@ MAX_PHOTOS = 30
 SCAN_IMAGE_RATIO = 0.9  # 圖片物件蓋住頁面 90% 以上＝整頁是掃描圖
 SCAN_CHECK_PAGES = 3
 HEIC_MESSAGE = "不支援 HEIC 照片，請在手機上改存成 JPG 後再上傳"
-MIXED_MESSAGE = "一次上傳多個檔案時只能都是照片（JPG、PNG）"
+MIXED_MESSAGE = "一次選多個檔案時只能都是照片（JPG、PNG）；PDF、Word、純文字請一份一份上傳"
 TOO_MANY_PHOTOS = f"一次最多上傳 {MAX_PHOTOS} 張照片"
 NO_IMAGE = "這一頁沒有原圖（Word 或純文字檔）"
 
@@ -33,18 +33,18 @@ def _clean_rgb(data: bytes, n: int) -> Image.Image:
         img = Image.open(io.BytesIO(data))
         img.load()
         img = ImageOps.exif_transpose(img)
-    except Exception as e:  # Pillow 對壞檔會丟各種例外
+        if img.mode in ("RGBA", "LA", "P", "PA"):
+            rgba = img.convert("RGBA")  # 透明的地方鋪白底，不變成黑色
+            clean = Image.new("RGB", rgba.size, "white")
+            clean.paste(rgba, mask=rgba.getchannel("A"))
+        else:
+            clean = Image.new("RGB", img.size, "white")
+            clean.paste(img.convert("RGB"))
+        box = A4_PX if clean.height >= clean.width else (A4_PX[1], A4_PX[0])
+        clean.thumbnail(box, Image.Resampling.LANCZOS)  # 只縮不放大
+        return clean
+    except Exception as e:  # Pillow 對壞檔會丟各種例外（開檔、解碼、貼圖、縮圖階段都可能）：一律當成讀不到
         raise UnreadableFile(f"無法讀取第 {n} 張照片") from e
-    if img.mode in ("RGBA", "LA", "P", "PA"):
-        rgba = img.convert("RGBA")  # 透明的地方鋪白底，不變成黑色
-        clean = Image.new("RGB", rgba.size, "white")
-        clean.paste(rgba, mask=rgba.getchannel("A"))
-    else:
-        clean = Image.new("RGB", img.size, "white")
-        clean.paste(img.convert("RGB"))
-    box = A4_PX if clean.height >= clean.width else (A4_PX[1], A4_PX[0])
-    clean.thumbnail(box, Image.Resampling.LANCZOS)  # 只縮不放大
-    return clean
 
 
 def photos_to_pdf(photos: list[bytes]) -> bytes:

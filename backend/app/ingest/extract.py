@@ -48,7 +48,7 @@ def _clean(text: str) -> str:
 def extract_pages(data: bytes, filename: str) -> list[PageExtract]:
     ext = file_ext(filename)
     if ext not in SUPPORTED:
-        raise UnsupportedFile(f"不支援的檔案格式：{ext or '（無副檔名）'}，請上傳 {'、'.join(SUPPORTED)}")
+        raise UnsupportedFile(f"不支援的檔案格式：{ext or '（無副檔名）'}，請上傳 {'、'.join(SUPPORTED)}，或 JPG、PNG 照片")
     if not data:
         raise UnreadableFile("檔案是空的")
     try:

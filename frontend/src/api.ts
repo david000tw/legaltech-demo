@@ -225,9 +225,13 @@ export function uploadDocument(caseId: string, file: File, kind: 'evidence' | 'o
 
 const PHOTO = /\.(jpe?g|png)$/i
 
+export const MULTI_FILE_MESSAGE = '一次選多個檔案時只能都是照片（JPG、PNG）；PDF、Word、純文字請一份一份上傳'
+
 // 上傳一份文件：多張照片合成一份（一個證物號）；只有一個、而且不是照片的檔案走 file
+// 一次選多個檔案只能都是照片（後端一次只收一份文件）：其他情況不送出，直接說明
 export function uploadDocuments(caseId: string, files: File[], kind: 'evidence' | 'opponent_brief', roundId?: string,
   filedByPartyId?: string) {
+  if (files.length > 1 && files.some((f) => !PHOTO.test(f.name))) return Promise.reject(new Error(MULTI_FILE_MESSAGE))
   const form = new FormData()
   const field = files.length === 1 && !PHOTO.test(files[0].name) ? 'file' : 'files'
   for (const f of files) form.append(field, f)

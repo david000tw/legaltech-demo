@@ -31,6 +31,18 @@ describe('api', () => {
     expect(f).toHaveBeenCalledWith('/api/cases/c1/documents', expect.objectContaining({ method: 'POST' }))
   })
 
+  it('uploadDocuments refuses several non-photo files before sending anything', async () => {
+    const f = respond(200, { id: 'd1', page_count: 1, ocr: null })
+    const pdf1 = new File(['%PDF'], '一.pdf', { type: 'application/pdf' })
+    const pdf2 = new File(['%PDF'], '二.pdf', { type: 'application/pdf' })
+    const jpg = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
+    for (const files of [[pdf1, pdf2], [jpg, pdf1]]) {
+      await expect(uploadDocuments('c1', files, 'evidence')).rejects.toThrow(
+        '一次選多個檔案時只能都是照片（JPG、PNG）；PDF、Word、純文字請一份一份上傳')
+    }
+    expect(f).not.toHaveBeenCalled()
+  })
+
   it('startDocumentOcr reports confirm_ocr as an ApiError code', async () => {
     const f = respond(409, { detail: { code: 'confirm_ocr', message: '要開始辨識嗎？' } })
     const err = await startDocumentOcr('d1', { confirm: false }).catch((e) => e)

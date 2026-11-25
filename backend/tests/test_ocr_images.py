@@ -131,7 +131,7 @@ def test_upload_rejects_heic_and_mixed(lawyer_client):
     r = upload(client, case_id, "IMG_0001.HEIC", b"heic-bytes")
     assert r.status_code == 415 and r.json()["detail"] == "不支援 HEIC 照片，請在手機上改存成 JPG 後再上傳"
     r = _multi(client, case_id, [("a.jpg", photo()), ("b.pdf", b"%PDF-1.4")])
-    assert r.status_code == 422 and r.json()["detail"] == "一次上傳多個檔案時只能都是照片（JPG、PNG）"
+    assert r.status_code == 422 and r.json()["detail"].startswith("一次選多個檔案時只能都是照片（JPG、PNG）")
     r = _multi(client, case_id, [(f"p{i}.jpg", photo((60, 40))) for i in range(31)])
     assert r.status_code == 422 and r.json()["detail"] == "一次最多上傳 30 張照片"
     assert client.get(f"/api/cases/{case_id}").json()["documents"] == []
@@ -202,3 +202,46 @@ def test_first_render_is_idempotent_under_concurrent_requests(lawyer_client):
     assert len(list(folder.glob("*.png"))) == 1
     assert Image.open(io.BytesIO(storage.get(k1))).format == "PNG"
     assert [p.name for p in folder.iterdir() if p.name.startswith(".tmp")] == []  # 沒有留下暫存檔
+
+
+# ---- 小問題批次（C8）：上傳訊息與壞圖片 ----
+def test_unsupported_format_message_mentions_photos(lawyer_client):
+    """C8b：WebP、GIF 被拒時，訊息要說 JPG、PNG 照片可以上傳。"""
+    client, _, _ = lawyer_client
+    case_id = new_case(client)
+    for name, ext in (("相片.webp", ".webp"), ("動畫.gif", ".gif")):
+        r = upload(client, case_id, name, b"RIFF....WEBPVP8 ")
+        assert r.status_code == 415, r.text
+        detail = r.json()["detail"]
+        assert detail.startswith(f"不支援的檔案格式：{ext}")
+        assert ".pdf、.docx、.txt" in detail and "JPG" in detail and "PNG" in detail
+
+
+def test_multiple_non_photo_files_message_says_one_by_one(lawyer_client):
+    """C8a：一次選好幾份 PDF 回 422；訊息要說 PDF、Word、純文字要一份一份上傳。"""
+    client, _, _ = lawyer_client
+    case_id = new_case(client)
+    r = _multi(client, case_id, [("a.pdf", b"%PDF-1.4"), ("b.pdf", b"%PDF-1.4")])
+    assert r.status_code == 422
+    assert r.json()["detail"] == "一次選多個檔案時只能都是照片（JPG、PNG）；PDF、Word、純文字請一份一份上傳"
+    assert client.get(f"/api/cases/{case_id}").json()["documents"] == []
+
+
+def test_late_pillow_failure_is_unreadable_not_500(lawyer_client, monkeypatch):
+    """C8c：貼圖、縮圖階段才出錯的壞圖片，也要回一般的 422「無法讀取第 N 張照片」，不是 500。"""
+    from app.ocr.images import _clean_rgb
+    from app.ingest.extract import UnreadableFile
+
+    def boom(self, *a, **k):
+        raise OSError("image file is truncated")
+    monkeypatch.setattr(Image.Image, "thumbnail", boom)
+    try:
+        _clean_rgb(photo(), 2)
+    except UnreadableFile as e:
+        assert str(e) == "無法讀取第 2 張照片"
+    else:
+        raise AssertionError("沒有丟出 UnreadableFile")
+    client, _, _ = lawyer_client
+    case_id = new_case(client)
+    r = upload(client, case_id, "收據.jpg", photo())
+    assert r.status_code == 422 and r.json()["detail"] == "無法讀取第 1 張照片"
