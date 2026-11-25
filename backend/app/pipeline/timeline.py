@@ -162,10 +162,13 @@ def timeline_outdated(s: Session, case_id: UUID) -> bool:
                     .order_by(AIJob.started_at.desc()).limit(1)).first()
     if job is None:
         return False
-    new_doc = select(Document.id).where(Document.case_id == case_id, Document.created_at > job.started_at)
+    # 只看大事記實際讀的那批文件（對造書狀依 sha256 去重）：複製輪次產生的同一份書狀副本不算變動
+    doc_ids = list({p.document_id for p in source_pages(s, case_id).values()})
+    if not doc_ids:
+        return False
+    new_doc = select(Document.id).where(Document.id.in_(doc_ids), Document.created_at > job.started_at)
     new_text = (select(PageText.id).join(Page, Page.id == PageText.page_id)
-                .join(Document, Document.id == Page.document_id)
-                .where(Document.case_id == case_id, PageText.created_at > job.started_at))
+                .where(Page.document_id.in_(doc_ids), PageText.created_at > job.started_at))
     return s.scalar(select(new_doc.exists() | new_text.exists())) is True
 
 
@@ -175,9 +178,9 @@ UNCOVERED_SNIPPET_RADIUS = 20
 
 def uncovered_dates(s: Session, case_id: UUID) -> dict:
     """卷證與對造書狀的目前文字裡出現、但大事記沒有事件涵蓋的完整日期（純規則，不用 AI；只給律師參考，不自動建立事件）。
-    涵蓋：有「日」的事件涵蓋同一天；只到月的事件涵蓋整個月；隱藏（dismissed）的 AI 事件不算。沒有文字的頁略過。"""
+    涵蓋：有「日」的事件涵蓋同一天；只到月的事件涵蓋整個月；律師刪掉的 AI 事件（隱藏保留）也算——
+    那個日期律師已經看過、判斷不要，不再列成漏列。沒有文字的頁略過。"""
     events = s.scalars(select(TimelineEvent).where(TimelineEvent.case_id == case_id,
-                                                   TimelineEvent.origin != "dismissed",
                                                    TimelineEvent.event_date.is_not(None))).all()
     days = {e.event_date for e in events if e.date_precision == "day"}
     months = {(e.event_date.year, e.event_date.month) for e in events if e.date_precision == "month"}

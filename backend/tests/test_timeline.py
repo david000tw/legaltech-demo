@@ -419,7 +419,8 @@ def test_uncovered_dates_month_only_event_covers_the_whole_month(lawyer_client, 
     assert [d["date"] for d in _uncovered(client, case_id)["dates"]] == ["2025-04-02"]  # 3/9、3/12 都被三月涵蓋
 
 
-def test_uncovered_dates_hidden_ai_event_does_not_cover(lawyer_client, db):
+def test_uncovered_dates_event_the_lawyer_deleted_still_covers(lawyer_client, db):
+    """律師刪掉的 AI 事件（隱藏保留）仍算涵蓋：那個日期律師已經看過、判斷不要，不該一直再列成「漏列」。"""
     client, firm, _ = lawyer_client
     case_id, _ = make_round(firm, opponent_pages=BRIEF, evidence=EVIDENCE)
     client.app.state.provider_factory = lambda settings, f: FakeProvider({"timeline": {"events": [PAID]}})
@@ -427,7 +428,7 @@ def test_uncovered_dates_hidden_ai_event_does_not_cover(lawyer_client, db):
     assert [d["date"] for d in _uncovered(client, case_id)["dates"]] == ["2025-03-12"]  # AI 事件涵蓋 3/9
     event = client.get(f"/api/cases/{case_id}/timeline").json()["events"][0]
     assert client.delete(f"/api/timeline-events/{event['id']}").status_code == 200  # 律師刪掉：AI 事件變成隱藏
-    assert [d["date"] for d in _uncovered(client, case_id)["dates"]] == ["2025-03-09", "2025-03-12"]
+    assert [d["date"] for d in _uncovered(client, case_id)["dates"]] == ["2025-03-12"]
 
 
 def test_uncovered_dates_skips_pages_without_text(lawyer_client, db):
@@ -462,3 +463,19 @@ def test_uncovered_dates_needs_login_and_own_case(lawyer_client, db):
     c2 = TestClient(create_app(db))
     assert login(c2, "other@b.test").status_code == 200
     assert c2.get(f"/api/cases/{case_id}/timeline/uncovered-dates").status_code == 404
+
+
+def test_timeline_not_outdated_after_copying_the_round(lawyer_client, db):
+    """「重新起草」複製輪次會為同一份對造書狀建新的文件列與文字列，但大事記讀的是去重後的同一批頁：不該提示重新整理。"""
+    client, firm, _ = lawyer_client
+    case_id, round_id = make_round(firm, opponent_pages=BRIEF, evidence=EVIDENCE)
+    client.app.state.provider_factory = lambda settings, f: FakeProvider({"timeline": {"events": [PAID]}})
+    assert client.post(f"/api/cases/{case_id}/timeline").status_code == 202
+    assert client.get(f"/api/cases/{case_id}/timeline").json()["outdated"] is False
+    from app.models import Round
+    from app.pipeline.copy_round import copy_round
+    with tenant_session(firm) as s:  # 複製只看輪次狀態；這裡直接標成已起草，不必真的跑起草
+        s.get(Round, round_id).status = "drafted"
+    with tenant_session(firm) as s:
+        copy_round(s, round_id)
+    assert client.get(f"/api/cases/{case_id}/timeline").json()["outdated"] is False
