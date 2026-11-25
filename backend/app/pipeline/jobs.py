@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import select
@@ -23,9 +23,11 @@ from app.config import Settings
 from app.db import tenant_session
 from app.models import AIJob, Case, Firm
 from app.ocr.state import OCR_STALE_AFTER
-from app.pipeline.run import STALE_AFTER
 
 log = logging.getLogger(__name__)
+# 每次 AI 呼叫後都更新心跳，所以只需大於單次呼叫最長時間（逾時 600 秒 × 重試 2 次 = 20 分鐘）；
+# 輪次整段執行的門檻（pipeline.run.STALE_AFTER）算的是整段總長，兩者不同
+JOB_STALE_AFTER = timedelta(minutes=45)
 BUSY = "AI 處理中，請稍候"
 TAKEN_OVER = "已由新的一次執行接手"
 INTERNAL = "other: 系統內部錯誤，請查看伺服器紀錄後重跑"
@@ -53,7 +55,7 @@ def _now() -> datetime:
 
 def _stale(job: AIJob) -> bool:
     # 辨識每次 AI 呼叫最多 120 秒（含重試 240 秒）、等校對員時每 30 秒更新心跳，所以過期門檻較短
-    limit = OCR_STALE_AFTER if job.step == "ocr" else STALE_AFTER
+    limit = OCR_STALE_AFTER if job.step == "ocr" else JOB_STALE_AFTER
     return job.status == "running" and _now() - job.heartbeat_at > limit
 
 

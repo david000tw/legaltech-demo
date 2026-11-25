@@ -1,13 +1,19 @@
 """子專案甲 Task 2：輪次分「拆解」「起草」兩段，中間停下來讓律師勾選；重新拆解要確認（設計 5.1、5.4）。"""
 from datetime import datetime, timedelta, timezone
 
+import inspect
+
 import pytest
 from sqlalchemy import func, select
 
 from app.ai.provider import AIError
+from app.ai.usage import call_ai
 from app.db import tenant_session
 from app.models import Candidate, Claim, Draft, Round
-from app.pipeline.run import RoundBusy, RoundRule, reset_round, run_draft, run_extract, start_stage
+from app.pipeline.run import (
+    AI_CALL_ATTEMPTS, AI_CALL_TIMEOUT_S, ROUND_MAX_AI_STEPS, STALE_AFTER, RoundBusy, RoundRule, reset_round,
+    run_draft, run_extract, start_stage,
+)
 from tests.test_drafting import fake_all, round_with_evidence
 
 TWO_CLAIMS = {"claims": [
@@ -107,12 +113,21 @@ def test_stage_transitions_refused(db, firm):
             start_stage(s, other, "extract")
 
 
+def test_stale_after_exceeds_worst_case_run():
+    """還在跑的輪次不能被判成逾時而重跑（重複花額度）：門檻要大於最壞情況（步驟數 × 重試次數 × 單次逾時）。"""
+    worst = timedelta(seconds=ROUND_MAX_AI_STEPS * AI_CALL_ATTEMPTS * AI_CALL_TIMEOUT_S)
+    assert worst == timedelta(minutes=60)
+    assert STALE_AFTER > worst
+    # 常數要與實際呼叫 AI 的預設值一致，否則上面的推算只是紙上談兵
+    assert inspect.signature(call_ai).parameters["timeout_s"].default == AI_CALL_TIMEOUT_S
+
+
 def test_stale_extracting_can_restart(db, firm):
     _, rid = round_with_evidence(firm)
     with tenant_session(firm) as s:
         start_stage(s, rid, "extract")
     with tenant_session(firm) as s:
-        s.get(Round, rid).started_at = datetime.now(timezone.utc) - timedelta(minutes=46)
+        s.get(Round, rid).started_at = datetime.now(timezone.utc) - STALE_AFTER - timedelta(minutes=1)
     with tenant_session(firm) as s:
         start_stage(s, rid, "extract")
         assert s.get(Round, rid).status == "extracting"
@@ -208,5 +223,5 @@ def test_stale_flag_for_new_states(api):
     _, rid = round_with_evidence(firm)
     with tenant_session(firm) as s:
         r = s.get(Round, rid)
-        r.status, r.started_at = "extracting", datetime.now(timezone.utc) - timedelta(minutes=46)
+        r.status, r.started_at = "extracting", datetime.now(timezone.utc) - STALE_AFTER - timedelta(minutes=1)
     assert client.get(f"/api/rounds/{rid}").json()["stale"] is True
