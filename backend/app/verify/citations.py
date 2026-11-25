@@ -167,7 +167,9 @@ def _outer_quotes(t: str) -> list[tuple[int, int, int]]:
 # 「包括(一)…、(二)…」）。
 _NUM = re.compile(r"\([一二三四五六七八九十]{1,3}\)")
 _NUM_OWNER = re.compile(r"(?:表|附件|原證|被證|證物|附圖)$")
-_LIST_BEFORE = tuple(":：;；。,，、") + ("包括",)
+_LIST_BEFORE = tuple(":：;；。,，、")
+# 「包括(一)…、(二)…」：同一句後面還有「、(二)」才是列舉；「損害包括(一)所述醫療費用」是段落參照
+_LIST_AFTER = re.compile(r"[^。；;]*?、\s*\([一二三四五六七八九十]{1,3}\)")
 
 
 def scan_numbered_cross_references(text: str) -> list[str]:
@@ -176,6 +178,8 @@ def scan_numbered_cross_references(text: str) -> list[str]:
     for m in _NUM.finditer(t):
         before = t[:m.start()].rstrip()
         if not before or before.endswith(_LIST_BEFORE) or _NUM_OWNER.search(before):
+            continue
+        if before.endswith("包括") and _LIST_AFTER.match(t, m.end()):
             continue
         out.append(t[max(0, m.start() - 3):m.end() + 2])
     return out

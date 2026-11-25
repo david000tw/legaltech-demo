@@ -568,7 +568,8 @@ def test_enumerated_list_with_dun_and_baokuo_not_flagged(text):
     assert scan_numbered_cross_references(text) == [], text
 
 
-@pytest.mark.parametrize("text", ["如前述(二)所示，被告應負責。", "同(二)所述，被告應負責。", "如前述(二)、(三)所示。"])
+@pytest.mark.parametrize("text", ["如前述(二)所示，被告應負責。", "同(二)所述，被告應負責。", "如前述(二)、(三)所示。",
+                                  "損害包括㈠所述醫療費用。"])
 def test_real_cross_references_still_flagged_after_list_fix(text):
     from app.verify.citations import scan_numbered_cross_references
     assert scan_numbered_cross_references(text), text
