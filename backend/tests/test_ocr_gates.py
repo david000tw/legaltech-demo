@@ -361,6 +361,29 @@ def test_draft_lists_unverified_ocr_pages(lawyer_client):
         "原證1 第1頁", "對造書狀「答辯狀.txt」第2頁"]
 
 
+def test_draft_skips_pages_confirmed_blank(lawyer_client):
+    """律師已確認是空白頁的辨識頁，不再列在草稿頁的「還沒對照原圖」清單；之後那頁有了真的文字就會再列出。"""
+    client, firm, _ = lawyer_client
+    _, rid = make_round(firm)
+    op1, op2 = opponent_page(firm, rid, 1), opponent_page(firm, rid, 2)
+    with tenant_session(firm) as s:
+        draft = Draft(firm_id=firm, round_id=rid)
+        s.add(draft)
+        s.flush()
+        s.add(Paragraph(firm_id=firm, draft_id=draft.id, seq=1, heading="㈠", text="原告並無過失。"))
+        draft_id = draft.id
+    blank = [{"kind": "blank", "start": 0, "end": 0, "message": "空白頁？請確認", "proof_text": None, "box": None}]
+    as_ocr(firm, op1, text="民事答辯狀")
+    as_ocr(firm, op2, text="", alerts=blank)
+    listed = lambda: client.get(f"/api/drafts/{draft_id}").json()["unverified_ocr_pages"]  # noqa: E731
+    assert listed() == ["對造書狀「答辯狀.txt」第1頁", "對造書狀「答辯狀.txt」第2頁"]
+    with tenant_session(firm) as s:
+        s.get(Page, op2).blank_confirmed_at = datetime.now(timezone.utc)
+    assert listed() == ["對造書狀「答辯狀.txt」第1頁"]
+    as_ocr(firm, op2, text="其實有字", alerts=[])  # 確認空白之後又補了文字：要重新對照
+    assert listed() == ["對造書狀「答辯狀.txt」第1頁", "對造書狀「答辯狀.txt」第2頁"]
+
+
 def test_citation_source_has_image_fields(lawyer_client):
     client, firm, _ = lawyer_client
     case_id, rid = make_round(firm, evidence={"01_研判表.txt": "研判結果：陳志豪未讓幹道車先行且未減速注意車前狀況。"})

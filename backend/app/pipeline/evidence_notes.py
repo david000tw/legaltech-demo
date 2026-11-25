@@ -19,8 +19,8 @@ from app.ai.schemas import EVIDENCE_NOTES_SCHEMA
 from app.amounts import parse_amounts
 from app.dates import parse_dates, parse_month_days
 from app.db import tenant_session
-from app.ingest.service import current_page_text
-from app.models import AIJob, Case, Document, EvidenceNote, Page
+from app.ingest.service import document_text_ids
+from app.models import AIJob, Case, Document, EvidenceNote
 from app.pipeline.case_context import case_context
 from app.pipeline.jobs import JobContext, JobRule
 from app.sources import (
@@ -35,10 +35,8 @@ KINDS = ("proves", "caution")
 
 def document_fingerprint(s: Session, document_id: UUID) -> str:
     """各頁 id 接上目前文字版本（掃描頁寫 ocr）：上傳新版本、校正文字、辨識完成都會改變指紋。"""
-    parts = []
-    for page in s.scalars(select(Page).where(Page.document_id == document_id).order_by(Page.page_no)):
-        pt = current_page_text(s, page.id)
-        parts.append(f"{page.id}:{pt.id if pt is not None else 'ocr'}")
+    parts = [f"{page_id}:{text_id if text_id is not None else 'ocr'}"
+             for page_id, text_id in document_text_ids(s, document_id)]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
@@ -46,8 +44,10 @@ def _has_text(pages: list[SourcePage]) -> bool:
     return any(p.text is not None and p.text.strip() for p in pages)
 
 
-def documents_needing_notes(s: Session, case_id: UUID) -> list[Document]:
-    return [doc for _, doc, pages in evidence_documents(s, case_id)
+def documents_needing_notes(s: Session, case_id: UUID, docs: list | None = None) -> list[Document]:
+    """docs：呼叫端已經算過的 evidence_documents 結果（輪詢端點不必重算一次）。"""
+    docs = evidence_documents(s, case_id) if docs is None else docs
+    return [doc for _, doc, pages in docs
             if _has_text(pages) and doc.notes_fingerprint != document_fingerprint(s, doc.id)]
 
 
@@ -160,9 +160,10 @@ def note_json(s: Session, n: EvidenceNote) -> dict:
 
 
 def notes_view(s: Session, case_id: UUID) -> list[dict]:
-    pending = {d.id for d in documents_needing_notes(s, case_id)}
+    docs = evidence_documents(s, case_id)
+    pending = {d.id for d in documents_needing_notes(s, case_id, docs)}
     out = []
-    for code, doc, pages in evidence_documents(s, case_id):
+    for code, doc, pages in docs:
         notes = s.scalars(select(EvidenceNote).where(EvidenceNote.document_id == doc.id)).all()
         notes = sorted(notes, key=lambda n: (KINDS.index(n.kind), n.seq, n.created_at))
         out.append({"document_id": str(doc.id), "exhibit": code, "filename": doc.filename,

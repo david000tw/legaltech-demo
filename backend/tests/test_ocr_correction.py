@@ -158,6 +158,39 @@ def test_manual_input_for_failed_page(lawyer_client, db):
         assert opponent_ocr_problem(s, rid) is None
 
 
+def test_can_save_verify_flag(lawyer_client, db):
+    """「儲存並標為已對照」：失敗頁手動輸入、已對照的頁改字，都可以一步完成；不可編輯、助理、校對中不行。"""
+    client, firm, _ = lawyer_client
+    assistant = client_as(db, firm, "assistant@ocr.test", role="assistant")
+    case_id, _ = make_round(firm, evidence={"01_收據.txt": "醫療費用合計新臺幣45,000元"})
+
+    def flags(c, page_id):
+        got = c.get(f"/api/pages/{page_id}/ocr").json()
+        return got["can_verify"], got["can_save_verify"]
+
+    _, to_check = ocr_page(firm, case_id, "收據", name="待對照.pdf")
+    _, failed = ocr_page(firm, case_id, None, state="failed", name="失敗.pdf")
+    _, verified = ocr_page(firm, case_id, "收據", verified=True, name="已對照.pdf")
+    with tenant_session(firm) as s:
+        text_layer = s.scalars(select(Page.id).join(PageText, PageText.page_id == Page.id)
+                               .where(PageText.text == "醫療費用合計新臺幣45,000元")).one()
+    proof_doc, proofing = ocr_page(firm, case_id, "收據", state="read", name="校對中.pdf")
+    with tenant_session(firm) as s:
+        queue_ocr(s, proof_doc, None, confirm=False, auto=False)
+    assert flags(client, to_check) == (True, True)
+    assert flags(client, failed) == (False, True)  # 沒有文字版本可勾，但手動輸入後可以直接儲存並對照
+    assert flags(client, verified) == (False, True)  # 已對照；改字會產生新版本，可以直接儲存並對照
+    assert flags(assistant, failed) == (False, False)  # 助理不能標已對照
+    assert flags(client, text_layer) == (False, False)  # 檔案本身的文字不能改
+    assert flags(client, proofing) == (False, False)  # 校對員還在比對
+    # 實際儲存並對照（後端本來就接受，這裡確認狀態機的結果）
+    r = put_text(client, failed, "手動輸入的內容", None, verify=True)
+    assert r.status_code == 200 and (r.json()["ocr_state"], r.json()["needs_check"]) == ("done", False)
+    assert r.json()["verified"]["by_name"]
+    r = put_text(client, verified, "更正後的內容", 1, verify=True)
+    assert r.status_code == 200 and (r.json()["version"], r.json()["needs_check"]) == (2, False)
+
+
 # ---- 對照原圖 ----
 
 def test_verify_page_rules(lawyer_client, db):

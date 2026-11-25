@@ -1,13 +1,19 @@
 """子專案甲 Task 2：輪次分「拆解」「起草」兩段，中間停下來讓律師勾選；重新拆解要確認（設計 5.1、5.4）。"""
 from datetime import datetime, timedelta, timezone
 
+import inspect
+
 import pytest
 from sqlalchemy import func, select
 
 from app.ai.provider import AIError
+from app.ai.usage import call_ai
 from app.db import tenant_session
 from app.models import Candidate, Claim, Draft, Round
-from app.pipeline.run import RoundBusy, RoundRule, reset_round, run_draft, run_extract, start_stage
+from app.pipeline.run import (
+    AI_CALL_ATTEMPTS, AI_CALL_TIMEOUT_S, ROUND_MAX_AI_STEPS, STALE_AFTER, RoundBusy, RoundRule, reset_round,
+    run_draft, run_extract, start_stage,
+)
 from tests.test_drafting import fake_all, round_with_evidence
 
 TWO_CLAIMS = {"claims": [
@@ -107,12 +113,21 @@ def test_stage_transitions_refused(db, firm):
             start_stage(s, other, "extract")
 
 
+def test_stale_after_exceeds_worst_case_run():
+    """還在跑的輪次不能被判成逾時而重跑（重複花額度）：門檻要大於最壞情況（步驟數 × 重試次數 × 單次逾時）。"""
+    worst = timedelta(seconds=ROUND_MAX_AI_STEPS * AI_CALL_ATTEMPTS * AI_CALL_TIMEOUT_S)
+    assert worst == timedelta(minutes=60)
+    assert STALE_AFTER > worst
+    # 常數要與實際呼叫 AI 的預設值一致，否則上面的推算只是紙上談兵
+    assert inspect.signature(call_ai).parameters["timeout_s"].default == AI_CALL_TIMEOUT_S
+
+
 def test_stale_extracting_can_restart(db, firm):
     _, rid = round_with_evidence(firm)
     with tenant_session(firm) as s:
         start_stage(s, rid, "extract")
     with tenant_session(firm) as s:
-        s.get(Round, rid).started_at = datetime.now(timezone.utc) - timedelta(minutes=46)
+        s.get(Round, rid).started_at = datetime.now(timezone.utc) - STALE_AFTER - timedelta(minutes=1)
     with tenant_session(firm) as s:
         start_stage(s, rid, "extract")
         assert s.get(Round, rid).status == "extracting"
@@ -208,5 +223,51 @@ def test_stale_flag_for_new_states(api):
     _, rid = round_with_evidence(firm)
     with tenant_session(firm) as s:
         r = s.get(Round, rid)
-        r.status, r.started_at = "extracting", datetime.now(timezone.utc) - timedelta(minutes=46)
+        r.status, r.started_at = "extracting", datetime.now(timezone.utc) - STALE_AFTER - timedelta(minutes=1)
     assert client.get(f"/api/rounds/{rid}").json()["stale"] is True
+
+
+# ---- 鎖定點要重讀資料庫（populate_existing）：同一個 session 先讀過輪次，別的交易改了狀態，鎖住後不能還看到舊狀態 ----
+
+def _set_status(firm, round_id, status):
+    with tenant_session(firm) as s:
+        r = s.get(Round, round_id)
+        r.status, r.started_at = status, datetime.now(timezone.utc)
+
+
+def test_start_stage_relocks_fresh_status(db, firm):
+    """路由先 s.get(Round) 檢查存在、再 start_stage 鎖列：中間被別人開始了，這裡不能用 identity map 裡的舊狀態再開始一次。"""
+    _, rid = round_with_evidence(firm)
+    with tenant_session(firm) as s:
+        held = s.get(Round, rid)  # 要留著參照：identity map 是弱參照，物件被回收就不會有舊狀態
+        assert held.status == "created"
+        _set_status(firm, rid, "extracting")  # 別的交易已開始並提交
+        with pytest.raises(RoundBusy, match="正在執行中"):
+            start_stage(s, rid, "extract")
+
+
+def test_reset_round_relocks_fresh_status(db, firm):
+    _, rid = round_with_evidence(firm)
+    _extract(firm, rid, fake_all(claims=TWO_CLAIMS), db)
+    with tenant_session(firm) as s:
+        held = s.get(Round, rid)
+        assert held.status == "extracted"
+        _set_status(firm, rid, "drafting")
+        with pytest.raises(RoundBusy):
+            reset_round(s, rid, True)
+
+
+def test_editable_claim_relocks_fresh_status(db, firm):
+    from fastapi import HTTPException
+
+    from app.api.routes_rounds import _editable_claim
+    _, rid = round_with_evidence(firm)
+    _extract(firm, rid, fake_all(claims=TWO_CLAIMS), db)
+    claim_id = _claims(firm, rid)[0][0]
+    with tenant_session(firm) as s:
+        held = s.get(Round, rid)
+        assert held.status == "extracted"
+        _set_status(firm, rid, "drafting")
+        with pytest.raises(HTTPException) as e:
+            _editable_claim(s, claim_id)
+        assert e.value.status_code == 409

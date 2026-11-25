@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app import db
@@ -46,3 +46,24 @@ def ingest_document(s: Session, firm_id: UUID, case_id: UUID, kind: str, filenam
 def current_page_text(s: Session, page_id: UUID) -> PageText | None:
     return s.scalars(select(PageText).where(PageText.page_id == page_id)
                      .order_by(PageText.version.desc()).limit(1)).first()
+
+
+def _latest_text_query(document_id: UUID, *columns):
+    """一份文件各頁（依頁碼）與各頁目前文字版本（最大 version）的單一查詢；沒有文字的頁 PageText 欄為 None。"""
+    latest = (select(PageText.page_id, func.max(PageText.version).label("v"))
+              .join(Page, Page.id == PageText.page_id).where(Page.document_id == document_id)
+              .group_by(PageText.page_id).subquery())
+    return (select(*columns).select_from(Page)
+            .outerjoin(latest, latest.c.page_id == Page.id)
+            .outerjoin(PageText, and_(PageText.page_id == Page.id, PageText.version == latest.c.v))
+            .where(Page.document_id == document_id).order_by(Page.page_no))
+
+
+def document_page_texts(s: Session, document_id: UUID) -> list[tuple[Page, PageText | None]]:
+    """（頁, 目前文字版本）依頁碼排序，一次查完；等同每頁各呼叫一次 current_page_text，但不隨頁數增加查詢次數。"""
+    return [(page, pt) for page, pt in s.execute(_latest_text_query(document_id, Page, PageText))]
+
+
+def document_text_ids(s: Session, document_id: UUID) -> list[tuple[UUID, UUID | None]]:
+    """（頁 id, 目前文字版本 id）依頁碼排序，只取 id、不載入文字；給指紋用。"""
+    return [(page_id, text_id) for page_id, text_id in s.execute(_latest_text_query(document_id, Page.id, PageText.id))]

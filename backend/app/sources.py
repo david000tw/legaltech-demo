@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.amounts import parse_amounts
 from app.dates import PartialDate, date_in_text, month_day_in_text
-from app.ingest.service import current_page_text
+from app.ingest.service import document_page_texts
 from app.models import Document, Exhibit, Page
 from app.ocr.state import needs_check
 from app.text_norm import normalize_text, source_found
@@ -86,12 +86,9 @@ def opponent_docs(s: Session, case_id: UUID, round_id: UUID | None = None) -> li
 
 
 def _pages(s: Session, code: str, doc: Document, kind: str) -> list[SourcePage]:
-    out = []
-    for page in s.scalars(select(Page).where(Page.document_id == doc.id).order_by(Page.page_no)):
-        pt = current_page_text(s, page.id)
-        out.append(SourcePage(page.id, code, page.page_no, kind, doc.id, pt.text if pt is not None else None,
-                              needs_check(pt)))
-    return out
+    return [SourcePage(page.id, code, page.page_no, kind, doc.id, pt.text if pt is not None else None,
+                       needs_check(pt))
+            for page, pt in document_page_texts(s, doc.id)]  # 一次查完整份文件，不是每頁一次（輪詢端點會一直呼叫）
 
 
 def evidence_documents(s: Session, case_id: UUID) -> list[tuple[str, Document, list[SourcePage]]]:

@@ -92,10 +92,11 @@ def classify_failure(payload: dict | None, stderr: str) -> AIError:
     result = str((payload or {}).get("result") or "")
     text = f"{result}\n{stderr}".strip()
     low = text.lower()
-    if any(w in low for w in ("not logged in", "log in", "login", "credential")):
+    if (payload or {}).get("api_error_status") == 429:  # 結構化的用量上限訊號最可靠，先判，不被文字裡的 login 字樣蓋過
+        kind = "usage_limit"
+    elif any(w in low for w in ("not logged in", "log in", "login", "credential")):
         kind = "not_logged_in"
-    elif (payload or {}).get("api_error_status") == 429 or (
-            "limit" in low and any(w in low for w in ("session", "weekly", "usage", "reset"))):
+    elif "limit" in low and any(w in low for w in ("session", "weekly", "usage", "reset")):
         kind = "usage_limit"
     else:
         kind = "other"

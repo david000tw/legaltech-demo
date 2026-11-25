@@ -11,6 +11,15 @@ from app.pipeline.claims import opponent_pages
 from app.sources import page_label
 
 
+def _listed(page: Page, pt: PageText | None) -> bool:
+    """還要對照原圖才列出；律師已確認是空白頁、文字也還是空白頁（有空白提醒）的不用列。
+    確認後又補了文字，空白提醒會消失，就會重新列出。"""
+    if not needs_check(pt):
+        return False
+    confirmed_blank = page.blank_confirmed_at is not None and any(a.get("kind") == "blank" for a in pt.alerts or [])
+    return not confirmed_blank
+
+
 def unverified_ocr_pages(s: Session, rnd: Round) -> list[str]:
     """本輪候選卷證頁與本輪對造書狀頁中，目前版本還要對照原圖的頁標籤；卷證依證物號、頁碼，對造頁在後。
     現有資料沒有記錄 AI 起草時讀了哪些頁，所以整輪列出，不逐段標（不會漏）。"""
@@ -22,6 +31,6 @@ def unverified_ocr_pages(s: Session, rnd: Round) -> list[str]:
         .where(Candidate.round_id == rnd.id, Candidate.kind == "evidence").distinct()
     ).all()
     evidence = sorted(rows, key=lambda r: (r[1].prefix, r[1].number, r[0].page_no))
-    out = [page_label(s, page.id) for page, _ in evidence if needs_check(current_page_text(s, page.id))]
-    out += [page_label(s, op.page.id) for op in opponent_pages(s, rnd.id) if needs_check(op.text)]
+    out = [page_label(s, page.id) for page, _ in evidence if _listed(page, current_page_text(s, page.id))]
+    out += [page_label(s, op.page.id) for op in opponent_pages(s, rnd.id) if _listed(op.page, op.text)]
     return out

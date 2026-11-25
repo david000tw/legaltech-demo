@@ -48,7 +48,7 @@ export type OcrAlert = { kind: string; start: number; end: number; message: stri
 export type PageOcr = { page_id: string; document_id: string; label: string | null; ocr_state: OcrState
   ocr_error: string | null; text: string | null; version: number | null; source: string | null; needs_check: boolean
   verified: { by_name: string | null; at: string | null } | null; alerts: OcrAlert[]; has_image: boolean
-  can_edit: boolean; can_verify: boolean; blank_unconfirmed: boolean }
+  can_edit: boolean; can_verify: boolean; can_save_verify: boolean; blank_unconfirmed: boolean }
 export type UploadResult = { id: string; page_count: number
   ocr?: { status: OcrJob['status']; pages: number; minutes: number } | null }
 export type Exhibit = { id: string; label: string; prefix: string; number: number; document_id: string;
@@ -252,6 +252,9 @@ export const startDocumentOcr = (docId: string, opts: { confirm?: boolean; retry
   req<OcrStart>(`/documents/${docId}/ocr`, json('POST', { confirm: !!opts.confirm, retry_failed: !!opts.retryFailed }))
 export const reocrDocument = (docId: string, confirm: boolean) =>
   req<OcrStart & { pages: number }>(`/documents/${docId}/reocr`, json('POST', { confirm }))
+// 辨識橫幅輪詢用的輕量狀態（只有橫幅要的欄位；狀態變了才重讀整個案件）
+export type DocOcrStatus = Pick<DocOcr, 'job' | 'progress' | 'can_resume'>
+export const getDocumentOcrStatus = (docId: string) => req<DocOcrStatus>(`/documents/${docId}/ocr-status`)
 export const startCaseOcr = (caseId: string, confirm: boolean) =>
   req<{ jobs: OcrJob[]; pages: number }>(`/cases/${caseId}/ocr`, json('POST', { confirm }))
 export const getPageOcr = (pageId: string) => req<PageOcr>(`/pages/${pageId}/ocr`)

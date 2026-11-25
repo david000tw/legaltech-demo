@@ -92,6 +92,24 @@ def test_heartbeat_keeps_long_job_alive(case, monkeypatch, db):
     assert _job(firm, job_id).status == "done"
 
 
+def test_heartbeat_updated_even_when_ai_call_fails(case, monkeypatch, db):
+    """失敗的呼叫（例如 5 次 120 秒逾時）也要更新心跳，不然還活著的工作會被誤判成逾時。"""
+    firm, case_id = case
+    seen = {}
+
+    def body(job, provider, ctx):
+        _age(firm, job.id, 30)  # 這次呼叫前心跳已經很舊
+        old = _job(firm, job.id).heartbeat_at
+        with pytest.raises(AIError):
+            ctx.call(STEP, "系統", "內容", {}, "low")
+        seen["advanced"] = _job(firm, job.id).heartbeat_at - old
+
+    _use_body(monkeypatch, body)
+    job_id = _start(firm, case_id)
+    jobs.run_job(firm, job_id, db, provider=FakeProvider({STEP: AIError("timeout", "逾時")}))
+    assert seen["advanced"] > timedelta(minutes=29)
+
+
 def test_superseded_job_discards_results(case, monkeypatch, db):
     firm, case_id = case
     taken_over = []

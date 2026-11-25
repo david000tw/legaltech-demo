@@ -1,15 +1,16 @@
 """子專案甲 Task 5：起訴狀的我方請求項目——AI 提案、律師確認、起草（設計 5.1、5.2）。"""
+import threading
 from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from app.ai.prompts import load_prompt
 from app.db import tenant_session
 from app.ingest.service import ingest_document
 from app.main import create_app
-from app.models import Claim, Round
+from app.models import Case, Claim, PageText, Round
 from app.pipeline.run import RoundRule, run_draft, run_extract, start_stage
 from app.text_norm import source_found
 from tests.fakes.fake_provider import FakeProvider
@@ -241,3 +242,47 @@ def test_assistant_cannot_delete_confirmed_request(api):
     r = assistant.delete(f"/api/claims/{item['id']}")
     assert r.status_code == 403 and r.json()["detail"] == "已確認的請求項目只能由律師刪除"
     assert client.delete(f"/api/claims/{item['id']}").status_code == 200
+
+
+def test_confirm_takes_case_lock_before_round_lock(api):
+    """辨識修正（ocr.service.lock_page）的上鎖順序是案件列 → …；確認請求項目也要先鎖案件列，再鎖輪次列。"""
+    from app import db as dbmod
+    client, _, _, rid, _ = api
+    item = _items(client, rid)[0]
+    eng = dbmod.engine_for(dbmod.settings().database_url)
+    locks: list[str] = []
+
+    def listener(conn, cur, stmt, params, ctx, many):
+        if "FOR UPDATE" in stmt:
+            locks.append("cases" if "FROM cases" in stmt else "rounds" if "FROM rounds" in stmt else stmt[:40])
+    event.listen(eng, "before_cursor_execute", listener)
+    try:
+        assert client.post(f"/api/claims/{item['id']}/confirm").status_code == 200
+    finally:
+        event.remove(eng, "before_cursor_execute", listener)
+    assert "cases" in locks and "rounds" in locks and locks.index("cases") < locks.index("rounds")
+
+
+def test_confirm_waits_for_ocr_correction_window(api):
+    """辨識修正進行中（已鎖案件列、新文字版本尚未提交）時按「確認」：要等修正提交，再依新的（未對照原圖）文字判斷。"""
+    client, _, firm, rid, _ = api
+    item = _items(client, rid)[0]
+    page_id = item["evidence"][0]["page_id"]
+    with tenant_session(firm) as s:
+        case_id = s.get(Round, rid).case_id
+    result: dict = {}
+
+    def confirm():
+        result["r"] = client.post(f"/api/claims/{item['id']}/confirm")
+
+    with tenant_session(firm) as s:
+        s.get(Case, case_id, with_for_update=True)  # 修正的視窗：案件列已鎖
+        s.add(PageText(firm_id=firm, page_id=page_id, version=2, source="manual", text="改過的文字",
+                       needs_image_check=True))
+        s.flush()
+        t = threading.Thread(target=confirm)
+        t.start()
+        t.join(1.0)
+        assert t.is_alive(), "確認沒有等案件列的鎖（會讀到修正前的文字而成功）"
+    t.join(30)
+    assert result["r"].status_code == 409 and result["r"].json()["detail"]["code"] == "image_unverified"

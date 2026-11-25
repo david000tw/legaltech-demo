@@ -11,7 +11,7 @@ from app.db import tenant_session
 from app.main import create_app
 from app.models import Candidate, Citation, Claim, Draft, Paragraph, ReviewEvent, Round, UsageRecord
 from app.pipeline.drafting import draft_round, rewrite_paragraph
-from app.pipeline.run import RoundBusy, run_draft, run_extract, start_stage
+from app.pipeline.run import STALE_AFTER, RoundBusy, run_draft, run_extract, start_stage
 from tests.fakes.fake_provider import FakeProvider
 from tests.helpers import create_member, login
 from tests.pipeline_helpers import api_run, make_round, run_two_stage
@@ -122,7 +122,7 @@ def test_stale_running_can_restart(db):
         with pytest.raises(RoundBusy):
             start_stage(s, round_id, "extract")
     with tenant_session(firm) as s:
-        s.get(Round, round_id).started_at = datetime.now(timezone.utc) - timedelta(minutes=46)
+        s.get(Round, round_id).started_at = datetime.now(timezone.utc) - STALE_AFTER - timedelta(minutes=1)
     with tenant_session(firm) as s:
         start_stage(s, round_id, "extract")
         assert s.get(Round, round_id).status == "extracting"

@@ -178,7 +178,8 @@ describe('CaseDetail', () => {
     vi.mocked(api.getCase).mockResolvedValue(baseCase)
     vi.mocked(api.getPageOcr).mockResolvedValue({ page_id: 'p2', document_id: 'd2', label: '原證2 第1頁',
       ocr_state: 'pending', ocr_error: null, text: null, version: null, source: null, needs_check: false, verified: null,
-      alerts: [], has_image: true, can_edit: true, can_verify: false, blank_unconfirmed: false })
+      alerts: [], has_image: true, can_edit: true, can_verify: false, can_save_verify: true,
+      blank_unconfirmed: false })
     renderAt()
     await openTab('卷證與時間軸')
     await userEvent.click(await screen.findByRole('button', { name: '第1頁：待辨識' }))
@@ -516,7 +517,8 @@ describe('CaseDetail brief filer and notices', () => {
       { ...extracted.claims[0], page_id: 'p9', ocr_unverified: true }, extracted.claims[1]] })
     vi.mocked(api.getPageOcr).mockResolvedValue({ page_id: 'p9', document_id: 'd9', label: '對造書狀「答辯狀.pdf」第1頁',
       ocr_state: 'done', ocr_error: null, text: '原告與有過失', version: 1, source: 'ai_ocr', needs_check: true,
-      verified: null, alerts: [], has_image: true, can_edit: true, can_verify: false, blank_unconfirmed: false })
+      verified: null, alerts: [], has_image: true, can_edit: true, can_verify: false, can_save_verify: true,
+      blank_unconfirmed: false })
     renderAt()
     await openTab('書狀')
     expect(await screen.findByText('辨識文字，未對照原圖')).toBeInTheDocument()

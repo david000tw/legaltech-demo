@@ -23,7 +23,11 @@ from app.pipeline.drafting import draft_round
 from app.pipeline.requests import evidence_pages, extract_requests
 
 log = logging.getLogger(__name__)
-STALE_AFTER = timedelta(minutes=45)  # 須大於單一步驟最長時間（逾時 600 秒 × 重試）
+AI_CALL_TIMEOUT_S = 600  # 單次 AI 呼叫的逾時（與 call_ai 的預設一致）
+AI_CALL_ATTEMPTS = 2  # 輸出不合法或拒答時重試一次（見 ClaudeCodeLocalProvider.run；Bedrock 供應來源尚是空殼，計畫 5 接上時要重新核對）
+ROUND_MAX_AI_STEPS = 3  # 一段最多的 AI 步驟數（拆解 1 步、起草 2 步，再留一步的餘裕）
+# 最壞情況 3 步 × 2 次 × 600 秒 = 60 分鐘；門檻須大於它再加餘裕，否則還在跑的輪次會被判逾時而重跑、重複花額度
+STALE_AFTER = timedelta(seconds=ROUND_MAX_AI_STEPS * AI_CALL_ATTEMPTS * AI_CALL_TIMEOUT_S) + timedelta(minutes=15)
 NO_TEXT = "no_text: 對造書狀沒有可讀文字，請等辨識完成，或手動輸入辨識失敗的頁"
 NO_EVIDENCE_TEXT = "no_text: 我方卷證還沒有可讀文字，請等辨識完成"
 Stage = Literal["extract", "draft"]
@@ -99,7 +103,7 @@ def _check_extract_ready(s: Session, rnd: Round) -> None:
 
 
 def start_stage(s: Session, round_id: UUID, stage: Stage) -> None:
-    rnd = s.get(Round, round_id, with_for_update=True)  # 鎖住輪次列：同時按兩次只會有一個開始
+    rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)  # 鎖住輪次列：同時按兩次只會有一個開始
     _check_transition(rnd, stage)
     if stage == "draft":
         _check_draft_ready(s, rnd)
@@ -114,7 +118,7 @@ def start_stage(s: Session, round_id: UUID, stage: Stage) -> None:
 
 def reset_round(s: Session, round_id: UUID, confirm: bool) -> None:
     """重新拆解前回到「已建立」：清掉主張（含勾選）、候選與草稿。律師改過勾選或確認過請求項目時要先確認。"""
-    rnd = s.get(Round, round_id, with_for_update=True)
+    rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)
     if rnd.status not in ("extracted", "failed"):
         raise RoundBusy("只有待確認或失敗的輪次可以重新拆解")
     claims = list(s.scalars(select(Claim).where(Claim.round_id == round_id)))
@@ -141,7 +145,7 @@ def _still_current(s: Session, round_id: UUID, token: datetime | None) -> None:
 
 def _mark_failed(firm_id: UUID, round_id: UUID, error: str, token: datetime | None, stage: Stage) -> None:
     with tenant_session(firm_id) as s:
-        rnd = s.get(Round, round_id, with_for_update=True)
+        rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)
         if rnd.started_at != token:
             return
         rnd.status, rnd.error, rnd.failed_stage = "failed", error[:1000], stage

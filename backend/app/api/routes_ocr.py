@@ -8,8 +8,8 @@ from app.auth import CurrentMember, current_member
 from app.db import tenant_session
 from app.models import AIJob, Case, Document, Page
 from app.ocr.job import (
-    confirm_message, ocr_progress, pending_without_job, queue_ocr, queued_pages, retry_failed, run_ocr_queue,
-    work_pages,
+    confirm_message, document_ocr_status, ocr_progress, pending_without_job, queue_ocr, queued_pages, retry_failed,
+    run_ocr_queue, work_pages,
 )
 from app.ocr.service import (
     OcrRuleError, confirm_blank, page_ocr_json, reocr_document, save_page_text, verify_page,
@@ -64,6 +64,15 @@ def start_document_ocr(document_id: UUID, request: Request, background: Backgrou
         out = {"job": job_json(job), "progress": ocr_progress(s, document_id)}
     schedule(request, background, m.firm_id, [job])
     return out
+
+
+@router.get("/documents/{document_id}/ocr-status")
+def get_document_ocr_status(document_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    """輕量狀態，給辨識橫幅每 3 秒輪詢（只有狀態變了前端才重讀整個案件）。"""
+    with tenant_session(m.firm_id) as s:
+        if s.get(Document, document_id) is None:
+            raise HTTPException(404, "找不到文件")
+        return document_ocr_status(s, document_id)
 
 
 @router.post("/cases/{case_id}/ocr")

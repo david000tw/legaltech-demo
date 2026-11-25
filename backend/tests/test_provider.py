@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import inspect, select
 
-from app.ai.claude_code import ClaudeCodeLocalProvider, build_args, child_env
+from app.ai.claude_code import ClaudeCodeLocalProvider, build_args, child_env, classify_failure
 from app.ai.provider import (
     AIError, AIResult, ProviderNotAllowed, ProviderNotEnabled, Usage, check_startup, get_provider,
 )
@@ -136,6 +136,15 @@ def test_not_logged_in_detected(fake):
     with pytest.raises(AIError) as e:
         fake("not_logged_in")
     assert e.value.kind == "not_logged_in"
+
+
+def test_structured_429_beats_login_keywords():
+    """用量上限的結構化訊號（api_error_status == 429）優先於文字裡的「login」字樣。"""
+    payload = {"is_error": True, "api_error_status": 429,
+               "result": "You've hit your usage limit. Please log in again after the reset."}
+    assert classify_failure(payload, "").kind == "usage_limit"
+    # 沒有 429 訊號、純登入問題仍判為未登入
+    assert classify_failure({"is_error": True, "result": "Not logged in · Please run /login"}, "").kind == "not_logged_in"
 
 
 def test_timeout_raises_timeout(fake):

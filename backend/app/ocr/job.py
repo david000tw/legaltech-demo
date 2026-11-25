@@ -12,11 +12,11 @@ from __future__ import annotations
 import math
 import shutil
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app import db
@@ -28,7 +28,8 @@ from app.ocr.alerts import compute_alerts
 from app.ocr.images import ensure_page_image
 from app.ocr.proofreader import ProofreaderUnavailable, finish_proofreader, kill_proofreader, start_proofreader
 from app.ocr.state import (
-    AUTO_OCR_PAGE_LIMIT, OCR_AI_TIMEOUT_S, PROOF_BATCH, QUEUE_KEEPALIVE_S, estimate_minutes, needs_check,
+    AUTO_OCR_PAGE_LIMIT, OCR_AI_TIMEOUT_S, OCR_STALE_AFTER, PROOF_BATCH, QUEUE_KEEPALIVE_S, estimate_minutes,
+    needs_check,
 )
 from app.storage import LocalStorage
 
@@ -69,12 +70,15 @@ def latest_ocr_job(s: Session, document_id: UUID) -> AIJob | None:
                      .order_by(AIJob.started_at.desc()).limit(1)).first()
 
 
-def active_job(s: Session, document_id: UUID) -> AIJob | None:
+def _is_active(job: AIJob | None) -> bool:
+    """等待確認、或在跑且心跳沒過期。"""
     from app.pipeline.jobs import _stale
+    return job is not None and (job.status == "waiting" or job.status == "running" and not _stale(job))
+
+
+def active_job(s: Session, document_id: UUID) -> AIJob | None:
     job = latest_ocr_job(s, document_id)
-    if job is not None and (job.status == "waiting" or job.status == "running" and not _stale(job)):
-        return job
-    return None
+    return job if _is_active(job) else None
 
 
 def queued_pages(s: Session, case_id: UUID) -> int:
@@ -126,14 +130,22 @@ def retry_failed(s: Session, document_id: UUID) -> int:
     return len(pages)
 
 
-def ocr_progress(s: Session, document_id: UUID) -> dict:
-    states = list(s.scalars(select(Page.ocr_state).where(Page.document_id == document_id, Page.ocr_state != "none")))
+def _ocr_states(s: Session, document_id: UUID) -> list[str]:
+    return list(s.scalars(select(Page.ocr_state).where(Page.document_id == document_id, Page.ocr_state != "none")))
+
+
+def ocr_progress(s: Session, document_id: UUID, job: AIJob | None = None) -> dict:
+    """job：呼叫端已經查過的最新辨識工作（不傳就在需要時才查）。"""
+    return _progress(s, document_id, _ocr_states(s, document_id), job)
+
+
+def _progress(s: Session, document_id: UUID, states: list[str], job: AIJob | None = None) -> dict:
     total, done, failed, proofing = len(states), states.count("done"), states.count("failed"), states.count("read")
     remaining = total - done - failed
     if remaining <= 0:
         minutes = 0
     else:
-        job = latest_ocr_job(s, document_id)
+        job = job or latest_ocr_job(s, document_id)
         completed = done + failed
         if completed and job is not None and job.status == "running":
             per_page = max((_now() - job.started_at).total_seconds(), 0) / completed
@@ -141,6 +153,16 @@ def ocr_progress(s: Session, document_id: UUID) -> dict:
         else:
             minutes = estimate_minutes(remaining)
     return {"total": total, "done": done, "failed": failed, "proofing": proofing, "minutes_left": minutes}
+
+
+def document_ocr_status(s: Session, document_id: UUID) -> dict:
+    """橫幅輪詢用的輕量狀態：工作、進度、能不能繼續辨識；不含每頁細節與 can_reocr 等不會隨辨識變動的欄位。
+    只查最新的辨識工作與頁狀態各一次（整個案件回應每份文件要多次查詢）。內容與 document_ocr_json 同源。"""
+    job = latest_ocr_job(s, document_id)
+    states = _ocr_states(s, document_id)
+    from app.pipeline.jobs import job_json
+    return {"job": job_json(job), "progress": _progress(s, document_id, states, job),
+            "can_resume": not _is_active(job) and bool(set(states) & {"pending", "read"})}
 
 
 def current_texts(s: Session, page_ids: list[UUID]) -> dict[UUID, PageText]:
@@ -177,6 +199,21 @@ def pending_without_job(s: Session, case_id: UUID) -> dict[UUID, int]:
         if n and active_job(s, doc_id) is None:
             out[doc_id] = n
     return out
+
+
+def interrupt_running_ocr_jobs() -> int:
+    """啟動時呼叫：前一個程序留下、還標著 running 的辨識工作，程序已經沒了，不必等 10 分鐘心跳過期，
+    直接把心跳改成已過期——與「心跳逾時的中斷」是同一個狀態（status 仍是 running、stale 為真），
+    所以「繼續辨識」立刻出現，接手時舊工作照常標 TAKEN_OVER。頁的狀態不用動：pending、read 本來就是「還沒做完」。
+    跨事務所，所以用 admin_session（RLS 擋掉 app_user 不指定事務所的查詢）。
+    注意：多個 worker 或滾動重啟時，這會把另一個 worker 還活著的工作也標成中斷（它下一次心跳會自己恢復，
+    但畫面上可能出現「繼續辨識」，按下去會接手並重複辨識）；計畫 5 要改成由單一協調者執行（見 docs/deploy-notes.md）。"""
+    from app.db import admin_session
+    expired = _now() - OCR_STALE_AFTER - timedelta(minutes=1)
+    with admin_session() as s:
+        result = s.execute(update(AIJob).where(AIJob.step == "ocr", AIJob.status == "running",
+                                               AIJob.heartbeat_at > expired).values(heartbeat_at=expired))
+        return result.rowcount or 0
 
 
 # ---- 執行 ----

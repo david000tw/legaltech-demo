@@ -1,6 +1,11 @@
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from app import db
 from app.ai.provider import check_startup, get_provider
@@ -10,6 +15,9 @@ from app.api import (
 )
 from app.config import Settings
 from app.corpus.importer import fetch_pdf
+from app.ocr.job import interrupt_running_ocr_jobs
+
+log = logging.getLogger(__name__)
 
 # "testclient" 是 Starlette TestClient 的預設來源；真實連線的來源一定是 IP。
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "testclient"}
@@ -18,11 +26,29 @@ ALLOWED_HOST_HEADERS = ["127.0.0.1", "localhost", "[::1]", "testserver"]
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
+STARTUP_RECOVERY_TIMEOUT_S = 15  # 資料庫連不上時不讓啟動一直卡住（逾時後繼續啟動，工作交給心跳逾時的老辦法）
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """啟動時把上一個程序留下的辨識工作標成中斷（「繼續辨識」立刻出現）；失敗只記錄，不擋啟動。
+    這要用超級使用者連線（跨事務所、RLS 擋掉一般帳號），網頁伺服器不該持有它，所以只在開發環境執行；
+    試用與正式環境維持原本的 10 分鐘心跳逾時，改由計畫 5 的單一協調者處理（見 docs/deploy-notes.md）。"""
+    if app.state.settings.app_env == "dev":
+        try:
+            n = await asyncio.wait_for(run_in_threadpool(interrupt_running_ocr_jobs), STARTUP_RECOVERY_TIMEOUT_S)
+            if n:
+                log.warning("啟動時把 %d 筆上次留下的辨識工作標成中斷", n)
+        except Exception:
+            log.exception("啟動時標記中斷的辨識工作失敗；這些工作要等心跳逾時才會出現「繼續辨識」")
+    yield
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     check_startup(settings)
     db.configure(settings)
-    app = FastAPI(title="legaltech")
+    app = FastAPI(title="legaltech", lifespan=lifespan)
     app.state.settings = settings
     app.state.provider_factory = get_provider  # 測試可換成假的供應來源
     app.state.judgment_fetcher = fetch_pdf  # 向司法院下載判決 PDF；測試換成假的，不連網
