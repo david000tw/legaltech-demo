@@ -107,6 +107,22 @@ def test_pin_rejects_party_claim_and_duplicate(lawyer_client):
     assert r.status_code == 409 and r.json()["detail"] == "這段已經釘選"
 
 
+def test_pin_rejects_withdrawn_judgment(lawyer_client):
+    """批次 B：判決已撤下時，段落本身的狀態仍是 active；釘選以前會回成功，卻不會出現在釘選清單與候選。"""
+    client, firm, _ = lawyer_client
+    _seed()
+    case_id, _ = make_round(firm)
+    pid = _passage()
+    with admin_session() as s:
+        j = s.get(Judgment, s.get(JudgmentPassage, pid).judgment_id)
+        j.status = "withdrawn"
+    r = client.post(f"/api/cases/{case_id}/pins", json={"passage_id": pid})
+    assert r.status_code == 422 and r.json()["detail"] == "這則判決已撤下，不能釘選"
+    assert client.get(f"/api/cases/{case_id}/pins").json() == []
+    with tenant_session(firm) as s:
+        assert s.scalar(select(PinnedPassage.id).where(PinnedPassage.case_id == case_id)) is None
+
+
 def test_assistant_can_search_and_pin(db):
     _seed()
     firm = create_firm("甲事務所")

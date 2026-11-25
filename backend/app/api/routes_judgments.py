@@ -71,6 +71,8 @@ def add_pin(case_id: UUID, body: PinBody, m: CurrentMember = Depends(current_mem
             raise HTTPException(404, "找不到判決段落")
         if p.passage_type != "court_reasoning" or p.status != "active":
             raise HTTPException(422, "只能釘選法院判斷段落")
+        if s.get(Judgment, p.judgment_id).status != "active":  # 判決撤下後，段落狀態不一定跟著變
+            raise HTTPException(422, "這則判決已撤下，不能釘選")
         if is_pinned(s, case_id, p.id):
             raise HTTPException(409, "這段已經釘選")
         pin = PinnedPassage(firm_id=m.firm_id, case_id=case_id, judgment_passage_id=p.id, note=body.note,
