@@ -156,6 +156,9 @@ from app.sources import soften  # noqa: E402
     ("收據業經證實原告支出醫療費用", "收據可佐證原告支出醫療費用"),
     ("收據已經證實原告支出醫療費用", "收據可佐證原告支出醫療費用"),
     ("原告之主張獲得證實", "原告之主張獲得佐證"),
+    ("金額業已驗證無誤", "金額可佐證無誤"),  # 不能留下「業可佐證」
+    ("金額業經驗證無誤", "金額可佐證無誤"),
+    ("金額已經驗證無誤", "金額可佐證無誤"),
     ("沒有誇大的字眼", "沒有誇大的字眼"),
 ])
 def test_soften_overclaim_wording(raw, expected):
@@ -163,6 +166,6 @@ def test_soften_overclaim_wording(raw, expected):
 
 
 def test_soften_leaves_no_overclaim_word_behind():
-    out = soften("業已證實、業經證實、已經證實、獲得證實、已證實、已驗證")
+    out = soften("業已證實、業經證實、已經證實、獲得證實、已證實、業已驗證、業經驗證、已經驗證、已驗證")
     for word in ("證實", "驗證"):
         assert word not in out
