@@ -28,7 +28,8 @@ _PARTY = re.compile(rf"^(原|被)\s*告(?:\s+|\s*:\s*)(?P<name>{_COMPANY}|{_PERS
 _CASE_NO = re.compile(r"(\d{2,3})\s*年度\s*(" + _CJK + r"{1,6})\s*字\s*第\s*(\d+)\s*號")
 _DIVISION = re.compile(rf"(?<!{_CJK})({_CJK})股(?!{_CJK})")
 _COURT = re.compile(rf"((?:臺灣|台灣){_CJK}{{2,8}}?法院|最高法院)")
-_COURT_BEFORE_SEAL = re.compile(rf"({_CJK}{{2,12}}法院)(?:\s*(?:民事庭|家事法庭|民事簡易庭))?\s*公鑒")
+# 「…法院（＋任何庭名，例如民事庭、臺中簡易庭）　公鑒」；法院只取到「法院」為止
+_COURT_BEFORE_SEAL = re.compile(rf"({_CJK}{{2,12}}?法院)(?:\s*{_CJK}{{0,8}}?庭)?\s*公鑒")
 _CAUSE = re.compile(rf"案由\s*:\s*({_CJK}{{2,20}})|為({_CJK}{{2,20}}?)事件")
 
 

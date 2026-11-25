@@ -60,3 +60,9 @@ def test_read_header_company_party():
 def test_read_header_garbage_returns_none():
     g = read_header("今天天氣很好，我們去公園散步。\n原告主張的事情很多。")
     assert (g.court, g.case_number, g.division, g.cause, g.plaintiffs, g.defendants) == (None, None, None, None, [], [])
+
+
+def test_read_header_court_with_branch_before_seal():
+    """驗收實測發現：「臺灣臺中地方法院臺中簡易庭　公鑒」也要讀出法院（庭名不限於民事庭、家事法庭）。"""
+    text = "民事起訴狀\n原告：王建宏\n被告：張美玲\n為請求損害賠償事件，依法起訴事：\n二、事實及理由：\n內文\n此致\n臺灣臺中地方法院臺中簡易庭　公鑒\n"
+    assert read_header(text).court == "臺灣臺中地方法院"
