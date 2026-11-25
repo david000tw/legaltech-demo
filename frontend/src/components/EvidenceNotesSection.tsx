@@ -56,8 +56,10 @@ function NoteItem({ note, onChanged, onError, onShowSource, compact }: {
 }
 
 // 卷證說明（設計 5.6）：每份我方卷證一張卡，列證明方向、注意事項與待辨識頁。compact＝草稿頁左側，只看不改
-export default function EvidenceNotesSection({ caseId, pollMs = POLL_MS, compact = false, onShowSource }: {
+export default function EvidenceNotesSection({ caseId, pollMs = POLL_MS, compact = false, onShowSource, refreshKey }: {
   caseId: string
+  // 值一變就重讀（例如背景辨識完成）；只重讀資料、不重建元件，律師打到一半的內容不會不見
+  refreshKey?: string
   pollMs?: number
   compact?: boolean
   onShowSource?: (s: api.SourceView) => void
@@ -76,7 +78,7 @@ export default function EvidenceNotesSection({ caseId, pollMs = POLL_MS, compact
     }
   }, [caseId])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load() }, [load, refreshKey])
   const running = job?.status === 'running' && !job.stale
   useJobPolling(running, load, pollMs)
 

@@ -96,8 +96,10 @@ function EventRow({ ev, onChanged, onError, onShowSource, compact }: {
 }
 
 // 大事記（設計 5.7）：日期｜事件｜金額｜出處；對造書狀來的標「對造主張」。compact＝草稿頁左側，只看不改
-export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = false, onShowSource }: {
+export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = false, onShowSource, refreshKey }: {
   caseId: string
+  // 值一變就重讀（例如背景辨識完成）；只重讀資料、不重建元件，律師打到一半的內容不會不見
+  refreshKey?: string
   pollMs?: number
   compact?: boolean
   onShowSource?: (s: api.SourceView) => void
@@ -125,7 +127,7 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
     }
   }, [caseId])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load() }, [load, refreshKey])
   const running = job?.status === 'running' && !job.stale
   useJobPolling(running, load, pollMs)
 

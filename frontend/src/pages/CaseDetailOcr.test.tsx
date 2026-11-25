@@ -1,5 +1,5 @@
 // 辨識進行中的案件頁：只輪詢輕量狀態；辨識結束（狀態變了）才重讀整個案件，卷證說明與大事記跟著重讀。
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api'
@@ -104,5 +104,18 @@ describe('CaseDetail while OCR runs', () => {
     expect(api.getTimeline).toHaveBeenCalledTimes(2)
     await new Promise((r) => setTimeout(r, 80))
     expect(api.getEvidenceNotes).toHaveBeenCalledTimes(2)  // d3 還在跑：輪詢不會讓兩個區塊一直重讀
+  })
+
+  it('keeps a half-typed timeline event when OCR finishes in the background', async () => {
+    // 辨識結束只重讀資料，不重建面板：律師打到一半的新增事件不能不見
+    vi.mocked(api.getCase).mockResolvedValueOnce(single(RUNNING, 'pending'))
+      .mockResolvedValue(single(FINISHED, 'done'))
+    vi.mocked(api.getEvidenceNotes).mockResolvedValue(notes([]))
+    vi.mocked(api.getDocumentOcrStatus).mockResolvedValueOnce(RUNNING).mockResolvedValue(FINISHED)
+    renderCase()
+    const input = await screen.findByLabelText('新增事件內容')
+    fireEvent.change(input, { target: { value: '原告前往醫院複診' } })
+    await waitFor(() => expect(api.getTimeline).toHaveBeenCalledTimes(2), { timeout: 3000 })  // 辨識結束後重讀了
+    expect(screen.getByLabelText('新增事件內容')).toHaveValue('原告前往醫院複診')
   })
 })

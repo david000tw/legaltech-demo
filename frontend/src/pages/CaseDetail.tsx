@@ -732,10 +732,10 @@ export default function CaseDetail() {
                   </ul>
                 </section>
                 {/* 卷證說明與大事記（設計 5.6、5.7）：只給律師參考，不進書狀 */}
-                <EvidenceNotesSection key={`notes-${data.exhibits.length}-${ocrKey}`} caseId={caseId}
-                  onShowSource={showSource} />
-                <TimelineSection key={`timeline-${data.documents.length}-${ocrKey}`} caseId={caseId}
-                  onShowSource={showSource} />
+                <EvidenceNotesSection key={`notes-${data.exhibits.length}`} caseId={caseId}
+                  onShowSource={showSource} refreshKey={ocrKey} />
+                <TimelineSection key={`timeline-${data.documents.length}`} caseId={caseId}
+                  onShowSource={showSource} refreshKey={ocrKey} />
               </div>
               {sourceCard}
             </div>
