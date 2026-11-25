@@ -9,6 +9,7 @@ import FilingPackageButton from '../components/FilingPackageButton'
 import PinnedPanel from '../components/PinnedPanel'
 import SourcePane from '../components/SourcePane'
 import StatementBlock, { AmountButtons, ClaimValueField } from '../components/StatementBlock'
+import CitationEditor from '../components/CitationEditor'
 import SupportBadge from '../components/SupportBadge'
 import TimelineSection from '../components/TimelineSection'
 import { POLL_MS, useJobPolling } from '../aiJobs'
@@ -82,12 +83,11 @@ function ParagraphCard({ p, draftId, canReview, onShowSource, onChanged, onError
             <input aria-label="段落標題" value={heading} onChange={(e) => setHeading(e.target.value)}
               className="mt-1 w-full rounded border border-slate-300 p-2 text-sm" />
           </label>
-          <label className="block text-xs text-slate-600">
+          <div className="block text-xs text-slate-600">
             段落內文
-            <textarea aria-label="段落內文" value={text} onChange={(e) => setText(e.target.value)} rows={6}
-              className="mt-1 w-full rounded border border-slate-300 p-2 font-mono text-sm" />
-          </label>
-          <p className="text-xs text-slate-500">引用請保留 {'{{cite:代碼}}'}／{'{{quote:代碼}}'} 標記，不要直接寫字號、條號或原證號。</p>
+            {/* 出處是一整塊，打不壞；要新增出處用「要求重寫」（設計 5.3） */}
+            <CitationEditor value={text} citations={p.citations} onChange={setText} ariaLabel="段落內文" />
+          </div>
           <div className="flex gap-2">
             {canReview ? (
               <>

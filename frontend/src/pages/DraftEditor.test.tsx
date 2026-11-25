@@ -14,6 +14,12 @@ vi.mock('../api', async (orig) => {
     listPins: vi.fn(), insertPin: vi.fn(), verifyPage: vi.fn() }
 })
 
+// 編輯框本身（出處整塊）在 CitationEditor.test.tsx 測；這裡換成文字框，專心測存檔與審核的流程
+vi.mock('../components/CitationEditor', () => ({
+  default: ({ value, onChange, ariaLabel }: { value: string; onChange: (v: string) => void; ariaLabel: string }) =>
+    <textarea aria-label={ariaLabel} value={value} onChange={(e) => onChange(e.target.value)} />,
+}))
+
 const draft: api.DraftView = {
   id: 'dr1', round_id: 'r1', case_id: 'c1', case_title: '林大明車禍案', can_review: true, brief_title: '民事準備書狀',
   procedure_warning: null,
