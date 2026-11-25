@@ -132,7 +132,22 @@ describe('DraftEditor', () => {
     expect(api.getCitationSource).toHaveBeenCalledWith('cj1')
     await waitFor(() => expect(api.getDraft).toHaveBeenCalledTimes(2))  // 打開原文後重新載入，「看過」才會更新
     await userEvent.click(screen.getByRole('button', { name: '標記已審' }))
-    expect(api.reviewParagraph).toHaveBeenCalledWith('p1', 'v1')
+    expect(api.reviewParagraph).toHaveBeenCalledWith('p1', 'v1', { supportVersions: {} })
+  })
+
+  it('sends back the partial support result shown under the paragraph (審查 #3)', async () => {
+    const partial: api.CitationView = { id: 'ce1', code: 'E1', kind: 'evidence', quote: '未讓幹道車先行', label: '被證1',
+      verify_status: 'ok', verify_reasons: [], lawyer_confirmed: false, court_confirmed: false,
+      support: { status: 'done', verdict: 'partial', explanation: '只提到未讓幹道車先行', error: null, blocking: true,
+        released: null, version: 's1' } }
+    const pending: api.CitationView = { ...partial, id: 'ce2', code: 'E2',
+      support: { ...partial.support!, status: 'pending', verdict: null, version: null } }
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft, paragraphs: [{ ...draft.paragraphs[0],
+      citations: [...draft.paragraphs[0].citations, partial, pending] }] })
+    vi.mocked(api.reviewParagraph).mockResolvedValue({ ...draft.paragraphs[0], status: 'reviewed' })
+    renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: '標記已審' }))
+    expect(api.reviewParagraph).toHaveBeenCalledWith('p1', 'v1', { supportVersions: { E1: 's1' } })
   })
 
   it('does not ask to open a judgment that was already opened', async () => {
@@ -403,7 +418,7 @@ describe('DraftEditor procedure', () => {
     const order = Array.from(document.querySelectorAll('[data-testid="statement-block"], article'))
     expect(order[0]).toBe(block)
     await userEvent.click(within(block).getByRole('button', { name: '標記已審' }))
-    expect(api.reviewParagraph).toHaveBeenCalledWith('st1', 'sv1')
+    expect(api.reviewParagraph).toHaveBeenCalledWith('st1', 'sv1', { supportVersions: {} })
     await userEvent.click(await screen.findByRole('button', { name: '展開' }))  // 阻擋清單預設收合
     expect(screen.getByText('整份書狀：請填寫訴訟標的金額或價額')).toBeInTheDocument()
     expect(screen.getByText('聲明：段落尚未審核')).toBeInTheDocument()

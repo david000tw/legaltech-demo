@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.auth import CurrentMember, current_member, require_lawyer
@@ -249,6 +249,8 @@ def confirm_paragraph_amount(paragraph_id: UUID, body: AmountBody, m: CurrentMem
 class ReviewBody(BaseModel):
     version: str
     defer: bool = False  # 「儲存並標記已審」：只差支持度還在檢查時，先記下、查完自動完成（設計 5.2）
+    # 畫面上顯示的支持度結果版本（引用代碼 → version）：「部分支持」只在版本相符時一併接受
+    support_versions: dict[str, str] | None = Field(default=None, max_length=200)
 
 
 @router.post("/paragraphs/{paragraph_id}/review")
@@ -265,7 +267,8 @@ def review(paragraph_id: UUID, request: Request, background: BackgroundTasks, bo
             if body.defer and request_review(s, paragraph_id, m, body.version) == "deferred":
                 return JSONResponse(status_code=202,
                                     content=paragraph_json(s, s.get(Paragraph, paragraph_id), member_id=m.id))
-            p = s.get(Paragraph, paragraph_id) if body.defer else mark_reviewed(s, paragraph_id, m, body.version)
+            p = (s.get(Paragraph, paragraph_id) if body.defer
+                 else mark_reviewed(s, paragraph_id, m, body.version, seen_support=body.support_versions))
         except ReviewRuleError as e:
             # 用 return 而不是 raise：raise 會丟掉剛排入的背景檢查；回應內容與 HTTPException 相同
             detail = ({"code": "review_blocked", "message": str(e), "reasons": e.reasons}

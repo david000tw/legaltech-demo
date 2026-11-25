@@ -112,10 +112,11 @@ def confirm_amount(s: Session, paragraph_id: UUID, amount: int, member: CurrentM
     return p
 
 
-def _absorb(s: Session, p: Paragraph, member: CurrentMember, absorb_partial: bool
+def _absorb(s: Session, p: Paragraph, member: CurrentMember, seen_support: dict[str, str] | None
             ) -> tuple[list[Citation], list[tuple[Citation, SupportCheck]], list[str]]:
     """把「已審」可以一併處理的阻擋分出來（設計 5.1）：
-    判決引用＝本人在本草稿打開過被引用的那一段；部分支持＝說明已顯示在段落下方。其餘照舊阻擋。"""
+    判決引用＝本人在本草稿打開過被引用的那一段；部分支持＝律師畫面上顯示的就是目前這一版結果
+    （seen_support 是畫面送回的「引用代碼 → 支持度版本」；沒送、或結果已變就照舊阻擋）。其餘照舊阻擋。"""
     from app.support import service as support  # 函式內 import，避免循環
     remaining: list[str] = []
     judgments: dict[str, Citation] = {}
@@ -131,7 +132,7 @@ def _absorb(s: Session, p: Paragraph, member: CurrentMember, absorb_partial: boo
                 judgments[code] = c
             else:
                 remaining.append(f"judgment_not_opened:{code}")
-        elif kind == "support_partial" and absorb_partial and c is not None:
+        elif kind == "support_partial" and seen_support and code in seen_support and c is not None:
             partial_codes.add(code)
         else:
             remaining.append(reason)
@@ -139,13 +140,15 @@ def _absorb(s: Session, p: Paragraph, member: CurrentMember, absorb_partial: boo
     cache: dict = {}
     for code in sorted(partial_codes):
         _, row = support.check_for(s, p, cites[code], cache)
-        if row is not None:
+        if row is not None and support.support_version(row) == seen_support[code]:
             partials.append((cites[code], row))
+        else:
+            remaining.append(f"support_partial:{code}")
     return list(judgments.values()), partials, remaining
 
 
 def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version: str, *,
-                  absorb_partial: bool = True, note: str | None = None) -> Paragraph:
+                  seen_support: dict[str, str] | None = None, note: str | None = None) -> Paragraph:
     """version 是律師畫面上那一版的指紋；內容已變（別人改過、改了原證號）就不能記成已審。
     打開過原文的判決引用與「部分支持」在同一交易裡一併確認（設計 5.1）；任何一項不成立就整個不寫。"""
     _require_lawyer(member)
@@ -155,7 +158,7 @@ def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version
     rendered = render_text(s, p)
     if paragraph_version(s, p, rendered) != version:
         raise ReviewRuleError("段落內容已變更，請重新載入後再審核")
-    judgments, partials, blockers = _absorb(s, p, member, absorb_partial)
+    judgments, partials, blockers = _absorb(s, p, member, seen_support)
     if blockers:
         raise ReviewBlocked(blockers)
     bar = member.bar_number or ""
@@ -185,9 +188,9 @@ def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version
 
 def request_review(s: Session, paragraph_id: UUID, member: CurrentMember, version: str) -> str:
     """「儲存並標記已審」（設計 5.2）：能審就審；只差支持度還在檢查，就記下「審核待完成」回 "deferred"。
-    律師按下去的那一刻還沒看過新的支持度說明，所以「部分支持」不一併接受（absorb_partial=False）。"""
+    律師按下去的那一刻還沒看過新的支持度說明，所以「部分支持」不一併接受（不帶 seen_support）。"""
     try:
-        mark_reviewed(s, paragraph_id, member, version, absorb_partial=False)
+        mark_reviewed(s, paragraph_id, member, version)
         return "reviewed"
     except ReviewBlocked as e:
         if not e.reasons or not all(r.startswith("support_pending:") for r in e.reasons):
@@ -240,7 +243,7 @@ def apply_deferred_reviews(s: Session, case_id: UUID) -> list[UUID]:
         member = CurrentMember(id=m.id, firm_id=m.firm_id, role=m.role, bar_number=m.bar_number,
                                bar_verified=m.bar_verified)
         try:
-            mark_reviewed(s, pid, member, p.review_request_version, absorb_partial=False, note=AUTO_REVIEW_NOTE)
+            mark_reviewed(s, pid, member, p.review_request_version, note=AUTO_REVIEW_NOTE)
         except ReviewRuleError:
             _cancel_request(p, REVIEW_AGAIN_NOTE)
             continue

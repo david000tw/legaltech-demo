@@ -118,6 +118,13 @@ describe('api', () => {
     expect(JSON.parse(init.body as string)).toEqual({ version: 'v1' })
   })
 
+  it('sends the support results the lawyer saw so a partial result is accepted only if unchanged (審查 #3)', async () => {
+    const f = respond(200, {})
+    await reviewParagraph('p1', 'v1', { supportVersions: { E1: 's1' } })
+    const [, init] = f.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({ version: 'v1', support_versions: { E1: 's1' } })
+  })
+
   it('keeps the reason codes of a refused review on the ApiError', async () => {
     respond(409, { detail: { code: 'review_blocked', message: '尚有未解決的問題，無法標記已審',
       reasons: ['image_unverified:原證1'] } })

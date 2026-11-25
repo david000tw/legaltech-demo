@@ -128,7 +128,7 @@ export default function StatementBlock({ draft, onChanged, onError }: {
             className="rounded border border-amber-400 px-2 py-0.5 text-xs text-amber-800">金額已自行核對</button>
         )}
         {draft.can_review && (
-          <button type="button" disabled={busy} onClick={() => act(() => api.reviewParagraph(st.id, st.version))}
+          <button type="button" disabled={busy} onClick={() => act(() => api.reviewParagraph(st.id, st.version, { supportVersions: api.shownSupport(st) }))}
             className="rounded bg-emerald-600 px-3 py-1 text-sm text-white disabled:opacity-50">標記已審</button>
         )}
       </div>

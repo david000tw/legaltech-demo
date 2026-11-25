@@ -156,7 +156,7 @@ function ParagraphCard({ p, draftId, canReview, onShowSource, onChanged, onError
         <AmountButtons reasons={p.verify_reasons} canReview={canReview}
           onConfirm={(n) => act(() => api.confirmAmount(p.id, n))} />
         {canReview && (
-          <button type="button" disabled={busy} onClick={() => act(() => api.reviewParagraph(p.id, p.version))}
+          <button type="button" disabled={busy} onClick={() => act(() => api.reviewParagraph(p.id, p.version, { supportVersions: api.shownSupport(p) }))}
             className="rounded bg-emerald-600 px-3 py-1 text-sm text-white disabled:opacity-50">標記已審</button>
         )}
       </div>

@@ -364,8 +364,16 @@ export const retrySupport = (draftId: string) =>
   req<{ queued: number }>(`/drafts/${draftId}/support/retry`, json('POST'))
 // version：律師畫面上那一版的指紋；後端發現內容已變就回 409，不會把沒看過的版本記成已審
 // defer：「儲存並標記已審」——只差支持度還在檢查時先記下，查完全部「支持」自動完成（設計 5.2）
-export const reviewParagraph = (id: string, version: string, opts: { defer?: boolean } = {}) =>
-  req<ParagraphView>(`/paragraphs/${id}/review`, json('POST', opts.defer ? { version, defer: true } : { version }))
+// supportVersions：畫面上顯示的支持度結果版本（引用代碼 → version）；「部分支持」只在版本相符時隨「已審」一併接受
+export const reviewParagraph = (id: string, version: string,
+  opts: { defer?: boolean; supportVersions?: Record<string, string> } = {}) =>
+  req<ParagraphView>(`/paragraphs/${id}/review`, json('POST', {
+    version, ...(opts.defer ? { defer: true } : {}),
+    ...(opts.supportVersions && Object.keys(opts.supportVersions).length ? { support_versions: opts.supportVersions } : {}),
+  }))
+/** 段落下方目前顯示的支持度結果版本，按「已審」時帶回去 */
+export const shownSupport = (p: ParagraphView): Record<string, string> =>
+  Object.fromEntries(p.citations.flatMap((c) => (c.support?.version ? [[c.code, c.support.version]] : [])))
 export const renumberExhibit = (id: string, number: number) =>
   req<{ id: string; label: string; number: number }>(`/exhibits/${id}`, json('PATCH', { number }))
 
