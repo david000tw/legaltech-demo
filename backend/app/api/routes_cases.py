@@ -17,6 +17,7 @@ from app.case_types import (
 from app.db import CASE_LOCK, tenant_session
 from app.ingest.extract import UnreadableFile, UnsupportedFile, file_ext
 from app.ingest.service import current_page_text, ingest_document
+from app.automation.placement import PlacementRule, opponent_target, place_opponent_upload
 from app.models import (
     AUTOMATION_MODES, AIJob, Case, CaseParty, Document, Exhibit, HealthReport, Member, Page, Round,
 )
@@ -95,6 +96,10 @@ def _case_or_404(s, case_id: UUID) -> Case:
 
 def _case_summary(c: Case) -> dict:
     return {"id": str(c.id), "title": c.title, "our_side": c.our_side, "case_type": c.case_type}
+
+
+def _target_json(t) -> dict:
+    return {"round_id": str(t.round_id) if t.round_id else None, "seq": t.seq, "new": t.new, "brief_kind": t.brief_kind}
 
 
 def _party_json(p: CaseParty) -> dict:
@@ -241,6 +246,7 @@ def get_case(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
             # 卷證說明、大事記的 AI 工作狀態（前端據此輪詢；設計 5.6、5.7）
             "jobs": {step: job_json(latest_job(s, case_id, None, step)) for step in ("evidence_notes", "timeline")},
             "automation": case.automation,
+            "opponent_target": _target_json(opponent_target(s, case)),
         }
 
 
@@ -342,13 +348,13 @@ def upload_document(case_id: UUID, request: Request, background: BackgroundTasks
                     kind: Literal["evidence", "opponent_brief"] = Form(...),
                     round_id: UUID | None = Form(None),
                     filed_by_party_id: UUID | None = Form(None),
+                    brief_kind: str | None = Form(None),  # 對方書狀建新輪次時的書狀種類（設計 6.2）
+                    strategy: str | None = Form(None, max_length=2000),  # 答辯策略，可在上傳時就填（設計 6.4）
                     m: CurrentMember = Depends(current_member)) -> dict:
     # 一般 def：FastAPI 會放到執行緒池，抽字、合成照片時不會卡住其他請求。
     uploads = ([file] if file is not None else []) + list(files or [])
     if not uploads:
         raise HTTPException(422, "請選擇要上傳的檔案")
-    if kind == "opponent_brief" and round_id is None:
-        raise HTTPException(422, "對造書狀要指定輪次")
     if kind != "opponent_brief" and filed_by_party_id is not None:
         raise HTTPException(422, "只有對造書狀有遞狀人")
     prep = _prepare_upload(uploads)
@@ -359,6 +365,11 @@ def upload_document(case_id: UUID, request: Request, background: BackgroundTasks
             r = s.get(Round, round_id)
             if r is None or r.case_id != case_id:
                 raise HTTPException(404, "找不到輪次")
+        elif kind == "opponent_brief":  # 沒指定輪次：自動放進還沒起草的最新一輪，或建新的一輪（設計 6.2）
+            try:
+                round_id = place_opponent_upload(s, case_id, brief_kind, strategy).id
+            except PlacementRule as e:
+                raise HTTPException(422, str(e))
         _check_filer(s, case_id, filed_by_party_id)
         try:
             doc = ingest_document(s, m.firm_id, case_id, kind, prep.filename, prep.data, round_id, storage=storage)

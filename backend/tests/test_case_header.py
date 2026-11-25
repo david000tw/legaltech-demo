@@ -369,15 +369,16 @@ def test_single_filer_labels_even_unverified_quotes(lawyer_client):
 
 
 # ---- 小問題批次（C2～C4）：上傳的輪次與遞狀人檢查 ----
-def test_opponent_brief_upload_requires_round(lawyer_client):
-    """C2a：對造書狀一定屬於某一輪；沒帶輪次回 422 與中文說明，不留下孤兒文件。"""
+def test_opponent_brief_upload_without_round_goes_to_a_round(lawyer_client):
+    """C2a 改（設計 6.2）：對造書狀一定屬於某一輪；沒帶輪次時自動放進可用的最新一輪或建新的一輪，不留孤兒文件。"""
     client, firm, _ = lawyer_client
     cid = _estate_case(client)
     r = client.post(f"/api/cases/{cid}/documents", data={"kind": "opponent_brief"},
                     files={"file": ("答辯狀.txt", BRIEF_A.encode(), "text/plain")})
-    assert r.status_code == 422 and r.json()["detail"] == "對造書狀要指定輪次"
+    assert r.status_code == 200, r.text
     with tenant_session(firm) as s:
-        assert s.scalars(select(Document).where(Document.case_id == cid)).all() == []
+        (doc,) = s.scalars(select(Document).where(Document.case_id == cid)).all()
+        assert doc.round_id is not None
 
 
 def test_evidence_upload_rejects_filer(lawyer_client):
