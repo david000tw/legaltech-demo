@@ -1,4 +1,5 @@
 """子專案甲 Task 4：訴之聲明、答辯聲明（聲明區塊）與 Word 依書狀種類排版（設計 5.1～5.3）。"""
+import pytest
 import io
 from datetime import datetime, timezone
 
@@ -68,7 +69,25 @@ def test_statement_created_for_complaint(db):
 
 def test_statement_created_for_answer(db):
     ctx, _ = make_brief(db, kind="answer")
-    assert _statement(ctx)[1] == "一、原告之訴及假執行之聲請均駁回。\n二、訴訟費用由原告負擔。\n三、如受不利判決，被告願供擔保請准宣告免為假執行。"
+    # 測試用的對造書狀沒有聲請假執行：第一項不寫「及假執行之聲請」
+    assert _statement(ctx)[1] == "一、原告之訴駁回。\n二、訴訟費用由原告負擔。\n三、如受不利判決，被告願供擔保請准宣告免為假執行。"
+
+
+@pytest.mark.parametrize("brief,first", [
+    ("訴之聲明：被告應給付原告新臺幣150,000元。訴訟費用由被告負擔。", "一、原告之訴駁回。"),
+    ("訴之聲明：被告應給付原告新臺幣150,000元。原告願供擔保，請准宣告假執行。", "一、原告之訴及假執行之聲請均駁回。"),
+])
+def test_answer_statement_follows_the_opponents_provisional_request(db, brief, first):
+    """答辯聲明依對造書狀有沒有聲請假執行（規則判斷，不用 AI）。"""
+    from app.ingest.service import ingest_document
+    ctx = setup_verify_round()
+    with tenant_session(ctx["firm"]) as s:
+        s.get(Round, ctx["round_id"]).brief_kind = "answer"
+        ingest_document(s, ctx["firm"], ctx["case_id"], "opponent_brief", "起訴狀.txt", brief.encode("utf-8"),
+                        round_id=ctx["round_id"])
+    with tenant_session(ctx["firm"]) as s:
+        create_statement(s, s.get(Draft, ctx["draft_id"]))
+    assert _statement(ctx)[1].split(chr(10))[0] == first
 
 
 def test_no_statement_for_preparatory(db):
@@ -89,7 +108,7 @@ def test_draft_round_creates_statement_for_answer(db):
     with tenant_session(firm) as s:
         draft = s.scalars(select(Draft).where(Draft.round_id == rid)).one()
         st = statement_of(s, draft.id)
-        assert st is not None and st.text.startswith("一、原告之訴及假執行之聲請均駁回。")
+        assert st is not None and st.text.startswith("一、原告之訴駁回。")
 
 
 def test_statement_not_numbered(db):
@@ -212,7 +231,7 @@ def test_export_answer_layout(db):
     lines, _ = _export_lines(ctx, cs)
     assert lines[0] == "民事答辯狀" and "為損害賠償事件，依法提出答辯事：" in lines
     i = lines.index("答辯聲明")
-    assert lines[i + 1] == "一、原告之訴及假執行之聲請均駁回。" and lines[i + 4] == "答辯理由" and lines[i + 5] == "㈠關於路權"
+    assert lines[i + 1] == "一、原告之訴駁回。" and lines[i + 4] == "答辯理由" and lines[i + 5] == "㈠關於路權"
     assert not any(line.startswith("訴訟標的") for line in lines)
 
 

@@ -82,6 +82,13 @@ def test_money_line_not_auto_for_two_plaintiffs():
     assert "新臺幣○○元" in text and "{{amount}}" not in text
 
 
+def test_answer_statement_without_provisional_request():
+    """對造沒有聲請假執行時，第一項不寫「及假執行之聲請」（走查：原告根本沒聲請卻寫了）；免為假執行那項保留
+    （簡易程序被告敗訴時法院會依職權宣告假執行）。"""
+    assert answer_statement("traffic_tort", provisional_requested=False).split(chr(10)) == [
+        "一、原告之訴駁回。", "二、訴訟費用由原告負擔。", "三、如受不利判決，被告願供擔保請准宣告免為假執行。"]
+
+
 def test_answer_statement_by_case_type():
     assert answer_statement("traffic_tort").split("\n") == [
         "一、原告之訴及假執行之聲請均駁回。", "二、訴訟費用由原告負擔。", "三、如受不利判決，被告願供擔保請准宣告免為假執行。"]

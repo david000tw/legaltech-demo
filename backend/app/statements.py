@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.case_types import answer_statement, auto_money_statement, complaint_statement
+from app.text_norm import normalize_text
 from app.models import Case, CaseParty, Claim, Draft, Paragraph, Round
 
 AMOUNT_MARKER = "{{amount}}"
@@ -40,10 +41,22 @@ def auto_money(s: Session, rnd: Round) -> bool:
     return auto_money_statement(_parties(s, rnd.case_id), rnd.joint_liability)
 
 
+def opponent_requested_provisional(s: Session, rnd: Round) -> bool:
+    """本輪對造書狀有沒有聲請假執行（規則判斷：文字裡有「假執行」）。沒有對造書狀、或有頁面還沒有文字時
+    無法判斷，當成有（沿用原本的範本，律師仍會在聲明區塊看到並可修改）。"""
+    from app.ingest.service import document_page_texts
+    from app.sources import opponent_docs
+    texts = [pt.text if pt is not None else None
+             for _, doc in opponent_docs(s, rnd.case_id, rnd.id) for _, pt in document_page_texts(s, doc.id)]
+    if not texts or any(t is None for t in texts):
+        return True
+    return any("假執行" in normalize_text(t) for t in texts)
+
+
 def statement_template(s: Session, rnd: Round) -> str | None:
     case = s.get(Case, rnd.case_id)
     if rnd.brief_kind == "answer":
-        return answer_statement(case.case_type)
+        return answer_statement(case.case_type, opponent_requested_provisional(s, rnd))
     if rnd.brief_kind != "complaint":
         return None
     items = confirmed_requests(s, rnd.id)

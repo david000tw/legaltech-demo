@@ -170,10 +170,13 @@ def complaint_statement(case_type: str, *, has_money: bool, has_non_money: bool,
     return _numbered(lines)
 
 
-def answer_statement(case_type: str) -> str:
-    """答辯聲明範本（設計 5.3，待律師審定）：對造沒有聲請假執行的案型，不寫假執行那兩句。"""
+def answer_statement(case_type: str, provisional_requested: bool = True) -> str:
+    """答辯聲明範本（設計 5.3，待律師審定）：對造沒有聲請假執行的案型，不寫假執行那兩句。
+    金錢案型裡對造沒聲請假執行時，第一項只寫「原告之訴駁回」；免為假執行那項保留（簡易程序被告敗訴時，
+    法院依民事訴訟法第389條第1項第3款職權宣告假執行）。"""
     if case_type in MONEY_CASE_TYPES:
-        return _numbered(["原告之訴及假執行之聲請均駁回。", "訴訟費用由原告負擔。", "如受不利判決，被告願供擔保請准宣告免為假執行。"])
+        first = "原告之訴及假執行之聲請均駁回。" if provisional_requested else "原告之訴駁回。"
+        return _numbered([first, "訴訟費用由原告負擔。", "如受不利判決，被告願供擔保請准宣告免為假執行。"])
     return _numbered(["原告之訴駁回。", "訴訟費用由原告負擔。"])
 
 
