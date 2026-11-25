@@ -16,7 +16,7 @@ from app.ai.prompts import load_prompt
 from app.ai.provider import AIProvider
 from app.ai.schemas import TIMELINE_SCHEMA
 from app.amounts import parse_amounts
-from app.dates import PartialDate, parse_dates, parse_iso, parse_month_days, roc_label
+from app.dates import PartialDate, dates_with_context, parse_dates, parse_iso, parse_month_days, roc_label
 from app.db import tenant_session
 from app.models import AIJob, Case, Document, Page, PageText, TimelineEvent
 from app.pipeline.case_context import case_context
@@ -167,6 +167,41 @@ def timeline_outdated(s: Session, case_id: UUID) -> bool:
                 .join(Document, Document.id == Page.document_id)
                 .where(Document.case_id == case_id, PageText.created_at > job.started_at))
     return s.scalar(select(new_doc.exists() | new_text.exists())) is True
+
+
+UNCOVERED_SOURCES_PER_DATE = 3
+UNCOVERED_SNIPPET_RADIUS = 20
+
+
+def uncovered_dates(s: Session, case_id: UUID) -> dict:
+    """卷證與對造書狀的目前文字裡出現、但大事記沒有事件涵蓋的完整日期（純規則，不用 AI；只給律師參考，不自動建立事件）。
+    涵蓋：有「日」的事件涵蓋同一天；只到月的事件涵蓋整個月；隱藏（dismissed）的 AI 事件不算。沒有文字的頁略過。"""
+    events = s.scalars(select(TimelineEvent).where(TimelineEvent.case_id == case_id,
+                                                   TimelineEvent.origin != "dismissed",
+                                                   TimelineEvent.event_date.is_not(None))).all()
+    days = {e.event_date for e in events if e.date_precision == "day"}
+    months = {(e.event_date.year, e.event_date.month) for e in events if e.date_precision == "month"}
+    found: dict[PartialDate, list[dict]] = {}
+    for page in source_pages(s, case_id).values():  # 與產生大事記讀的是同一批頁
+        if page.text is None or not page.text.strip():
+            continue
+        seen_on_page: set[PartialDate] = set()
+        for pd, snippet in dates_with_context(page.text, UNCOVERED_SNIPPET_RADIUS):
+            if pd.day is None or pd in seen_on_page:
+                continue
+            try:
+                d = date(pd.year, pd.month, pd.day)
+            except ValueError:  # 2月30日這類不存在的日期
+                continue
+            seen_on_page.add(pd)
+            if d in days or (pd.year, pd.month) in months:
+                continue
+            found.setdefault(pd, []).append({"label": page.code, "page_no": page.page_no, "snippet": snippet,
+                                             "page_id": str(page.page_id)})
+    dates = [{"date": date(pd.year, pd.month, pd.day).isoformat(), "date_label": roc_label(pd),
+              "source_count": len(srcs), "sources": srcs[:UNCOVERED_SOURCES_PER_DATE]}
+             for pd, srcs in sorted(found.items())]
+    return {"total": len(dates), "dates": dates}
 
 
 def timeline_view(s: Session, case_id: UUID) -> list[dict]:

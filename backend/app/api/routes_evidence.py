@@ -13,7 +13,9 @@ from app.db import tenant_session
 from app.models import Case, Document, EvidenceNote, Page, TimelineEvent
 from app.pipeline.evidence_notes import note_json, notes_view
 from app.pipeline.jobs import BUSY, JobBusy, JobRule, job_json, latest_job, run_job, start_job
-from app.pipeline.timeline import event_json, lawyer_event, set_date, timeline_outdated, timeline_view
+from app.pipeline.timeline import (
+    event_json, lawyer_event, set_date, timeline_outdated, timeline_view, uncovered_dates,
+)
 from app.sources import MAX_AMOUNT, pending_ocr, source_pages
 
 router = APIRouter(prefix="/api")
@@ -101,6 +103,14 @@ def get_timeline(case_id: UUID, m: CurrentMember = Depends(current_member)) -> d
         return {"events": timeline_view(s, case_id), "pending_ocr": pending_ocr(source_pages(s, case_id).values()),
                 "outdated": timeline_outdated(s, case_id),  # 整理之後卷證有變：前端提示建議重新整理
                 "job": job_json(latest_job(s, case_id, None, "timeline"))}
+
+
+@router.get("/cases/{case_id}/timeline/uncovered-dates")
+def get_uncovered_dates(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    """律師按「檢查漏列日期」才算（不放進 3 秒輪詢的 GET）：卷證裡有、大事記沒有的完整日期，純規則比對。"""
+    with tenant_session(m.firm_id) as s:
+        _case_or_404(s, case_id)
+        return uncovered_dates(s, case_id)
 
 
 _Description = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]

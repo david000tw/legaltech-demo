@@ -371,3 +371,94 @@ def test_timeline_outdated_flag_follows_sources(lawyer_client, db):
         page = s.scalars(select(Page).order_by(Page.id)).first()
         s.add(PageText(firm_id=firm, page_id=page.id, version=2, source="manual", text="校正後的文字內容"))
     assert outdated() is True
+
+
+# ---- C14：卷證裡有、大事記沒列的日期（純規則，不用 AI） ----
+def _uncovered(client, case_id):
+    r = client.get(f"/api/cases/{case_id}/timeline/uncovered-dates")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _by_date(body):
+    return {d["date"]: d for d in body["dates"]}
+
+
+def test_uncovered_dates_lists_dates_without_events(lawyer_client, db):
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm, opponent_pages=BRIEF, evidence=EVIDENCE)
+    body = _uncovered(client, case_id)
+    assert body["total"] == 2
+    assert [d["date"] for d in body["dates"]] == ["2025-03-09", "2025-03-12"]  # 由早到晚
+    d9 = body["dates"][0]
+    assert d9["date_label"] == "民國114年3月9日"
+    assert [(s["label"], s["page_no"]) for s in d9["sources"]] == [("原證1", 1), ("對造書狀A", 1)]
+    assert "114年3月9日" in d9["sources"][0]["snippet"] and "支付醫療費用" in d9["sources"][0]["snippet"]
+    assert len(d9["sources"][0]["snippet"]) <= 60
+    assert [(s["label"], s["page_no"]) for s in body["dates"][1]["sources"]] == [("原證2", 1)]
+
+
+def test_uncovered_dates_event_on_same_day_covers_it(lawyer_client, db):
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm, opponent_pages=BRIEF, evidence=EVIDENCE)
+    r = client.post(f"/api/cases/{case_id}/timeline/events", json={"date": "114年3月9日", "description": "原告支付醫療費"})
+    assert r.status_code == 200, r.text
+    body = _uncovered(client, case_id)
+    assert body["total"] == 1 and [d["date"] for d in body["dates"]] == ["2025-03-12"]
+
+
+def test_uncovered_dates_month_only_event_covers_the_whole_month(lawyer_client, db):
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm, opponent_pages=BRIEF, evidence=EVIDENCE)
+    other_month = "原證3 別的月份\n民國114年4月2日 回診。"
+    with tenant_session(firm) as s:
+        ingest_document(s, firm, case_id, "evidence", "03_診斷.txt", other_month.encode())
+    assert _uncovered(client, case_id)["total"] == 3
+    r = client.post(f"/api/cases/{case_id}/timeline/events", json={"date": "2025-03", "description": "三月間就醫"})
+    assert r.status_code == 200, r.text
+    assert [d["date"] for d in _uncovered(client, case_id)["dates"]] == ["2025-04-02"]  # 3/9、3/12 都被三月涵蓋
+
+
+def test_uncovered_dates_hidden_ai_event_does_not_cover(lawyer_client, db):
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm, opponent_pages=BRIEF, evidence=EVIDENCE)
+    client.app.state.provider_factory = lambda settings, f: FakeProvider({"timeline": {"events": [PAID]}})
+    assert client.post(f"/api/cases/{case_id}/timeline").status_code == 202
+    assert [d["date"] for d in _uncovered(client, case_id)["dates"]] == ["2025-03-12"]  # AI 事件涵蓋 3/9
+    event = client.get(f"/api/cases/{case_id}/timeline").json()["events"][0]
+    assert client.delete(f"/api/timeline-events/{event['id']}").status_code == 200  # 律師刪掉：AI 事件變成隱藏
+    assert [d["date"] for d in _uncovered(client, case_id)["dates"]] == ["2025-03-09", "2025-03-12"]
+
+
+def test_uncovered_dates_skips_pages_without_text(lawyer_client, db):
+    from tests.test_ingest import blank_pdf
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm, opponent_pages=(), evidence={"01_收據.txt": RECEIPT})
+    with tenant_session(firm) as s:  # 掃描檔：還沒有文字，不會被讀、也不會出錯
+        ingest_document(s, firm, case_id, "evidence", "02_掃描.pdf", blank_pdf(2))
+    body = _uncovered(client, case_id)
+    assert body["total"] == 1 and [s["label"] for s in body["dates"][0]["sources"]] == ["原證1"]
+
+
+def test_uncovered_dates_caps_sources_ignores_partial_and_invalid_dates(lawyer_client, db):
+    client, firm, _ = lawyer_client
+    pages = tuple(f"第{i}份 民國114年5月6日 到庭。另民國114年7月只寫到月、民國114年2月30日不存在。" for i in range(1, 6))
+    case_id, _ = make_round(firm, opponent_pages=pages, evidence={})
+    body = _uncovered(client, case_id)
+    assert body["total"] == 1  # 只算完整且存在的日期
+    d = body["dates"][0]
+    assert d["date"] == "2025-05-06" and len(d["sources"]) == 3 and d["source_count"] == 5
+
+
+def test_uncovered_dates_needs_login_and_own_case(lawyer_client, db):
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    from tests.helpers import create_member, login
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm, opponent_pages=BRIEF, evidence=EVIDENCE)
+    assert TestClient(create_app(db)).get(f"/api/cases/{case_id}/timeline/uncovered-dates").status_code == 401
+    other = create_firm("乙事務所")
+    create_member(other, "other@b.test")
+    c2 = TestClient(create_app(db))
+    assert login(c2, "other@b.test").status_code == 200
+    assert c2.get(f"/api/cases/{case_id}/timeline/uncovered-dates").status_code == 404

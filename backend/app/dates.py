@@ -78,10 +78,9 @@ def _make(y: int | None, m: int | None, d: int | None) -> PartialDate | None:
     return PartialDate(y, m, d)
 
 
-def parse_dates(text: str) -> list[PartialDate]:
-    """依出現順序列出文字裡的日期（去重）。"""
-    norm = unicodedata.normalize("NFKC", text or "")
-    hits: list[tuple[int, PartialDate]] = []
+def _hits(norm: str) -> list[tuple[int, int, PartialDate]]:
+    """已正規化文字裡每一個日期出現的地方：(起, 迄, 日期)，依出現位置排序。"""
+    hits: list[tuple[int, int, PartialDate]] = []
     for m in _CJK_DATE.finditer(norm):
         raw = _cn_int(m.group("y"))
         day = _cn_int(m.group("d")) if m.group("d") else None
@@ -90,12 +89,23 @@ def parse_dates(text: str) -> list[PartialDate]:
         month = 1 if m.group("m") == "元" else _cn_int(m.group("m"))  # 元月＝一月
         pd = _make(_year(raw, m.group("era")) if raw is not None else None, month, day)
         if pd is not None:
-            hits.append((m.start(), pd))
+            hits.append((m.start(), m.end(), pd))
     for m in _SEP_DATE.finditer(norm):
         pd = _make(_year(int(m.group("y")), None), int(m.group("m")), int(m.group("d")))
         if pd is not None:
-            hits.append((m.start(), pd))
-    return list(dict.fromkeys(pd for _, pd in sorted(hits, key=lambda h: h[0])))
+            hits.append((m.start(), m.end(), pd))
+    return sorted(hits, key=lambda h: h[0])
+
+
+def parse_dates(text: str) -> list[PartialDate]:
+    """依出現順序列出文字裡的日期（去重）。"""
+    return list(dict.fromkeys(pd for _, _, pd in _hits(unicodedata.normalize("NFKC", text or ""))))
+
+
+def dates_with_context(text: str, radius: int = 20) -> list[tuple[PartialDate, str]]:
+    """每個日期出現的地方都列一筆（不去重）：(日期, 前後各約 radius 字的片段，換行與連續空白收成一個空白)。"""
+    norm = unicodedata.normalize("NFKC", text or "")
+    return [(pd, " ".join(norm[max(0, start - radius):end + radius].split())) for start, end, pd in _hits(norm)]
 
 
 def date_in_text(d: PartialDate, text: str) -> bool:

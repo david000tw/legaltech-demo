@@ -106,6 +106,8 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
   const [pending, setPending] = useState<string[]>([])
   const [job, setJob] = useState<api.JobView | null>(null)
   const [outdated, setOutdated] = useState(false)
+  const [uncovered, setUncovered] = useState<{ total: number; dates: api.UncoveredDate[] } | null>(null)
+  const [checking, setChecking] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [date, setDate] = useState('')
   const [description, setDescription] = useState('')
@@ -137,6 +139,20 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
     await load()
   }
 
+  // 純規則比對卷證日期與大事記，只提示漏列、不自動建立事件（律師用下方「新增事件」自己補）
+  async function checkUncovered() {
+    setMessage(null)
+    setChecking(true)
+    setUncovered(null)
+    try {
+      setUncovered(await api.getUncoveredDates(caseId))
+    } catch (e) {
+      setMessage((e as Error).message)
+    } finally {
+      setChecking(false)
+    }
+  }
+
   async function add(e: FormEvent) {
     e.preventDefault()
     setMessage(null)
@@ -160,6 +176,11 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
             整理大事記
           </button>
         )}
+        {!compact && (
+          <button type="button" onClick={checkUncovered} disabled={checking} className={BTN_SECONDARY}>
+            {checking ? '檢查中…' : '檢查漏列日期'}
+          </button>
+        )}
         <h2 className="text-lg font-semibold text-slate-800">大事記</h2>
         {running && <span className="text-sm text-amber-700">{busyText('timeline')}</span>}
       </div>
@@ -169,6 +190,29 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
         <p className="rounded bg-yellow-50 p-2 text-sm text-yellow-800">卷證或對造書狀已有變更，建議重新整理大事記</p>
       )}
       {pending.map((p) => <p key={p} className="text-xs text-amber-700">{p}待辨識，未處理</p>)}
+      {uncovered && (uncovered.total === 0 ? (
+        <p className="text-sm text-emerald-700">卷證裡的日期都已列入大事記</p>
+      ) : (
+        <div className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+          <p className="font-medium">{`卷證中有 ${uncovered.total} 個日期沒有列入大事記`}</p>
+          <p className="text-xs text-amber-800">需要的話，請用下方「新增事件」自行補上</p>
+          <ul className="mt-1 space-y-1">
+            {uncovered.dates.map((d) => (
+              <li key={d.date}>
+                <span className="font-medium">{d.date_label}</span>
+                {d.source_count > d.sources.length && (
+                  <span className="ml-1 text-xs text-amber-800">{`（共 ${d.source_count} 處）`}</span>
+                )}
+                <ul className="ml-4 list-disc text-xs text-slate-700">
+                  {d.sources.map((src, i) => (
+                    <li key={i}>{`${src.label} 第${src.page_no}頁：「${src.snippet}」`}</li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-slate-600">

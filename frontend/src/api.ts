@@ -340,6 +340,11 @@ export const generateTimeline = (caseId: string) => req<{ job: JobView }>(`/case
 export const getTimeline = (caseId: string) =>
   req<{ events: TimelineEventView[]; pending_ocr: string[]; outdated?: boolean; job: JobView | null }>(
     `/cases/${caseId}/timeline`)  // outdated＝整理之後卷證有新增或變更
+// 卷證裡有、大事記沒列的完整日期（純規則，按鈕才查）；date_label＝民國年；sources 最多 3 筆，source_count＝全部處數
+export type UncoveredDate = { date: string; date_label: string; source_count: number
+  sources: { label: string; page_no: number; snippet: string; page_id: string }[] }
+export const getUncoveredDates = (caseId: string) =>
+  req<{ total: number; dates: UncoveredDate[] }>(`/cases/${caseId}/timeline/uncovered-dates`)
 export const addTimelineEvent = (caseId: string, body: TimelineEventInput) =>
   req<TimelineEventView>(`/cases/${caseId}/timeline/events`, json('POST', body))
 export const patchTimelineEvent = (id: string, body: TimelineEventInput) =>
