@@ -77,11 +77,31 @@ export function errorMessage(e: unknown): string {
   return err.message
 }
 
-export default function ExportButton({ blockers, onExport }: {
+// 阻擋清單依位置排序：整份書狀 → 聲明 → 各段（依段落編號）
+function placeOrder(b: Blocker): number {
+  if (b.scope === 'draft') return -2
+  if (b.scope === 'statement') return -1
+  return b.paragraph_no ?? b.paragraph_seq
+}
+
+// 收合時的一行摘要：「還有 3 項要處理：整份書狀、第 2、5 段」
+function blockerSummary(blockers: Blocker[]): string {
+  const parts: string[] = []
+  if (blockers.some((b) => b.scope === 'draft')) parts.push('整份書狀')
+  if (blockers.some((b) => b.scope === 'statement')) parts.push('聲明')
+  const nos = [...new Set(blockers.filter((b) => b.scope !== 'draft' && b.scope !== 'statement')
+    .map((b) => b.paragraph_no ?? b.paragraph_seq))].sort((a, b) => a - b)
+  if (nos.length) parts.push(`第 ${nos.join('、')} 段`)
+  return `還有 ${blockers.length} 項要處理：${parts.join('、')}`
+}
+
+export default function ExportButton({ blockers, onExport, onJump }: {
   blockers: Blocker[]; onExport: () => void | Promise<void>
+  onJump?: (b: Blocker) => void  // 點清單的一項：捲到那一段
 }) {
   const blocked = blockers.length > 0
   const [busy, setBusy] = useState(false)  // 匯出中不能再按：同時兩個匯出會搶同一份草稿的驗證寫入
+  const [open, setOpen] = useState(false)  // 預設收合：草稿頁第一屏不要整片紅字
   async function run() {
     setBusy(true)
     try {
@@ -90,6 +110,7 @@ export default function ExportButton({ blockers, onExport }: {
       setBusy(false)
     }
   }
+  const sorted = [...blockers].sort((a, b) => placeOrder(a) - placeOrder(b))
   return (
     <div className="space-y-2">
       <button type="button" onClick={run} disabled={blocked || busy}
@@ -97,9 +118,25 @@ export default function ExportButton({ blockers, onExport }: {
         {busy ? '匯出中…' : '匯出 Word'}
       </button>
       {blocked && (
-        <ul className="space-y-0.5 text-sm text-red-700">
-          {blockers.map((b, i) => <li key={i}>{blockerPlace(b)}：{reasonLabel(b.reason)}</li>)}
-        </ul>
+        <div className="space-y-1 text-sm">
+          <p className="flex flex-wrap items-center gap-2 text-red-700">
+            <span>{blockerSummary(blockers)}</span>
+            <button type="button" onClick={() => setOpen(!open)} className="rounded border px-2 py-0.5 text-xs text-slate-700">
+              {open ? '收合' : '展開'}
+            </button>
+          </p>
+          {open && (
+            <ul className="space-y-0.5 text-red-700">
+              {sorted.map((b, i) => (
+                <li key={i}>
+                  <button type="button" onClick={() => onJump?.(b)} className="text-left hover:underline">
+                    {`${blockerPlace(b)}：${reasonLabel(b.reason)}`}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </div>
   )

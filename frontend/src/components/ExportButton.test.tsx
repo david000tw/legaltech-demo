@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import { reasonLabel } from './ExportButton'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
+import ExportButton, { reasonLabel } from './ExportButton'
 
 describe('ExportButton reason labels', () => {
   it('labels the new blocker reasons including the amount page', () => {
@@ -31,5 +33,29 @@ describe('ExportButton reason labels', () => {
     expect(reasonLabel('citation_quote_conflict:J1')).toBe('同一引用的引文不一致：J1 在同一段出現了兩段不同的引文，系統只保留第一段，請改寫或拆開')
     expect(reasonLabel('quote_conflict')).toBe('同一代碼出現了不同的引文')
     expect(reasonLabel('reviewed_text_changed')).toBe('審核後顯示內容有變更（例如系統調整引用格式），已退回未審，請重新檢視後標記已審')
+  })
+})
+
+describe('ExportButton blocker list', () => {
+  const blockers = [
+    { paragraph_seq: 2, paragraph_no: 2, reason: 'unreviewed', scope: 'paragraph' as const },
+    { paragraph_seq: 5, paragraph_no: 5, reason: 'unreviewed', scope: 'paragraph' as const },
+    { paragraph_seq: 0, paragraph_no: 0, reason: 'empty_draft', scope: 'draft' as const },
+  ]
+
+  it('starts collapsed with a one-line summary', () => {
+    render(<ExportButton blockers={blockers} onExport={() => {}} />)
+    expect(screen.getByText('還有 3 項要處理：整份書狀、第 2、5 段')).toBeInTheDocument()
+    expect(screen.queryByText(/段落尚未審核/)).not.toBeInTheDocument()
+  })
+
+  it('expands grouped by place with draft-level items first, and jumps on click', async () => {
+    const onJump = vi.fn()
+    render(<ExportButton blockers={blockers} onExport={() => {}} onJump={onJump} />)
+    await userEvent.click(screen.getByRole('button', { name: '展開' }))
+    const items = screen.getAllByRole('button', { name: /：/ })
+    expect(items.map((b) => b.textContent)).toEqual(['整份書狀：草稿沒有任何段落', '第 2 段：段落尚未審核', '第 5 段：段落尚未審核'])
+    await userEvent.click(items[1])
+    expect(onJump).toHaveBeenCalledWith(blockers[0])
   })
 })

@@ -36,10 +36,11 @@ describe('CitationTag', () => {
 })
 
 describe('ExportButton', () => {
-  it('is disabled and explains every blocker in Chinese', () => {
+  it('is disabled and explains every blocker in Chinese', async () => {
     render(<ExportButton blockers={[{ paragraph_seq: 1, reason: 'judgment_unconfirmed:J1' },
       { paragraph_seq: 2, reason: 'unbound_reference:999年度台上字第1號' }]} onExport={() => {}} />)
     expect(screen.getByRole('button', { name: '匯出 Word' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: '展開' }))  // 阻擋清單預設收合
     expect(screen.getByText(/J1：打開原文後，按該段「已審」一併確認/)).toBeInTheDocument()
     expect(screen.getByText(/999年度台上字第1號/)).toBeInTheDocument()
   })

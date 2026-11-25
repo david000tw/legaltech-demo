@@ -81,7 +81,9 @@ describe('DraftEditor', () => {
       verified: { by_name: '王律師', at: null }, alerts: [], has_image: true, can_edit: true, can_verify: false,
       can_save_verify: true, blank_unconfirmed: false })
     renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: '展開' }))  // 阻擋清單預設收合
     expect(await screen.findByText('第 1 段：E2 的頁尚未對照原圖')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '收合' }))  // 清單項目也是按鈕：收合後再點引用標籤
     await userEvent.click(screen.getByRole('button', { name: /E2/ }))
     const pane = await screen.findByTestId('source-pane')
     expect(within(pane).getByRole('img', { name: '原證2 第1頁（掃描.pdf） 原圖' })).toHaveAttribute('src', '/api/pages/p2/image')
@@ -182,8 +184,21 @@ describe('DraftEditor', () => {
     expect(screen.getByText('支持度有新的結果，請看過後再按「已審」')).toBeInTheDocument()
   })
 
+  it('clicking a blocker scrolls to its paragraph and highlights it', async () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: '展開' }))
+    await userEvent.click(screen.getByRole('button', { name: '第 1 段：段落尚未審核' }))
+    expect(scroll).toHaveBeenCalled()
+    const target = scroll.mock.contexts[0] as HTMLElement
+    expect(target.id).toBe('paragraph-1')
+    expect(target.className).toMatch(/ring-amber/)
+  })
+
   it('export button lists blockers', async () => {
     renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: '展開' }))  // 阻擋清單預設收合
     expect(await screen.findByText(/J1：打開原文後，按該段「已審」一併確認/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '匯出 Word' })).toBeDisabled()
   })
@@ -389,6 +404,7 @@ describe('DraftEditor procedure', () => {
     expect(order[0]).toBe(block)
     await userEvent.click(within(block).getByRole('button', { name: '標記已審' }))
     expect(api.reviewParagraph).toHaveBeenCalledWith('st1', 'sv1')
+    await userEvent.click(await screen.findByRole('button', { name: '展開' }))  // 阻擋清單預設收合
     expect(screen.getByText('整份書狀：請填寫訴訟標的金額或價額')).toBeInTheDocument()
     expect(screen.getByText('聲明：段落尚未審核')).toBeInTheDocument()
   })

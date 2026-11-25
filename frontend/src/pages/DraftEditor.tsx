@@ -62,7 +62,7 @@ function ParagraphCard({ p, draftId, canReview, onShowSource, onChanged, onError
   const remove = () => act(() => api.patchParagraph(p.id, '', [], ''))
 
   return (
-    <article className="space-y-2 rounded-lg border border-slate-200 bg-white p-4">
+    <article id={`paragraph-${p.seq}`} className="space-y-2 rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-slate-900">
           {p.display_heading}
@@ -186,6 +186,16 @@ export default function DraftEditor({ pollMs = POLL_MS }: { pollMs?: number } = 
     .some((p) => p.citations.some((c) => c.support?.status === 'pending'))
   useJobPolling(checking, load, pollMs)
 
+  // 阻擋清單點一項：捲到那一段並短暫標亮（整份書狀層級的項目沒有對應段落）
+  function jumpTo(b: api.Blocker) {
+    const id = b.scope === 'statement' ? 'paragraph-statement' : b.scope === 'draft' ? null : `paragraph-${b.paragraph_seq}`
+    const el = id ? document.getElementById(id) : null
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('ring-2', 'ring-amber-400')
+    window.setTimeout(() => el.classList.remove('ring-2', 'ring-amber-400'), 2000)
+  }
+
   async function showSource(c: api.CitationView) {
     try {
       setSource(await api.getCitationSource(c.id))
@@ -265,7 +275,7 @@ export default function DraftEditor({ pollMs = POLL_MS }: { pollMs?: number } = 
             <p className="rounded bg-yellow-50 p-2 text-sm text-yellow-800">{draft.procedure_warning}</p>
           )}
           {checking && <p className="rounded bg-slate-100 p-2 text-sm text-slate-700">支持度檢查中</p>}
-          <ExportButton blockers={draft.blockers} onExport={doExport} />
+          <ExportButton blockers={draft.blockers} onExport={doExport} onJump={jumpTo} />
           <FilingPackageButton draftId={draftId} blockers={draft.blockers} canReview={draft.can_review} />
         </div>
       </div>

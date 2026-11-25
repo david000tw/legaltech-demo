@@ -82,7 +82,7 @@ export default function StatementBlock({ draft, onChanged, onError }: {
 
   const estate = draft.case_type === 'estate_partition'
   return (
-    <section data-testid="statement-block" className="space-y-2 rounded-lg border border-indigo-200 bg-white p-4">
+    <section id="paragraph-statement" data-testid="statement-block" className="space-y-2 rounded-lg border border-indigo-200 bg-white p-4">
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-slate-900">
           {draft.statement_label}
