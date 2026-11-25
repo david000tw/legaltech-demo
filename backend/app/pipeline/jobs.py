@@ -144,14 +144,18 @@ class JobContext:
              model: str | None = None, timeout_s: int = 600) -> AIResult:
         with tenant_session(self.firm_id) as s:  # 已被接手就不再花錢呼叫
             self._running(s)
-        result = call_ai(self.provider, firm_id=self.firm_id, case_id=self.case_id, member_id=self.member_id,
-                         step=step, system=system, user=user, schema=schema, effort=effort, timeout_s=timeout_s,
-                         images=images, model=model)  # 用量在獨立交易記錄
-        with tenant_session(self.firm_id) as s:
-            job = s.get(AIJob, self.job_id)
-            if job is not None and job.status == "running":
-                job.heartbeat_at = _now()
-        return result
+        try:
+            return call_ai(self.provider, firm_id=self.firm_id, case_id=self.case_id, member_id=self.member_id,
+                           step=step, system=system, user=user, schema=schema, effort=effort, timeout_s=timeout_s,
+                           images=images, model=model)  # 用量在獨立交易記錄
+        finally:  # 成功或失敗都更新心跳：連續逾時（例如 5 × 120 秒）的工作還活著，不能被誤判成逾時
+            try:
+                with tenant_session(self.firm_id) as s:
+                    job = s.get(AIJob, self.job_id)
+                    if job is not None and job.status == "running":
+                        job.heartbeat_at = _now()
+            except Exception:  # 心跳寫不進去不能蓋掉 AI 呼叫本身的結果或錯誤
+                log.exception("AI job %s heartbeat update failed", self.job_id)
 
     def beat(self) -> None:
         """只更新心跳（例如等校對員時）；工作已被接手或已結束就丟 _Superseded。"""
