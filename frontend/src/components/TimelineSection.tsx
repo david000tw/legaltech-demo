@@ -5,6 +5,8 @@ import { BTN_SECONDARY, BTN_SMALL } from '../ui'
 import SourceBadge from './SourceBadge'
 
 const money = (n: number | null) => (n == null ? '' : `新臺幣${n.toLocaleString('en-US')}元`)
+// 後端接受西元與民國寫法（114年3月9日、114/3/9），一次填一個日期
+export const DATE_HINT = '2025-03-09 或 114年3月9日'
 export const AMOUNT_HINT = '金額請填數字，例如 45000 或 45,000元'
 // 律師常照書狀寫「新臺幣45,000元」：去掉幣別、元、逗號與空白後要是整數；讀不懂就擋下，不默默變成沒有金額
 const toAmount = (s: string): number | null => {
@@ -44,8 +46,8 @@ function EventRow({ ev, onChanged, onError, onShowSource, compact }: {
     <tr className="align-top">
       <td className="whitespace-nowrap px-2 py-1">
         {editing ? (
-          <input aria-label="事件日期" value={date} onChange={(e) => setDate(e.target.value)} placeholder="2025-03-09"
-            className="w-28 rounded border border-slate-300 px-1 py-0.5" />
+          <input aria-label="事件日期" value={date} onChange={(e) => setDate(e.target.value)} placeholder={DATE_HINT}
+            className="w-48 rounded border border-slate-300 px-1 py-0.5" />
         ) : (ev.date_label ?? '（無日期）')}
       </td>
       <td className="px-2 py-1">
@@ -180,8 +182,8 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
       {!compact && (
         <form onSubmit={add} className="flex flex-wrap items-end gap-2 text-sm">
           <label className="text-slate-700">日期
-            <input aria-label="新增事件日期" value={date} onChange={(e) => setDate(e.target.value)} placeholder="2025-03-09"
-              className="ml-1 w-28 rounded border border-slate-300 px-1 py-0.5" />
+            <input aria-label="新增事件日期" value={date} onChange={(e) => setDate(e.target.value)} placeholder={DATE_HINT}
+              className="ml-1 w-48 rounded border border-slate-300 px-1 py-0.5" />
           </label>
           <label className="flex-1 text-slate-700">事件
             <input aria-label="新增事件內容" value={description} onChange={(e) => setDescription(e.target.value)}

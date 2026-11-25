@@ -1,5 +1,6 @@
 """卷證說明（設計 5.6）與大事記（設計 5.7）的 API；AI 工作的開始方式也給健檢共用。
 律師與助理都可以產生、修改（設計 5.1）。"""
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
@@ -7,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, StringConstraints
 
 from app.auth import CurrentMember, current_member
-from app.dates import PartialDate, parse_iso
+from app.dates import PartialDate, parse_dates, parse_iso
 from app.db import tenant_session
 from app.models import Case, Document, EvidenceNote, Page, TimelineEvent
 from app.pipeline.evidence_notes import note_json, notes_view
@@ -104,13 +105,29 @@ def get_timeline(case_id: UUID, m: CurrentMember = Depends(current_member)) -> d
 _Description = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
 
 
+_DATE_HINT = "日期請填一個存在的日期，例如 2025-03-09、民國114年3月9日、114年3月9日、114/3/9（只填到月也可以）"
+
+
 def _date_or_422(value: str | None) -> PartialDate | None:
+    """西元 ISO 先照舊；其他寫法（民國、斜線、點）交給 dates.parse_dates，只接受剛好一個、且存在的日期。"""
     if value is None or not value.strip():
         return None
     pd = parse_iso(value)
     if pd is None:
-        raise HTTPException(422, "日期格式要是 YYYY-MM-DD 或 YYYY-MM（西元），且要是存在的日期")
+        found = parse_dates(value)
+        if len(found) == 1 and _exists(found[0]):
+            pd = found[0]
+    if pd is None:
+        raise HTTPException(422, _DATE_HINT)
     return pd
+
+
+def _exists(pd: PartialDate) -> bool:
+    try:
+        date(pd.year, pd.month, pd.day or 1)
+    except ValueError:  # 2月30日這類不存在的日期
+        return False
+    return True
 
 
 class EventBody(BaseModel):

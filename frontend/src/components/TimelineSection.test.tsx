@@ -48,6 +48,16 @@ describe('TimelineSection', () => {
     expect(api.addTimelineEvent).toHaveBeenCalledTimes(1)
   })
 
+  it('hints that ROC dates work in both date inputs', async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], job: null })
+    render(<TimelineSection caseId="c1" />)
+    const add = await screen.findByLabelText('新增事件日期')
+    expect(add).toHaveAttribute('placeholder', expect.stringContaining('114年3月9日'))
+    await userEvent.click(within(screen.getByText('原告支付醫療費用').closest('tr') as HTMLElement)
+      .getByRole('button', { name: '修改' }))
+    expect(screen.getByLabelText('事件日期')).toHaveAttribute('placeholder', expect.stringContaining('114年3月9日'))
+  })
+
   it('adds, edits and deletes events', async () => {
     vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], job: null })
     vi.mocked(api.addTimelineEvent).mockResolvedValue(ev({ id: 'e3', origin: 'lawyer' }))
