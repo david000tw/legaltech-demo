@@ -797,3 +797,46 @@ describe('CaseDetail tabs', () => {
     expect(await screen.findByText('AI 處理中，約需 1 分鐘')).toBeInTheDocument()
   })
 })
+
+describe('CaseDetail round automation (設計 6.2、6.4)', () => {
+  const claim: api.ClaimView = { id: 'cl1', seq: 1, summary: '原告與有過失', quote: '原告未減速', page_id: null,
+    quote_verified: true, selected: true } as api.ClaimView
+  const extracted = (automation?: api.AutomationView): api.RoundDetail => ({ id: 'r1', seq: 1, status: 'extracted',
+    error: null, stale: false, brief_kind: 'answer', failed_stage: null, draft_id: null, claims: [claim],
+    strategy: null, automation })
+  const rounds: api.RoundSummary[] = [{ id: 'r1', seq: 1, status: 'extracted', error: null, brief_kind: 'answer' }]
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.getCaseOptions).mockResolvedValue(OPTIONS)
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, our_side: 'defendant', rounds })
+  })
+
+  it('pause stop shows the strategy box and 開始起草', async () => {
+    vi.mocked(api.getRound).mockResolvedValue(extracted({ mode: 'pause', auto_next: null, running: null, wait: null,
+      failed_stage: null }))
+    vi.mocked(api.patchRound).mockResolvedValue({})
+    renderAt(undefined, '?tab=briefs')
+    const box = await screen.findByRole('textbox', { name: '答辯策略（選填）' })
+    await userEvent.type(box, '主打原告與有過失')
+    await userEvent.tab()
+    expect(api.patchRound).toHaveBeenCalledWith('r1', { strategy: '主打原告與有過失' })
+    expect(screen.getByRole('button', { name: '開始起草' })).toBeInTheDocument()
+  })
+
+  it('shows why automation is waiting', async () => {
+    vi.mocked(api.getRound).mockResolvedValue(extracted({ mode: 'auto', auto_next: 'draft', running: null,
+      wait: { code: 'evidence_notes_running', message: '等卷證說明完成', document_id: null, page_id: null, hint: null },
+      failed_stage: null }))
+    renderAt(undefined, '?tab=briefs')
+    expect(await screen.findByText('等待中：等卷證說明完成')).toBeInTheDocument()
+  })
+
+  it('manual mode keeps the old screen', async () => {
+    vi.mocked(api.getRound).mockResolvedValue(extracted({ mode: 'manual', auto_next: null, running: null, wait: null,
+      failed_stage: null }))
+    renderAt(undefined, '?tab=briefs')
+    expect(await screen.findByRole('button', { name: '起草' })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '答辯策略（選填）' })).not.toBeInTheDocument()
+  })
+})

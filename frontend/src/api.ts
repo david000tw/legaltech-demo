@@ -132,9 +132,16 @@ export type RoundDetail = { id: string; seq: number; status: RoundStatus; error:
   claim_value?: number | null; statement_variant?: 'alive' | 'deceased' | null; total_amount?: number
   statement_preview?: string | null; pending_ocr_pages?: string[]
   health_job?: JobView | null  // 書狀健檢的 AI 工作（設計 5.8）
-  extract_blocked?: string | null }  // 對造書狀還沒辨識完等：「拆解」停用並顯示這段話
+  extract_blocked?: string | null  // 對造書狀還沒辨識完等：「拆解」停用並顯示這段話
+  strategy?: string | null  // 答辯策略（設計 6.4）
+  automation?: AutomationView }  // 自動跑到哪、在等什麼（設計 6.2）
+export type AutomationWait = { code: 'opponent_ocr' | 'evidence_ocr' | 'evidence_notes_running' | 'new_brief' | 'blocked'
+  message: string; document_id: string | null; page_id: string | null
+  hint: 'confirm_ocr' | 'resume_ocr' | 'retry_failed' | null }
+export type AutomationView = { mode: AutomationMode; auto_next: 'extract' | 'draft' | null
+  running: 'extract' | 'draft' | null; wait: AutomationWait | null; failed_stage: string | null }
 export type RoundSettings = { narrative?: string | null; joint_liability?: boolean; provisional_execution?: boolean
-  claim_value?: number | null; statement_variant?: 'alive' | 'deceased' | null }
+  claim_value?: number | null; statement_variant?: 'alive' | 'deceased' | null; strategy?: string | null }
 export type CitationView = { id: string; code: string; kind: 'evidence' | 'judgment' | 'statute'; quote: string;
   label: string | null; verify_status: 'ok' | 'warn' | 'failed'; verify_reasons: string[]; lawyer_confirmed: boolean
   opened?: boolean  // 判決引用：目前登入的律師在本草稿打開過被引用的那一段（設計 5.1）

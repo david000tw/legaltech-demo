@@ -12,6 +12,7 @@ import HealthTab from '../components/HealthTab'
 import JudgmentSearchTab from '../components/JudgmentSearchTab'
 import OcrStatus from '../components/OcrStatus'
 import OpponentUploadBox from '../components/OpponentUploadBox'
+import RoundAutomationStatus from '../components/RoundAutomationStatus'
 import PageCheckPanel from '../components/PageCheckPanel'
 import PartiesEditor from '../components/PartiesEditor'
 import RequestItemsEditor from '../components/RequestItemsEditor'
@@ -62,11 +63,15 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
   useEffect(() => { void refresh() }, [refresh])
 
   const status = detail?.status ?? round.status
+  const auto = detail?.automation
+  const automatic = !!auto && auto.mode !== 'manual'
+  // 自動流程排定中（等證據、等卷證說明）也定時重新載入：伺服器接著跑時畫面跟著更新（設計 6.2）
+  const armed = automatic && !!auto?.auto_next
   useEffect(() => {
-    if (status !== 'extracting' && status !== 'drafting') return
+    if (status !== 'extracting' && status !== 'drafting' && !armed) return
     const t = setInterval(() => { void refresh() }, POLL_MS)
     return () => clearInterval(t)
-  }, [status, refresh])
+  }, [status, armed, refresh])
 
   useEffect(() => { if (status === 'drafted' || status === 'failed') onChanged() }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -201,6 +206,10 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
         </h3>
         <span className="text-sm text-slate-600">{STATUS_LABEL[status]}{stale ? '（逾時，可重新開始）' : ''}</span>
       </div>
+      {detail?.automation && (
+        <RoundAutomationStatus roundId={round.id} automation={detail.automation} onAction={act}
+          onOpenPage={setCheckPage} />
+      )}
       {stale && (status === 'extracting' || status === 'drafting') && (
         <button type="button" onClick={status === 'extracting' ? extract : draft} disabled={busy}
           className="mt-2 rounded border border-amber-400 px-3 py-1 text-sm text-amber-800 disabled:opacity-50">
@@ -301,7 +310,7 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button type="button" onClick={draft} disabled={busy || !!draftBlockedReason}
             className={BTN_SECONDARY}>
-            {status === 'failed' ? '重新起草' : '起草'}
+            {status === 'failed' ? '重新起草' : automatic ? '開始起草' : '起草'}
           </button>
           <button type="button" onClick={reset} disabled={busy}
             className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-50">
@@ -310,6 +319,18 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
           {draftBlockedReason && <span className="text-xs text-amber-700">{draftBlockedReason}</span>}
           {unticked > 0 && <span className="text-xs text-amber-700">未勾選的 {unticked} 條主張不會被回應</span>}
         </div>
+      )}
+      {status === 'extracted' && automatic && detail && (
+        <label className="mt-2 block text-xs text-slate-600">
+          答辯策略（選填）
+          <textarea aria-label="答辯策略（選填）" rows={2} maxLength={2000} placeholder="例如：主打原告與有過失"
+            defaultValue={detail.strategy ?? ''} key={`strategy-${detail.strategy ?? ''}`}
+            onBlur={(e) => {
+              const v = e.target.value.trim()
+              if (v !== (detail.strategy ?? '')) void act(() => api.patchRound(round.id, { strategy: v || null }))
+            }}
+            className="mt-1 w-full rounded border border-slate-300 p-2 text-sm" />
+        </label>
       )}
       {status === 'extracted' && complaint && detail && (
         <RequestItemsEditor round={detail} onChanged={refresh} onError={setMessage} onOpenPage={setCheckPage} />

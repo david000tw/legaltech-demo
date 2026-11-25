@@ -339,3 +339,19 @@ def test_two_files_one_batch_one_extraction(env):
     assert _steps(env).count("claims") == 1
     claims_user = next(c["user"] for c in env["fake"].calls if c["step"] == "claims")
     assert "慰撫金" in claims_user and "未減速慢行" in claims_user
+
+
+def test_ignore_new_briefs_drafts_without_reextract(env):
+    _mode(env, "pause")
+    _evidence(env)
+    _brief(env)
+    rid = _only_round(env).id
+    with tenant_session(env["firm"]) as s:  # 律師取消勾選後又上傳：自動流程先問
+        for c in s.scalars(select(Claim).where(Claim.round_id == rid)):
+            c.selected = c.seq == 1
+        s.add(Claim(firm_id=env["firm"], round_id=rid, seq=2, summary="慰撫金過高", quote="", selected=False))
+    _upload(env, "opponent_brief", "補充書狀.txt", "被告另主張原告超速行駛。")
+    assert env["c"]["lawyer"].get(f"/api/rounds/{rid}").json()["automation"]["wait"]["code"] == "new_brief"
+    r = env["c"]["lawyer"].post(f"/api/rounds/{rid}/draft", json={"ignore_new_briefs": True})
+    assert r.status_code == 202
+    assert _only_round(env).status == "drafted" and _steps(env).count("claims") == 1
