@@ -48,9 +48,10 @@ def render_text(s: Session, p: Paragraph) -> str:
         if kind == "quote":
             return f"「{c.quote}」" if c.quote.strip() else f"【引用錯誤：{code}】"
         label = citation_label(s, c)
-        if label and "所提" in label:  # AI 寫了「原告所提{{cite:E7}}」：不要變成「原告所提原告所提…」
+        if label and "所提" in label:  # AI 寫了「原告所提／原告提出之{{cite:E7}}」：不要變成「原告提出之原告所提…」
             head = label[:label.index("所提") + 2]
-            if text[:m.start()].endswith(head):
+            who = head[:-2]
+            if text[:m.start()].endswith((head, f"{who}提出之", f"{who}所提出之", f"{who}提出")):
                 label = label[len(head):]
         return label or f"【引用錯誤：{code}】"
 

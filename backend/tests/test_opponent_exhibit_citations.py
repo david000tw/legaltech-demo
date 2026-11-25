@@ -72,6 +72,15 @@ def test_render_does_not_double_the_prefix(ctx):
     assert "原告所提原證1第1頁僅記載金額" in text and "原告所提原告所提" not in text
 
 
+@pytest.mark.parametrize("lead", ["原告提出之", "原告所提出之", "原告提出"])
+def test_render_does_not_double_other_wordings(ctx, lead):
+    """真實 AI 驗收發現：AI 寫「原告提出之{{cite:E9}}」會變成「原告提出之原告所提原證1第1頁」。"""
+    _cite(ctx, ctx["brief"], 3)
+    pid = make_paragraph(ctx, f"{lead}{{{{cite:E9}}}}僅記載金額。", [("E9", QUOTE)])
+    text, _ = _render(ctx, pid)
+    assert f"{lead}原證1第1頁僅記載金額" in text
+
+
 def test_label_follows_filer(ctx):
     with tenant_session(ctx["firm"]) as s:
         party = CaseParty(firm_id=ctx["firm"], case_id=ctx["case_id"], seq=9, name="林大明", role="上訴人",
