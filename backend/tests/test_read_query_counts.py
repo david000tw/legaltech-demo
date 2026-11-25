@@ -4,6 +4,7 @@ from sqlalchemy import event, select
 from app import db as dbmod
 from app.db import tenant_session
 from app.models import Document, Page, PageText
+from app.ingest.service import current_page_text, document_page_texts, document_text_ids
 from app.pipeline.evidence_notes import documents_needing_notes, notes_view
 from app.pipeline.health import report_view
 from tests.helpers import create_firm
@@ -70,3 +71,24 @@ def test_health_report_view_statement_count_does_not_grow_with_pages(db):
     _add_pages(firm, ctx["exhibit_doc"], 3, 18)  # 2 頁 → 20 頁
     large = _count_statements(read)
     assert large == small, f"查詢次數隨頁數增加：2 頁 {small} 次、20 頁 {large} 次"
+
+
+def test_batched_page_texts_equal_per_page_current_text(db):
+    """一次查完的結果要與每頁各呼叫 current_page_text 完全一樣：多版本取最大版、沒有文字的頁是 None、依頁碼排序。"""
+    firm = create_firm("甲事務所")
+    case_id, _ = make_round(firm, evidence={"01_收據.txt": "第1頁第2頁第3頁"})
+    doc_id = _evidence_doc_id(firm, case_id)
+    with tenant_session(firm) as s:
+        pages = list(s.scalars(select(Page).where(Page.document_id == doc_id).order_by(Page.page_no)))
+        s.add(PageText(firm_id=firm, page_id=pages[0].id, version=2, source="manual", text="第1頁（改）"))
+        s.add(PageText(firm_id=firm, page_id=pages[0].id, version=3, source="manual", text="第1頁（再改）"))
+        for pt in s.scalars(select(PageText).where(PageText.page_id == pages[2].id)):
+            s.delete(pt)  # 第 3 頁沒有任何文字版本（待辨識）
+    with tenant_session(firm) as s:
+        expected = [(p.id, current_page_text(s, p.id)) for p in s.scalars(
+            select(Page).where(Page.document_id == doc_id).order_by(Page.page_no))]
+        got = document_page_texts(s, doc_id)
+        ids = document_text_ids(s, doc_id)
+    assert [(p.id, pt.id if pt else None) for p, pt in got] == [(pid, pt.id if pt else None) for pid, pt in expected]
+    assert ids == [(pid, pt.id if pt else None) for pid, pt in expected]
+    assert got[0][1].version == 3 and got[2][1] is None
