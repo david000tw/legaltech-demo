@@ -24,7 +24,7 @@ from app.pipeline.requests import evidence_pages, extract_requests
 
 log = logging.getLogger(__name__)
 AI_CALL_TIMEOUT_S = 600  # 單次 AI 呼叫的逾時（與 call_ai 的預設一致）
-AI_CALL_ATTEMPTS = 2  # 輸出不合法或拒答時重試一次（見 ClaudeCodeLocalProvider.run）
+AI_CALL_ATTEMPTS = 2  # 輸出不合法或拒答時重試一次（見 ClaudeCodeLocalProvider.run；Bedrock 供應來源尚是空殼，計畫 5 接上時要重新核對）
 ROUND_MAX_AI_STEPS = 3  # 一段最多的 AI 步驟數（拆解 1 步、起草 2 步，再留一步的餘裕）
 # 最壞情況 3 步 × 2 次 × 600 秒 = 60 分鐘；門檻須大於它再加餘裕，否則還在跑的輪次會被判逾時而重跑、重複花額度
 STALE_AFTER = timedelta(seconds=ROUND_MAX_AI_STEPS * AI_CALL_ATTEMPTS * AI_CALL_TIMEOUT_S) + timedelta(minutes=15)
