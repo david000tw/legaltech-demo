@@ -286,3 +286,11 @@ def test_confirm_waits_for_ocr_correction_window(api):
         assert t.is_alive(), "確認沒有等案件列的鎖（會讀到修正前的文字而成功）"
     t.join(30)
     assert result["r"].status_code == 409 and result["r"].json()["detail"]["code"] == "image_unverified"
+
+
+def test_round_has_no_statement_preview_for_an_answer(api):
+    """聲明預覽只給起訴狀的請求項目區塊用；答辯狀輪次每 3 秒輪詢時不必讀全部對造書狀判斷假執行。"""
+    client, _, firm, rid, _ = api
+    with tenant_session(firm) as s:
+        s.get(Round, rid).brief_kind = "answer"
+    assert client.get(f"/api/rounds/{rid}").json()["statement_preview"] is None

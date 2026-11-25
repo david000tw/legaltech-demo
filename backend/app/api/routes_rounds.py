@@ -246,6 +246,9 @@ def claim_json(s, c: Claim) -> dict:
 
 
 def _statement_preview(s, rnd: Round) -> str | None:
+    # 只有起訴狀的請求項目區塊會顯示；答辯狀的範本要讀全部對造書狀判斷假執行，輪詢時不必算
+    if rnd.brief_kind != "complaint":
+        return None
     text = rnd.statement_text or statement_template(s, rnd)
     if text is None:
         return None

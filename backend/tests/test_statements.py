@@ -76,6 +76,8 @@ def test_statement_created_for_answer(db):
 @pytest.mark.parametrize("brief,first", [
     ("訴之聲明：被告應給付原告新臺幣150,000元。訴訟費用由被告負擔。", "一、原告之訴駁回。"),
     ("訴之聲明：被告應給付原告新臺幣150,000元。原告願供擔保，請准宣告假執行。", "一、原告之訴及假執行之聲請均駁回。"),
+    # 共同被告的答辯狀裡的「免為假執行」「假執行之聲請均駁回」不是原告聲請假執行
+    ("答辯聲明：原告之訴及假執行之聲請均駁回。如受不利判決，被告願供擔保請准宣告免為假執行。", "一、原告之訴駁回。"),
 ])
 def test_answer_statement_follows_the_opponents_provisional_request(db, brief, first):
     """答辯聲明依對造書狀有沒有聲請假執行（規則判斷，不用 AI）。"""
@@ -88,6 +90,19 @@ def test_answer_statement_follows_the_opponents_provisional_request(db, brief, f
     with tenant_session(ctx["firm"]) as s:
         create_statement(s, s.get(Draft, ctx["draft_id"]))
     assert _statement(ctx)[1].split(chr(10))[0] == first
+
+
+def test_answer_statement_sees_a_provisional_request_in_an_earlier_brief(db):
+    """起訴狀在別的輪次（或沒有輪次）聲請了假執行，這一輪的書狀沒重複寫：仍要寫「及假執行之聲請」。"""
+    from app.ingest.service import ingest_document
+    ctx = setup_verify_round()
+    with tenant_session(ctx["firm"]) as s:
+        s.get(Round, ctx["round_id"]).brief_kind = "answer"
+        ingest_document(s, ctx["firm"], ctx["case_id"], "opponent_brief", "起訴狀.txt",
+                        "訴之聲明：被告應給付原告新臺幣150,000元。原告願供擔保，請准宣告假執行。".encode("utf-8"))
+    with tenant_session(ctx["firm"]) as s:
+        create_statement(s, s.get(Draft, ctx["draft_id"]))
+    assert _statement(ctx)[1].split(chr(10))[0] == "一、原告之訴及假執行之聲請均駁回。"
 
 
 def test_no_statement_for_preparatory(db):

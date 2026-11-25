@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from uuid import UUID
 
 from sqlalchemy import select
@@ -41,16 +43,21 @@ def auto_money(s: Session, rnd: Round) -> bool:
     return auto_money_statement(_parties(s, rnd.case_id), rnd.joint_liability)
 
 
+# 共同被告答辯狀裡的寫法，不是原告聲請假執行
+_NOT_A_REQUEST = re.compile(r"免為假執行|假執行之聲請均?駁回")
+
+
 def opponent_requested_provisional(s: Session, rnd: Round) -> bool:
-    """本輪對造書狀有沒有聲請假執行（規則判斷：文字裡有「假執行」）。沒有對造書狀、或有頁面還沒有文字時
-    無法判斷，當成有（沿用原本的範本，律師仍會在聲明區塊看到並可修改）。"""
+    """本案對造書狀（各輪都看：起訴狀可能在前一輪）有沒有聲請假執行（規則判斷：文字裡有「假執行」，
+    扣掉「免為假執行」「假執行之聲請均駁回」）。沒有對造書狀、或有頁面還沒有文字時無法判斷，當成有
+    （沿用原本的範本，律師仍會在聲明區塊看到並可修改）。"""
     from app.ingest.service import document_page_texts
     from app.sources import opponent_docs
     texts = [pt.text if pt is not None else None
-             for _, doc in opponent_docs(s, rnd.case_id, rnd.id) for _, pt in document_page_texts(s, doc.id)]
+             for _, doc in opponent_docs(s, rnd.case_id) for _, pt in document_page_texts(s, doc.id)]
     if not texts or any(t is None for t in texts):
         return True
-    return any("假執行" in normalize_text(t) for t in texts)
+    return any("假執行" in _NOT_A_REQUEST.sub("", normalize_text(t)) for t in texts)
 
 
 def statement_template(s: Session, rnd: Round) -> str | None:
