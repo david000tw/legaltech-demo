@@ -4,7 +4,7 @@ import * as api from '../api'
 import AppShell from '../components/AppShell'
 import CitationTag from '../components/CitationTag'
 import EvidenceNotesSection from '../components/EvidenceNotesSection'
-import ExportButton, { reasonLabel } from '../components/ExportButton'
+import ExportButton, { errorMessage, reasonLabel } from '../components/ExportButton'
 import FilingPackageButton from '../components/FilingPackageButton'
 import PinnedPanel from '../components/PinnedPanel'
 import SourcePane from '../components/SourcePane'
@@ -40,7 +40,7 @@ function ParagraphCard({ p, draftId, canReview, onShowSource, onChanged, onError
       await f()
       await onChanged()
     } catch (e) {
-      onError((e as Error).message)
+      onError(errorMessage(e))
       await onChanged()  // 例如內容已被別人改過：重新載入，讓律師看到最新版本
     } finally {
       setBusy(false)

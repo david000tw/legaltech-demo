@@ -201,7 +201,7 @@ def test_review_after_source_page_changed_rechecks(db):
         e1 = fp.support_inputs(s, s.get(Paragraph, pid))["E1"].fingerprint
         s.execute(SupportCheck.__table__.delete().where(SupportCheck.fingerprint == e1))
     r = c["lawyer"].post(f"/api/paragraphs/{pid}/review", json={"version": v})
-    assert r.status_code == 409 and "support_pending:E1" in r.json()["detail"]
+    assert r.status_code == 409 and "support_pending:E1" in r.json()["detail"]["reasons"]
     _all_done(ctx, pid)
 
 

@@ -104,6 +104,18 @@ def test_cannot_review_with_unconfirmed_judgment(env):
     assert r.status_code == 409 and "judgment_unconfirmed:J1" in r.text
 
 
+def test_review_refusal_returns_structured_reasons(env):
+    """C9：標記已審被擋時，回結構化的原因代碼讓前端翻成中文；訊息本身不再串接原始代碼。"""
+    bad = make_paragraph(env, "{{cite:E1}}可稽。", [("E1", "未讓幹道車先行")], seq=2)
+    c = env["client_for"]("lawyer@a.test")
+    r = post_review(env, c, bad)
+    assert r.status_code == 409
+    d = r.json()["detail"]
+    assert d["code"] == "review_blocked" and "citation_failed:E1" in d["reasons"]
+    assert "unreviewed" not in d["reasons"]
+    assert d["message"] == "尚有未解決的問題，無法標記已審" and "citation_failed" not in d["message"]
+
+
 def test_only_ok_judgment_citations_can_be_confirmed(env):
     c = env["client_for"]("lawyer@a.test")
     assert c.post(f"/api/citations/{cite_id(env, env['good'], 'E1')}/confirm").status_code == 409

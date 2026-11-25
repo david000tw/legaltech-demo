@@ -1,4 +1,4 @@
-import type { Blocker } from '../api'
+import { ApiError, type Blocker } from '../api'
 import { BTN_PRIMARY } from '../ui'
 
 // 驗證與審核原因代碼的中文說明（對應後端 app/verify/citations.py 與審核規則）。
@@ -63,6 +63,13 @@ export function reasonLabel(reason: string): string {
   const arg = i < 0 ? '' : reason.slice(i + 1)
   const f = REASON_LABELS[code]
   return f ? f(arg) : `其他問題（${reason}）`
+}
+
+// 操作失敗的畫面文字：被問題擋下（帶原因代碼）時把代碼翻成中文，其餘照後端訊息
+export function errorMessage(e: unknown): string {
+  const err = e as Error
+  if (e instanceof ApiError && e.reasons?.length) return `${err.message}：${e.reasons.map(reasonLabel).join('；')}`
+  return err.message
 }
 
 export default function ExportButton({ blockers, onExport }: { blockers: Blocker[]; onExport: () => void }) {

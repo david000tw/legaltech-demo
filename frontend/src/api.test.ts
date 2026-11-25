@@ -88,6 +88,15 @@ describe('api', () => {
     expect(JSON.parse(init.body as string)).toEqual({ version: 'v1' })
   })
 
+  it('keeps the reason codes of a refused review on the ApiError', async () => {
+    respond(409, { detail: { code: 'review_blocked', message: '尚有未解決的問題，無法標記已審',
+      reasons: ['image_unverified:原證1'] } })
+    const err = await reviewParagraph('p1', 'v1').catch((e) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect([err.status, err.code, err.message, err.reasons]).toEqual([409, 'review_blocked',
+      '尚有未解決的問題，無法標記已審', ['image_unverified:原證1']])
+  })
+
   it('sends the heading with a paragraph edit', async () => {
     const f = respond(200, {})
     await patchParagraph('p1', '內文', [], '㈠標題')

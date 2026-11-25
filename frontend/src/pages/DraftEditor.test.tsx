@@ -161,6 +161,18 @@ describe('DraftEditor', () => {
     await waitFor(() => expect(screen.queryByText('段落內容已變更，請重新載入後再審核')).not.toBeInTheDocument())
   })
 
+  it('shows Chinese labels when marking reviewed is refused with reason codes', async () => {
+    vi.mocked(api.reviewParagraph).mockRejectedValue(new api.ApiError(409, '尚有未解決的問題，無法標記已審',
+      'review_blocked', ['image_unverified:原證1', 'amount_unverified:45000', 'something_new:x']))
+    renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: '標記已審' }))
+    const msg = await screen.findByText(/尚有未解決的問題，無法標記已審/)
+    expect(msg).toHaveTextContent('原證1 的頁尚未對照原圖')
+    expect(msg).toHaveTextContent('金額未對到請求項目或卷證：45,000元')
+    expect(msg).toHaveTextContent('其他問題（something_new:x）')
+    expect(msg.textContent).not.toMatch(/image_unverified|amount_unverified/)
+  })
+
   it('shows the AI error when a rewrite fails', async () => {
     vi.mocked(api.rewriteParagraph).mockRejectedValue(new api.ApiError(503, 'usage_limit: 已達用量上限'))
     renderEditor()

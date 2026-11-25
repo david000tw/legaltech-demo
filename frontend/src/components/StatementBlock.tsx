@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import * as api from '../api'
 import { BTN_SECONDARY } from '../ui'
-import { reasonLabel } from './ExportButton'
+import { errorMessage, reasonLabel } from './ExportButton'
 
 function amountOf(reason: string): number | null {
   return reason.startsWith('amount_unverified:') ? Number(reason.slice('amount_unverified:'.length)) : null
@@ -73,7 +73,7 @@ export default function StatementBlock({ draft, onChanged, onError }: {
     try {
       await f()
     } catch (e) {
-      onError((e as Error).message)
+      onError(errorMessage(e))
     } finally {
       setBusy(false)
     }

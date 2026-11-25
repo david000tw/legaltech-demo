@@ -20,7 +20,7 @@ from app.models import (
 from app.numbering import display_heading, strip_heading_number
 from app.render import citation_label, paragraph_version, render_text
 from app.review.service import (
-    CitationInput, ReviewRuleError, confirm_amount, confirm_citation, confirm_court_reasoning, edit_paragraph, mark_reviewed,
+    CitationInput, ReviewBlocked, ReviewRuleError, confirm_amount, confirm_citation, confirm_court_reasoning, edit_paragraph, mark_reviewed,
     renumber_exhibit,
 )
 from app.review.insert import InsertRejected, insert_pin
@@ -249,7 +249,9 @@ def review(paragraph_id: UUID, request: Request, background: BackgroundTasks, bo
             p = mark_reviewed(s, paragraph_id, m, body.version)
         except ReviewRuleError as e:
             # 用 return 而不是 raise：raise 會丟掉剛排入的背景檢查；回應內容與 HTTPException 相同
-            return JSONResponse(status_code=409, content={"detail": str(e)})
+            detail = ({"code": "review_blocked", "message": str(e), "reasons": e.reasons}
+                      if isinstance(e, ReviewBlocked) else str(e))  # 被問題擋下：附原因代碼，前端翻成中文
+            return JSONResponse(status_code=409, content={"detail": detail})
         return paragraph_json(s, p)
 
 

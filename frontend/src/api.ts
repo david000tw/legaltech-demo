@@ -3,10 +3,12 @@
 export class ApiError extends Error {
   status: number
   code?: string  // 後端以 {code, message} 回報的規則錯誤，例如 confirm_reset
-  constructor(status: number, message: string, code?: string) {
+  reasons?: string[]  // 被擋下的原因代碼（review_blocked）；畫面用 reasonLabel 翻成中文
+  constructor(status: number, message: string, code?: string, reasons?: string[]) {
     super(message)
     this.status = status
     this.code = code
+    this.reasons = reasons
   }
 }
 
@@ -161,14 +163,17 @@ export type CitationSource = { kind: string; title: string; text: string; span: 
   alerts?: OcrAlert[] }  // 這一頁目前版本的提醒（卡片勾「已對照原圖」會解除整頁，要看得到）
 export type CitationInput = { code: string; quote: string }
 
-async function detail(r: Response): Promise<{ message: string; code?: string }> {
+async function detail(r: Response): Promise<{ message: string; code?: string; reasons?: string[] }> {
   try {
     const body = await r.json()
     if (typeof body.detail === 'string') return { message: body.detail }
     if (Array.isArray(body.detail)) {  // 欄位驗證錯誤：只留說明文字
       return { message: `輸入資料有誤：${body.detail.map((e: { msg?: string }) => e.msg ?? '').filter(Boolean).join('；')}` }
     }
-    if (body.detail && typeof body.detail.message === 'string') return { message: body.detail.message, code: body.detail.code }
+    if (body.detail && typeof body.detail.message === 'string') {
+      return { message: body.detail.message, code: body.detail.code,
+        reasons: Array.isArray(body.detail.reasons) ? body.detail.reasons : undefined }
+    }
     return { message: JSON.stringify(body.detail ?? body) }
   } catch {
     return { message: r.statusText }
@@ -177,7 +182,7 @@ async function detail(r: Response): Promise<{ message: string; code?: string }> 
 
 async function apiError(r: Response): Promise<ApiError> {
   const d = await detail(r)
-  return new ApiError(r.status, d.message, d.code)
+  return new ApiError(r.status, d.message, d.code, d.reasons)
 }
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
