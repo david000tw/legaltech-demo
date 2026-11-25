@@ -555,3 +555,20 @@ def test_same_code_same_quote_not_flagged(db):
     reasons, cites = para(ctx, pid)
     assert reasons == []
     assert cites["J1"].verify_status == "ok"
+
+
+# ---- 批次 B：「包括(一)…、(二)…」是列舉，不是段落編號參照 ----
+@pytest.mark.parametrize("text", [
+    "被告之過失包括(一)未減速、(二)未注意車前狀況、(三)闖紅燈。",
+    "請求項目包括㈠醫療費用、㈡薪資損失。",
+    "損害包括：(一)醫療費、(二)看護費。",
+])
+def test_enumerated_list_with_dun_and_baokuo_not_flagged(text):
+    from app.verify.citations import scan_numbered_cross_references
+    assert scan_numbered_cross_references(text) == [], text
+
+
+@pytest.mark.parametrize("text", ["如前述(二)所示，被告應負責。", "同(二)所述，被告應負責。", "如前述(二)、(三)所示。"])
+def test_real_cross_references_still_flagged_after_list_fix(text):
+    from app.verify.citations import scan_numbered_cross_references
+    assert scan_numbered_cross_references(text), text
