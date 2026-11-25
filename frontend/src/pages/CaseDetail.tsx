@@ -600,8 +600,10 @@ export default function CaseDetail() {
     const files = Array.from(evidenceRef.current?.files ?? [])
     if (files.length === 0 || uploading) return
     setUploading(true)
+    setError(null)  // 上一次上傳失敗的訊息不要留到這一次
     try {
-      await api.uploadDocuments(caseId, files, 'evidence')  // 多張照片合成一份卷證、一個證物號
+      // 全是照片時合成一份卷證、一個證物號；有 PDF、Word、純文字時逐份上傳，各自一個證物號
+      await api.uploadDocuments(caseId, files, 'evidence')
       await load()
     } catch (e) {
       setError((e as Error).message)

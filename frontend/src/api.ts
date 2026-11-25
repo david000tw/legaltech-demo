@@ -230,13 +230,8 @@ export function uploadDocument(caseId: string, file: File, kind: 'evidence' | 'o
 
 const PHOTO = /\.(jpe?g|png)$/i
 
-export const MULTI_FILE_MESSAGE = '一次選多個檔案時只能都是照片（JPG、PNG）；PDF、Word、純文字請一份一份上傳'
-
-// 上傳一份文件：多張照片合成一份（一個證物號）；只有一個、而且不是照片的檔案走 file
-// 一次選多個檔案只能都是照片（後端一次只收一份文件）：其他情況不送出，直接說明
-export function uploadDocuments(caseId: string, files: File[], kind: 'evidence' | 'opponent_brief', roundId?: string,
+function uploadOne(caseId: string, files: File[], kind: 'evidence' | 'opponent_brief', roundId?: string,
   filedByPartyId?: string) {
-  if (files.length > 1 && files.some((f) => !PHOTO.test(f.name))) return Promise.reject(new Error(MULTI_FILE_MESSAGE))
   const form = new FormData()
   const field = files.length === 1 && !PHOTO.test(files[0].name) ? 'file' : 'files'
   for (const f of files) form.append(field, f)
@@ -244,6 +239,25 @@ export function uploadDocuments(caseId: string, files: File[], kind: 'evidence' 
   if (roundId) form.append('round_id', roundId)
   if (filedByPartyId) form.append('filed_by_party_id', filedByPartyId)
   return req<UploadResult>(`/cases/${caseId}/documents`, { method: 'POST', body: form })
+}
+
+// 上傳：一次選的全是照片時合成一份（一個證物號）；有 PDF、Word、純文字時逐份上傳，每份各自一個證物號
+// （後端一次只收一份文件）。中途失敗就停下，說明是哪一份、前面幾份已上傳
+export async function uploadDocuments(caseId: string, files: File[], kind: 'evidence' | 'opponent_brief',
+  roundId?: string, filedByPartyId?: string): Promise<UploadResult[]> {
+  if (files.length <= 1 || files.every((f) => PHOTO.test(f.name))) {
+    return [await uploadOne(caseId, files, kind, roundId, filedByPartyId)]
+  }
+  const done: UploadResult[] = []
+  for (const f of files) {
+    try {
+      done.push(await uploadOne(caseId, [f], kind, roundId, filedByPartyId))
+    } catch (e) {
+      const before = done.length ? `（前 ${done.length} 份已上傳）` : ''
+      throw new Error(`「${f.name}」上傳失敗：${(e as Error).message}${before}`)
+    }
+  }
+  return done
 }
 
 // 辨識（計畫 2A）：頁數超過上限時回 409 confirm_ocr（ApiError.code），畫面確認後帶 confirm 再送一次

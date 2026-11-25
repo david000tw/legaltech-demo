@@ -92,7 +92,7 @@ describe('CaseDetail', () => {
       undisputed: [], issues: [], issues_label: '本件爭點', pending_ocr: [] }
     vi.mocked(api.getHealthReport).mockImplementation(async () => ({ report: { ...report, outdated: uploaded() },
       job: null }))
-    vi.mocked(api.uploadDocuments).mockResolvedValue({ id: 'd9', page_count: 1 })
+    vi.mocked(api.uploadDocuments).mockResolvedValue([{ id: 'd9', page_count: 1 }])
     renderAt()
     await openTab('書狀健檢')
     expect(await screen.findByRole('button', { name: '重新執行健檢' })).toBeInTheDocument()
@@ -105,11 +105,26 @@ describe('CaseDetail', () => {
     expect(await screen.findByText('資料已變更，建議重新執行')).toBeInTheDocument()
   })
 
+  it('clears an earlier upload error when the next upload starts', async () => {
+    // 走查：一次上傳失敗的紅字，之後單檔上傳成功仍留在頁面上
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
+    vi.mocked(api.uploadDocuments).mockRejectedValueOnce(new Error('「壞檔.pdf」上傳失敗：檔案損毀'))
+      .mockResolvedValue([{ id: 'd9', page_count: 1 }])
+    renderAt()
+    await openTab('卷證與時間軸')
+    const input = screen.getByLabelText('上傳卷證（依上傳順序自動編號）')
+    await userEvent.upload(input, new File(['x'], '壞檔.pdf', { type: 'application/pdf' }))
+    expect(await screen.findByText('「壞檔.pdf」上傳失敗：檔案損毀')).toBeInTheDocument()
+    await userEvent.upload(input, new File(['收據'], '06_收據.txt', { type: 'text/plain' }))
+    await waitFor(() => expect(api.uploadDocuments).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByText('「壞檔.pdf」上傳失敗：檔案損毀')).not.toBeInTheDocument())
+  })
+
   it('disables the evidence upload while a slow upload is processing', async () => {
     // 上傳還在處理時又選一次檔案，會多建一個證物編號
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
-    let finish: (r: api.UploadResult) => void = () => {}
-    vi.mocked(api.uploadDocuments).mockReturnValue(new Promise<api.UploadResult>((resolve) => { finish = resolve }))
+    let finish: (r: api.UploadResult[]) => void = () => {}
+    vi.mocked(api.uploadDocuments).mockReturnValue(new Promise<api.UploadResult[]>((resolve) => { finish = resolve }))
     renderAt()
     await openTab('卷證與時間軸')
     const input = await screen.findByLabelText('上傳卷證（依上傳順序自動編號）')
@@ -118,7 +133,7 @@ describe('CaseDetail', () => {
     expect(busy).toBeDisabled()
     expect(input).toBeDisabled()
     expect(api.uploadDocuments).toHaveBeenCalledTimes(1)
-    finish({ id: 'd9', page_count: 1 })
+    finish([{ id: 'd9', page_count: 1 }])
     expect(await screen.findByRole('button', { name: '上傳卷證' })).toBeEnabled()
     expect(input).toBeEnabled()
   })
@@ -163,7 +178,7 @@ describe('CaseDetail', () => {
 
   it('uploads several photos as one document', async () => {
     vi.mocked(api.getCase).mockResolvedValue(baseCase)
-    vi.mocked(api.uploadDocuments).mockResolvedValue({ id: 'd9', page_count: 2, ocr: null })
+    vi.mocked(api.uploadDocuments).mockResolvedValue([{ id: 'd9', page_count: 2, ocr: null }])
     renderAt()
     await openTab('卷證與時間軸')
     const a = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
@@ -326,7 +341,7 @@ describe('CaseDetail header and parties', () => {
       rounds: [{ id: 'r1', seq: 1, status: 'created', error: null }] })
     vi.mocked(api.getRound).mockResolvedValue({ id: 'r1', seq: 1, status: 'created', stale: false, brief_kind: 'preparatory', failed_stage: null, draft_id: null,
       error: null, claims: [] })
-    vi.mocked(api.uploadDocuments).mockResolvedValue({ id: 'd9', page_count: 1 })
+    vi.mocked(api.uploadDocuments).mockResolvedValue([{ id: 'd9', page_count: 1 }])
     renderAt()
     await openTab('書狀')
     const filer = await screen.findByLabelText('遞狀人')

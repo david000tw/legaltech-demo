@@ -31,16 +31,32 @@ describe('api', () => {
     expect(f).toHaveBeenCalledWith('/api/cases/c1/documents', expect.objectContaining({ method: 'POST' }))
   })
 
-  it('uploadDocuments refuses several non-photo files before sending anything', async () => {
+  it('uploadDocuments sends several non-photo files one by one, each as its own document', async () => {
+    // 走查：一次選好幾份 PDF 被擋下很煩；改成逐份上傳，每份各自一個證物號
     const f = respond(200, { id: 'd1', page_count: 1, ocr: null })
     const pdf1 = new File(['%PDF'], '一.pdf', { type: 'application/pdf' })
     const pdf2 = new File(['%PDF'], '二.pdf', { type: 'application/pdf' })
     const jpg = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
-    for (const files of [[pdf1, pdf2], [jpg, pdf1]]) {
-      await expect(uploadDocuments('c1', files, 'evidence')).rejects.toThrow(
-        '一次選多個檔案時只能都是照片（JPG、PNG）；PDF、Word、純文字請一份一份上傳')
-    }
-    expect(f).not.toHaveBeenCalled()
+    await uploadDocuments('c1', [pdf1, pdf2, jpg], 'evidence')
+    expect(f).toHaveBeenCalledTimes(3)
+    const sent = f.mock.calls.map((c) => {
+      const body = (c as unknown as [string, RequestInit])[1].body as FormData
+      return [...body.getAll('file'), ...body.getAll('files')].map((x) => (x as File).name)
+    })
+    expect(sent).toEqual([['一.pdf'], ['二.pdf'], ['a.jpg']])
+  })
+
+  it('uploadDocuments stops at the first failed file and says which one', async () => {
+    const f = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'd1', page_count: 1, ocr: null }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: '檔案損毀' }), { status: 422 }))
+    vi.stubGlobal('fetch', f)
+    const pdf1 = new File(['%PDF'], '一.pdf', { type: 'application/pdf' })
+    const pdf2 = new File(['%PDF'], '二.pdf', { type: 'application/pdf' })
+    const pdf3 = new File(['%PDF'], '三.pdf', { type: 'application/pdf' })
+    await expect(uploadDocuments('c1', [pdf1, pdf2, pdf3], 'evidence')).rejects.toThrow(
+      '「二.pdf」上傳失敗：檔案損毀（前 1 份已上傳）')
+    expect(f).toHaveBeenCalledTimes(2)
   })
 
   it('startDocumentOcr reports confirm_ocr as an ApiError code', async () => {
