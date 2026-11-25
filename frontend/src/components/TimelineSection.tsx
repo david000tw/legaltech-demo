@@ -5,6 +5,8 @@ import { BTN_SECONDARY, BTN_SMALL } from '../ui'
 import SourceBadge from './SourceBadge'
 
 const money = (n: number | null) => (n == null ? '' : `新臺幣${n.toLocaleString('en-US')}元`)
+// 後端接受西元與民國寫法（114年3月9日、114/3/9），一次填一個日期
+export const DATE_HINT = '2025-03-09 或 114年3月9日'
 export const AMOUNT_HINT = '金額請填數字，例如 45000 或 45,000元'
 // 律師常照書狀寫「新臺幣45,000元」：去掉幣別、元、逗號與空白後要是整數；讀不懂就擋下，不默默變成沒有金額
 const toAmount = (s: string): number | null => {
@@ -44,8 +46,8 @@ function EventRow({ ev, onChanged, onError, onShowSource, compact }: {
     <tr className="align-top">
       <td className="whitespace-nowrap px-2 py-1">
         {editing ? (
-          <input aria-label="事件日期" value={date} onChange={(e) => setDate(e.target.value)} placeholder="2025-03-09"
-            className="w-28 rounded border border-slate-300 px-1 py-0.5" />
+          <input aria-label="事件日期" value={date} onChange={(e) => setDate(e.target.value)} placeholder={DATE_HINT}
+            className="w-48 rounded border border-slate-300 px-1 py-0.5" />
         ) : (ev.date_label ?? '（無日期）')}
       </td>
       <td className="px-2 py-1">
@@ -103,6 +105,9 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
   const [events, setEvents] = useState<api.TimelineEventView[] | null>(null)
   const [pending, setPending] = useState<string[]>([])
   const [job, setJob] = useState<api.JobView | null>(null)
+  const [outdated, setOutdated] = useState(false)
+  const [uncovered, setUncovered] = useState<{ total: number; dates: api.UncoveredDate[] } | null>(null)
+  const [checking, setChecking] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [date, setDate] = useState('')
   const [description, setDescription] = useState('')
@@ -113,6 +118,7 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
       const body = await api.getTimeline(caseId)
       setEvents(body.events)
       setPending(body.pending_ocr)
+      setOutdated(!!body.outdated)
       setJob(body.job)
     } catch (e) {
       setMessage((e as Error).message)
@@ -131,6 +137,20 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
       setMessage((e as Error).message)
     }
     await load()
+  }
+
+  // 純規則比對卷證日期與大事記，只提示漏列、不自動建立事件（律師用下方「新增事件」自己補）
+  async function checkUncovered() {
+    setMessage(null)
+    setChecking(true)
+    setUncovered(null)
+    try {
+      setUncovered(await api.getUncoveredDates(caseId))
+    } catch (e) {
+      setMessage((e as Error).message)
+    } finally {
+      setChecking(false)
+    }
   }
 
   async function add(e: FormEvent) {
@@ -156,12 +176,43 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
             整理大事記
           </button>
         )}
+        {!compact && (
+          <button type="button" onClick={checkUncovered} disabled={checking} className={BTN_SECONDARY}>
+            {checking ? '檢查中…' : '檢查漏列日期'}
+          </button>
+        )}
         <h2 className="text-lg font-semibold text-slate-800">大事記</h2>
         {running && <span className="text-sm text-amber-700">{busyText('timeline')}</span>}
       </div>
       {job?.status === 'failed' && job.error && <p className="text-sm text-red-700">{job.error}</p>}
       {message && <p className="text-sm text-red-700">{message}</p>}
+      {!compact && outdated && !running && (
+        <p className="rounded bg-yellow-50 p-2 text-sm text-yellow-800">卷證或對造書狀已有變更，建議重新整理大事記</p>
+      )}
       {pending.map((p) => <p key={p} className="text-xs text-amber-700">{p}待辨識，未處理</p>)}
+      {uncovered && (uncovered.total === 0 ? (
+        <p className="text-sm text-emerald-700">卷證裡的日期都已列入大事記</p>
+      ) : (
+        <div className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+          <p className="font-medium">{`卷證中有 ${uncovered.total} 個日期沒有列入大事記`}</p>
+          <p className="text-xs text-amber-800">需要的話，請用下方「新增事件」自行補上</p>
+          <ul className="mt-1 space-y-1">
+            {uncovered.dates.map((d) => (
+              <li key={d.date}>
+                <span className="font-medium">{d.date_label}</span>
+                {d.source_count > d.sources.length && (
+                  <span className="ml-1 text-xs text-amber-800">{`（共 ${d.source_count} 處）`}</span>
+                )}
+                <ul className="ml-4 list-disc text-xs text-slate-700">
+                  {d.sources.map((src, i) => (
+                    <li key={i}>{`${src.label} 第${src.page_no}頁：「${src.snippet}」`}</li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-slate-600">
@@ -180,8 +231,8 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
       {!compact && (
         <form onSubmit={add} className="flex flex-wrap items-end gap-2 text-sm">
           <label className="text-slate-700">日期
-            <input aria-label="新增事件日期" value={date} onChange={(e) => setDate(e.target.value)} placeholder="2025-03-09"
-              className="ml-1 w-28 rounded border border-slate-300 px-1 py-0.5" />
+            <input aria-label="新增事件日期" value={date} onChange={(e) => setDate(e.target.value)} placeholder={DATE_HINT}
+              className="ml-1 w-48 rounded border border-slate-300 px-1 py-0.5" />
           </label>
           <label className="flex-1 text-slate-700">事件
             <input aria-label="新增事件內容" value={description} onChange={(e) => setDescription(e.target.value)}

@@ -21,6 +21,14 @@ class ReviewRuleError(Exception):
     pass
 
 
+class ReviewBlocked(ReviewRuleError):
+    """標記已審被未解決的問題擋下：reasons 是原因代碼（前端翻成中文），訊息本身不含代碼。"""
+
+    def __init__(self, reasons: list[str]):
+        super().__init__("尚有未解決的問題，無法標記已審")
+        self.reasons = reasons
+
+
 @dataclass(frozen=True)
 class CitationInput:
     code: str
@@ -105,7 +113,7 @@ def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version
         raise ReviewRuleError("段落內容已變更，請重新載入後再審核")
     blockers = [b for b in paragraph_blockers(s, p) if b != "unreviewed"]
     if blockers:
-        raise ReviewRuleError("尚有未解決的問題：" + "、".join(blockers))
+        raise ReviewBlocked(blockers)
     p.status, p.reviewed_by, p.reviewed_bar_number = "reviewed", member.id, member.bar_number
     p.reviewed_at = datetime.now(timezone.utc)
     p.source_notice = None  # 律師重新審過「依據頁已修正」的段落

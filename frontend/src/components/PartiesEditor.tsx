@@ -29,6 +29,9 @@ export default function PartiesEditor({ value, onChange, options }: {
   return (
     <fieldset className="space-y-2">
       <legend className="text-sm font-medium text-slate-800">當事人</legend>
+      {value.length > 0 && !value.some((p) => p.alignment === 'ours') && (
+        <p className="rounded bg-yellow-50 p-2 text-sm text-yellow-800">尚未指定我方當事人，書狀的具狀人與訴訟代理人會是空白</p>
+      )}
       {value.map((p, i) => {
         const n = `當事人${i + 1}`
         return (

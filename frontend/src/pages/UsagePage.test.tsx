@@ -56,6 +56,17 @@ describe('UsagePage', () => {
     await waitFor(() => expect(api.getUsage).toHaveBeenLastCalledWith({ month: '2026-11', case_id: 'c1' }))
   })
 
+  it('clears an earlier load error after a later load succeeds', async () => {
+    vi.mocked(api.getUsage).mockResolvedValueOnce(SUMMARY).mockRejectedValueOnce(new api.ApiError(500, '用量讀取失敗'))
+      .mockResolvedValue(SUMMARY)
+    renderAs('lawyer')
+    await screen.findByRole('table', { name: '用量' })
+    await userEvent.selectOptions(screen.getByLabelText('月份'), '2026-11')
+    expect(await screen.findByText('用量讀取失敗')).toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByLabelText('月份'), '2026-10')
+    await waitFor(() => expect(screen.queryByText('用量讀取失敗')).not.toBeInTheDocument())
+  })
+
   it('labels OCR usage as 辨識', async () => {
     vi.mocked(api.getUsage).mockResolvedValue({ ...SUMMARY, rows: [row({ step: 'ocr' })],
       filters: { ...SUMMARY.filters, steps: ['ocr'] } })

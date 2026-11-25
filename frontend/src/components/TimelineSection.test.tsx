@@ -7,7 +7,7 @@ import TimelineSection from './TimelineSection'
 vi.mock('../api', async (orig) => {
   const real = await orig<typeof import('../api')>()
   return { ...real, getTimeline: vi.fn(), generateTimeline: vi.fn(), addTimelineEvent: vi.fn(),
-    patchTimelineEvent: vi.fn(), deleteTimelineEvent: vi.fn() }
+    patchTimelineEvent: vi.fn(), deleteTimelineEvent: vi.fn(), getUncoveredDates: vi.fn() }
 })
 
 const ev = (over: Partial<api.TimelineEventView>): api.TimelineEventView => ({
@@ -46,6 +46,77 @@ describe('TimelineSection', () => {
     await userEvent.click(screen.getByRole('button', { name: '新增事件' }))
     expect(await screen.findByText('金額請填數字，例如 45000 或 45,000元')).toBeInTheDocument()
     expect(api.addTimelineEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('hints that ROC dates work in both date inputs', async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], job: null })
+    render(<TimelineSection caseId="c1" />)
+    const add = await screen.findByLabelText('新增事件日期')
+    expect(add).toHaveAttribute('placeholder', expect.stringContaining('114年3月9日'))
+    await userEvent.click(within(screen.getByText('原告支付醫療費用').closest('tr') as HTMLElement)
+      .getByRole('button', { name: '修改' }))
+    expect(screen.getByLabelText('事件日期')).toHaveAttribute('placeholder', expect.stringContaining('114年3月9日'))
+  })
+
+  it('suggests refreshing when the sources changed after the last run', async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], outdated: true, job: null })
+    const { unmount } = render(<TimelineSection caseId="c1" />)
+    expect(await screen.findByText('卷證或對造書狀已有變更，建議重新整理大事記')).toBeInTheDocument()
+    unmount()
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], outdated: false, job: null })
+    render(<TimelineSection caseId="c1" />)
+    await screen.findByText('原告支付醫療費用')
+    expect(screen.queryByText(/建議重新整理大事記/)).toBeNull()
+  })
+
+  it('does not show the refresh hint in the read-only compact view', async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], outdated: true, job: null })
+    render(<TimelineSection caseId="c1" compact />)
+    await screen.findByText('原告支付醫療費用')
+    expect(screen.queryByText(/建議重新整理大事記/)).toBeNull()
+  })
+
+  it('checks for dates in the evidence that the timeline leaves out', async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], job: null })
+    vi.mocked(api.getUncoveredDates).mockResolvedValue({ total: 2, dates: [
+      { date: '2025-03-12', date_label: '民國114年3月12日', source_count: 1, sources: [
+        { label: '原證2', page_no: 1, snippet: '114年3月12日 車輛修復：零件費110,000元', page_id: 'p2' }] },
+      { date: '2025-04-02', date_label: '民國114年4月2日', source_count: 5, sources: [
+        { label: '對造書狀A', page_no: 3, snippet: '被告於114年4月2日到庭', page_id: 'p9' }] },
+    ] })
+    render(<TimelineSection caseId="c1" />)
+    await screen.findByText('原告支付醫療費用')
+    expect(api.getUncoveredDates).not.toHaveBeenCalled()  // 只在按下按鈕時才檢查
+    await userEvent.click(screen.getByRole('button', { name: '檢查漏列日期' }))
+    expect(api.getUncoveredDates).toHaveBeenCalledWith('c1')
+    expect(await screen.findByText('卷證中有 2 個日期沒有列入大事記')).toBeInTheDocument()
+    const first = screen.getByText('民國114年3月12日').closest('li') as HTMLElement
+    expect(first).toHaveTextContent('原證2 第1頁')
+    expect(first).toHaveTextContent('114年3月12日 車輛修復：零件費110,000元')
+    const second = screen.getByText('民國114年4月2日').closest('li') as HTMLElement
+    expect(second).toHaveTextContent('對造書狀A 第3頁')
+    expect(second).toHaveTextContent('共 5 處')
+    expect(api.addTimelineEvent).not.toHaveBeenCalled()  // 只提示，不自動建立事件
+  })
+
+  it('says so when every date is already on the timeline, and reports a failed check', async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], job: null })
+    vi.mocked(api.getUncoveredDates).mockResolvedValueOnce({ total: 0, dates: [] })
+      .mockRejectedValueOnce(new api.ApiError(500, '檢查失敗'))
+    render(<TimelineSection caseId="c1" />)
+    await screen.findByText('原告支付醫療費用')
+    await userEvent.click(screen.getByRole('button', { name: '檢查漏列日期' }))
+    expect(await screen.findByText('卷證裡的日期都已列入大事記')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '檢查漏列日期' }))
+    expect(await screen.findByText('檢查失敗')).toBeInTheDocument()
+    expect(screen.queryByText('卷證裡的日期都已列入大事記')).toBeNull()
+  })
+
+  it('has no uncovered-date check in the read-only compact view', async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], job: null })
+    render(<TimelineSection caseId="c1" compact />)
+    await screen.findByText('原告支付醫療費用')
+    expect(screen.queryByRole('button', { name: '檢查漏列日期' })).toBeNull()
   })
 
   it('adds, edits and deletes events', async () => {

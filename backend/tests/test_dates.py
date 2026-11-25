@@ -2,7 +2,8 @@
 import pytest
 
 from app.dates import (
-    PartialDate, date_in_text, month_day_in_text, parse_dates, parse_iso, parse_month_days, roc_label,
+    PartialDate, date_in_text, dates_with_context, month_day_in_text, parse_dates, parse_iso, parse_month_days,
+    roc_label,
 )
 
 
@@ -61,3 +62,15 @@ def test_parse_iso():
 def test_roc_label():
     assert roc_label(PartialDate(2025, 3, 9)) == "民國114年3月9日"
     assert roc_label(PartialDate(2025, 3, None)) == "民國114年3月"
+
+
+def test_dates_with_context_keeps_every_occurrence_and_a_snippet():
+    """C14：每個日期出現的地方都回一段前後文（約 radius 字）；順序依出現位置，同一日期出現兩次就兩筆。"""
+    text = "收據\n民國114年3月9日 林大明 支付醫療費用新臺幣45,000元。後續於114年3月12日複診，114年3月9日再次回診。"
+    hits = dates_with_context(text, radius=8)
+    assert [h[0] for h in hits] == [PartialDate(2025, 3, 9), PartialDate(2025, 3, 12), PartialDate(2025, 3, 9)]
+    first = hits[0][1]
+    assert "114年3月9日" in first and "林大明" in first and "\n" not in first
+    assert len(first) <= len("114年3月9日") + 8 * 2 + 4  # 日期本身加前後各 radius 字（民國前綴可能多算幾字）
+    assert hits[1][1].count("114年3月12日") == 1
+    assert dates_with_context("沒有日期的文字", radius=8) == []

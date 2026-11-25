@@ -20,6 +20,9 @@ MIN_PDF_PAGE_CHARS = 20
 SUPPORTED = (".pdf", ".docx", ".txt")
 
 
+NO_READABLE_TEXT = "此檔沒有可讀文字，請改上傳 PDF 或圖片"
+
+
 class UnsupportedFile(Exception):
     pass
 
@@ -45,7 +48,7 @@ def _clean(text: str) -> str:
 def extract_pages(data: bytes, filename: str) -> list[PageExtract]:
     ext = file_ext(filename)
     if ext not in SUPPORTED:
-        raise UnsupportedFile(f"不支援的檔案格式：{ext or '（無副檔名）'}，請上傳 {'、'.join(SUPPORTED)}")
+        raise UnsupportedFile(f"不支援的檔案格式：{ext or '（無副檔名）'}，請上傳 {'、'.join(SUPPORTED)}，或 JPG、PNG 照片")
     if not data:
         raise UnreadableFile("檔案是空的")
     try:
@@ -54,7 +57,11 @@ def extract_pages(data: bytes, filename: str) -> list[PageExtract]:
         raise
     except (PyPdfError, zipfile.BadZipFile, KeyError, ValueError, OSError) as e:
         raise UnreadableFile(f"無法讀取檔案（可能已損壞或加密）：{type(e).__name__}") from e
-    return [PageExtract(page_no=i, text=None if t is None else _clean(t)) for i, t in enumerate(texts, start=1)]
+    pages = [PageExtract(page_no=i, text=None if t is None else _clean(t)) for i, t in enumerate(texts, start=1)]
+    if ext != ".pdf" and not any((p.text or "").strip() for p in pages):
+        # Word、純文字沒有原圖可辨識（辨識只處理 PDF 與照片）：整份沒有字就直接說清楚，不建出空白頁
+        raise UnreadableFile(NO_READABLE_TEXT)
+    return pages
 
 
 def _pdf(data: bytes) -> list[str | None]:

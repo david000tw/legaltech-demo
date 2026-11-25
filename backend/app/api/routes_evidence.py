@@ -1,5 +1,6 @@
 """卷證說明（設計 5.6）與大事記（設計 5.7）的 API；AI 工作的開始方式也給健檢共用。
 律師與助理都可以產生、修改（設計 5.1）。"""
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
@@ -7,12 +8,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, StringConstraints
 
 from app.auth import CurrentMember, current_member
-from app.dates import PartialDate, parse_iso
+from app.dates import PartialDate, parse_dates, parse_iso
 from app.db import tenant_session
 from app.models import Case, Document, EvidenceNote, Page, TimelineEvent
 from app.pipeline.evidence_notes import note_json, notes_view
 from app.pipeline.jobs import BUSY, JobBusy, JobRule, job_json, latest_job, run_job, start_job
-from app.pipeline.timeline import event_json, lawyer_event, set_date, timeline_view
+from app.pipeline.timeline import (
+    event_json, lawyer_event, set_date, timeline_outdated, timeline_view, uncovered_dates,
+)
 from app.sources import MAX_AMOUNT, pending_ocr, source_pages
 
 router = APIRouter(prefix="/api")
@@ -98,19 +101,44 @@ def get_timeline(case_id: UUID, m: CurrentMember = Depends(current_member)) -> d
     with tenant_session(m.firm_id) as s:
         _case_or_404(s, case_id)
         return {"events": timeline_view(s, case_id), "pending_ocr": pending_ocr(source_pages(s, case_id).values()),
+                "outdated": timeline_outdated(s, case_id),  # 整理之後卷證有變：前端提示建議重新整理
                 "job": job_json(latest_job(s, case_id, None, "timeline"))}
+
+
+@router.get("/cases/{case_id}/timeline/uncovered-dates")
+def get_uncovered_dates(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    """律師按「檢查漏列日期」才算（不放進 3 秒輪詢的 GET）：卷證裡有、大事記沒有的完整日期，純規則比對。"""
+    with tenant_session(m.firm_id) as s:
+        _case_or_404(s, case_id)
+        return uncovered_dates(s, case_id)
 
 
 _Description = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
 
 
+_DATE_HINT = "日期請填一個存在的日期，例如 2025-03-09、民國114年3月9日、114年3月9日、114/3/9（只填到月也可以）"
+
+
 def _date_or_422(value: str | None) -> PartialDate | None:
+    """西元 ISO 先照舊；其他寫法（民國、斜線、點）交給 dates.parse_dates，只接受剛好一個、且存在的日期。"""
     if value is None or not value.strip():
         return None
     pd = parse_iso(value)
     if pd is None:
-        raise HTTPException(422, "日期格式要是 YYYY-MM-DD 或 YYYY-MM（西元），且要是存在的日期")
+        found = parse_dates(value)
+        if len(found) == 1 and _exists(found[0]):
+            pd = found[0]
+    if pd is None:
+        raise HTTPException(422, _DATE_HINT)
     return pd
+
+
+def _exists(pd: PartialDate) -> bool:
+    try:
+        date(pd.year, pd.month, pd.day or 1)
+    except ValueError:  # 2月30日這類不存在的日期
+        return False
+    return True
 
 
 class EventBody(BaseModel):

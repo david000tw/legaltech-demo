@@ -295,3 +295,41 @@ def test_counsel_listed_once_after_co_parties(db):
     lines, _ = _export(ctx, db)
     assert lines[2:7] == ["原告　甲", "原告　乙", "訴訟代理人　王大明律師", "訴訟代理人　李小華律師", "被告　丙"]
     assert "具狀人：甲、乙" in lines and "撰狀人：訴訟代理人王大明律師、李小華律師" in lines
+
+
+def test_concurrent_exports_of_one_draft_do_not_deadlock(db, monkeypatch):
+    """C10：兩個匯出同時讀同一份草稿，各自持有段落共享鎖後又都要寫驗證結果，會互等而死結；先鎖草稿列就會排隊。"""
+    ctx, cs = ready(db)
+    pid = review_all(ctx, cs["lawyer"])
+    with tenant_session(ctx["firm"]) as s:  # 讓先前存的驗證結果過期：匯出重新驗證時一定要寫入
+        s.execute(update(Paragraph).where(Paragraph.id == pid).values(verify_reasons=["stale_reason"]))
+        member = CurrentMember(id=s.scalars(select(Member.id).where(Member.email == "lawyer@a.test")).one(),
+                               firm_id=ctx["firm"], role="lawyer", bar_number=BAR, bar_verified=True)
+    gate = threading.Barrier(2)
+    original = docx_export.export_blockers
+
+    def meet_then_verify(s, draft_id):
+        try:
+            gate.wait(2)  # 兩個匯出都拿到段落鎖之後才開始驗證（有排隊時第二個永遠到不了，逾時就放行）
+        except threading.BrokenBarrierError:
+            pass
+        return original(s, draft_id)
+
+    monkeypatch.setattr(docx_export, "export_blockers", meet_then_verify)
+    errors: list[BaseException] = []
+
+    def run():
+        try:
+            with tenant_session(ctx["firm"]) as s:
+                export_draft(s, ctx["draft_id"], member)
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert errors == []
+    with tenant_session(ctx["firm"]) as s:
+        assert len(s.scalars(select(ExportRecord).where(ExportRecord.draft_id == ctx["draft_id"])).all()) == 2

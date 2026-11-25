@@ -1,4 +1,5 @@
-import type { Blocker } from '../api'
+import { ApiError, type Blocker } from '../api'
+import { useState } from 'react'
 import { BTN_PRIMARY } from '../ui'
 
 // 驗證與審核原因代碼的中文說明（對應後端 app/verify/citations.py 與審核規則）。
@@ -67,13 +68,31 @@ export function reasonLabel(reason: string): string {
   return f ? f(arg) : `其他問題（${reason}）`
 }
 
-export default function ExportButton({ blockers, onExport }: { blockers: Blocker[]; onExport: () => void }) {
+// 操作失敗的畫面文字：被問題擋下（帶原因代碼）時把代碼翻成中文，其餘照後端訊息
+export function errorMessage(e: unknown): string {
+  const err = e as Error
+  if (e instanceof ApiError && e.reasons?.length) return `${err.message}：${e.reasons.map(reasonLabel).join('；')}`
+  return err.message
+}
+
+export default function ExportButton({ blockers, onExport }: {
+  blockers: Blocker[]; onExport: () => void | Promise<void>
+}) {
   const blocked = blockers.length > 0
+  const [busy, setBusy] = useState(false)  // 匯出中不能再按：同時兩個匯出會搶同一份草稿的驗證寫入
+  async function run() {
+    setBusy(true)
+    try {
+      await onExport()
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <div className="space-y-2">
-      <button type="button" onClick={onExport} disabled={blocked}
+      <button type="button" onClick={run} disabled={blocked || busy}
         className={`${BTN_PRIMARY} disabled:cursor-not-allowed`}>
-        匯出 Word
+        {busy ? '匯出中…' : '匯出 Word'}
       </button>
       {blocked && (
         <ul className="space-y-0.5 text-sm text-red-700">

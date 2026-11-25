@@ -3,10 +3,12 @@
 export class ApiError extends Error {
   status: number
   code?: string  // 後端以 {code, message} 回報的規則錯誤，例如 confirm_reset
-  constructor(status: number, message: string, code?: string) {
+  reasons?: string[]  // 被擋下的原因代碼（review_blocked）；畫面用 reasonLabel 翻成中文
+  constructor(status: number, message: string, code?: string, reasons?: string[]) {
     super(message)
     this.status = status
     this.code = code
+    this.reasons = reasons
   }
 }
 
@@ -161,14 +163,17 @@ export type CitationSource = { kind: string; title: string; text: string; span: 
   alerts?: OcrAlert[] }  // 這一頁目前版本的提醒（卡片勾「已對照原圖」會解除整頁，要看得到）
 export type CitationInput = { code: string; quote: string }
 
-async function detail(r: Response): Promise<{ message: string; code?: string }> {
+async function detail(r: Response): Promise<{ message: string; code?: string; reasons?: string[] }> {
   try {
     const body = await r.json()
     if (typeof body.detail === 'string') return { message: body.detail }
     if (Array.isArray(body.detail)) {  // 欄位驗證錯誤：只留說明文字
       return { message: `輸入資料有誤：${body.detail.map((e: { msg?: string }) => e.msg ?? '').filter(Boolean).join('；')}` }
     }
-    if (body.detail && typeof body.detail.message === 'string') return { message: body.detail.message, code: body.detail.code }
+    if (body.detail && typeof body.detail.message === 'string') {
+      return { message: body.detail.message, code: body.detail.code,
+        reasons: Array.isArray(body.detail.reasons) ? body.detail.reasons : undefined }
+    }
     return { message: JSON.stringify(body.detail ?? body) }
   } catch {
     return { message: r.statusText }
@@ -177,7 +182,7 @@ async function detail(r: Response): Promise<{ message: string; code?: string }> 
 
 async function apiError(r: Response): Promise<ApiError> {
   const d = await detail(r)
-  return new ApiError(r.status, d.message, d.code)
+  return new ApiError(r.status, d.message, d.code, d.reasons)
 }
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -225,9 +230,13 @@ export function uploadDocument(caseId: string, file: File, kind: 'evidence' | 'o
 
 const PHOTO = /\.(jpe?g|png)$/i
 
+export const MULTI_FILE_MESSAGE = '一次選多個檔案時只能都是照片（JPG、PNG）；PDF、Word、純文字請一份一份上傳'
+
 // 上傳一份文件：多張照片合成一份（一個證物號）；只有一個、而且不是照片的檔案走 file
+// 一次選多個檔案只能都是照片（後端一次只收一份文件）：其他情況不送出，直接說明
 export function uploadDocuments(caseId: string, files: File[], kind: 'evidence' | 'opponent_brief', roundId?: string,
   filedByPartyId?: string) {
+  if (files.length > 1 && files.some((f) => !PHOTO.test(f.name))) return Promise.reject(new Error(MULTI_FILE_MESSAGE))
   const form = new FormData()
   const field = files.length === 1 && !PHOTO.test(files[0].name) ? 'file' : 'files'
   for (const f of files) form.append(field, f)
@@ -329,7 +338,13 @@ export const deleteEvidenceNote = (id: string) =>
 // 大事記（設計 5.7）：重新整理只取代 AI 的事件，律師新增或修改的保留
 export const generateTimeline = (caseId: string) => req<{ job: JobView }>(`/cases/${caseId}/timeline`, json('POST'))
 export const getTimeline = (caseId: string) =>
-  req<{ events: TimelineEventView[]; pending_ocr: string[]; job: JobView | null }>(`/cases/${caseId}/timeline`)
+  req<{ events: TimelineEventView[]; pending_ocr: string[]; outdated?: boolean; job: JobView | null }>(
+    `/cases/${caseId}/timeline`)  // outdated＝整理之後卷證有新增或變更
+// 卷證裡有、大事記沒列的完整日期（純規則，按鈕才查）；date_label＝民國年；sources 最多 3 筆，source_count＝全部處數
+export type UncoveredDate = { date: string; date_label: string; source_count: number
+  sources: { label: string; page_no: number; snippet: string; page_id: string }[] }
+export const getUncoveredDates = (caseId: string) =>
+  req<{ total: number; dates: UncoveredDate[] }>(`/cases/${caseId}/timeline/uncovered-dates`)
 export const addTimelineEvent = (caseId: string, body: TimelineEventInput) =>
   req<TimelineEventView>(`/cases/${caseId}/timeline/events`, json('POST', body))
 export const patchTimelineEvent = (id: string, body: TimelineEventInput) =>

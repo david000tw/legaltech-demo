@@ -131,7 +131,7 @@ def test_upload_rejects_heic_and_mixed(lawyer_client):
     r = upload(client, case_id, "IMG_0001.HEIC", b"heic-bytes")
     assert r.status_code == 415 and r.json()["detail"] == "不支援 HEIC 照片，請在手機上改存成 JPG 後再上傳"
     r = _multi(client, case_id, [("a.jpg", photo()), ("b.pdf", b"%PDF-1.4")])
-    assert r.status_code == 422 and r.json()["detail"] == "一次上傳多個檔案時只能都是照片（JPG、PNG）"
+    assert r.status_code == 422 and r.json()["detail"].startswith("一次選多個檔案時只能都是照片（JPG、PNG）")
     r = _multi(client, case_id, [(f"p{i}.jpg", photo((60, 40))) for i in range(31)])
     assert r.status_code == 422 and r.json()["detail"] == "一次最多上傳 30 張照片"
     assert client.get(f"/api/cases/{case_id}").json()["documents"] == []
@@ -177,3 +177,71 @@ def test_page_image_endpoint(lawyer_client, db):
     assert login(c2, "b@other.test").status_code == 200
     r = c2.get(f"/api/pages/{page_id}/image")
     assert r.status_code == 404 and r.json()["detail"] == "找不到頁面"
+
+
+def test_first_render_is_idempotent_under_concurrent_requests(lawyer_client):
+    """C7：兩個請求同時第一次要同一頁原圖：存放鍵固定，只留下一個 PNG，資料庫指向同一把鍵。"""
+    from pathlib import Path
+
+    from app.ocr.images import ensure_page_image
+    from tests.test_ingest import FIXTURES
+    client, firm_id, _ = lawyer_client
+    case_id = new_case(client)  # 有文字層的 PDF：上傳時不辨識，所以還沒有原圖
+    doc_id = upload(client, case_id, "判決.pdf", (FIXTURES / "tcev_113_3946.pdf").read_bytes()).json()["id"]
+    storage = LocalStorage(client.app.state.settings.storage_dir)
+    with tenant_session(firm_id) as s:
+        page_id = s.scalars(select(Page.id).where(Page.document_id == doc_id, Page.page_no == 1)).one()
+        assert s.get(Page, page_id).image_key is None
+    with tenant_session(firm_id) as s1, tenant_session(firm_id) as s2:  # 兩個請求都還沒看到對方寫的鍵
+        k1 = ensure_page_image(s1, storage, s1.get(Page, page_id))
+        k2 = ensure_page_image(s2, storage, s2.get(Page, page_id))
+    assert k1 == k2
+    with tenant_session(firm_id) as s:
+        assert s.get(Page, page_id).image_key == k1
+    folder = Path(client.app.state.settings.storage_dir) / str(firm_id) / str(case_id)
+    assert len(list(folder.glob("*.png"))) == 1
+    assert Image.open(io.BytesIO(storage.get(k1))).format == "PNG"
+    assert [p.name for p in folder.iterdir() if p.name.startswith(".tmp")] == []  # 沒有留下暫存檔
+
+
+# ---- 小問題批次（C8）：上傳訊息與壞圖片 ----
+def test_unsupported_format_message_mentions_photos(lawyer_client):
+    """C8b：WebP、GIF 被拒時，訊息要說 JPG、PNG 照片可以上傳。"""
+    client, _, _ = lawyer_client
+    case_id = new_case(client)
+    for name, ext in (("相片.webp", ".webp"), ("動畫.gif", ".gif")):
+        r = upload(client, case_id, name, b"RIFF....WEBPVP8 ")
+        assert r.status_code == 415, r.text
+        detail = r.json()["detail"]
+        assert detail.startswith(f"不支援的檔案格式：{ext}")
+        assert ".pdf、.docx、.txt" in detail and "JPG" in detail and "PNG" in detail
+
+
+def test_multiple_non_photo_files_message_says_one_by_one(lawyer_client):
+    """C8a：一次選好幾份 PDF 回 422；訊息要說 PDF、Word、純文字要一份一份上傳。"""
+    client, _, _ = lawyer_client
+    case_id = new_case(client)
+    r = _multi(client, case_id, [("a.pdf", b"%PDF-1.4"), ("b.pdf", b"%PDF-1.4")])
+    assert r.status_code == 422
+    assert r.json()["detail"] == "一次選多個檔案時只能都是照片（JPG、PNG）；PDF、Word、純文字請一份一份上傳"
+    assert client.get(f"/api/cases/{case_id}").json()["documents"] == []
+
+
+def test_late_pillow_failure_is_unreadable_not_500(lawyer_client, monkeypatch):
+    """C8c：貼圖、縮圖階段才出錯的壞圖片，也要回一般的 422「無法讀取第 N 張照片」，不是 500。"""
+    from app.ocr.images import _clean_rgb
+    from app.ingest.extract import UnreadableFile
+
+    def boom(self, *a, **k):
+        raise OSError("image file is truncated")
+    monkeypatch.setattr(Image.Image, "thumbnail", boom)
+    try:
+        _clean_rgb(photo(), 2)
+    except UnreadableFile as e:
+        assert str(e) == "無法讀取第 2 張照片"
+    else:
+        raise AssertionError("沒有丟出 UnreadableFile")
+    client, _, _ = lawyer_client
+    case_id = new_case(client)
+    r = upload(client, case_id, "收據.jpg", photo())
+    assert r.status_code == 422 and r.json()["detail"] == "無法讀取第 1 張照片"

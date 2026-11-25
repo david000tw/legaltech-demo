@@ -42,10 +42,11 @@ def opponent_pages(s: Session, round_id: UUID) -> list[OpponentPage]:
 def _filers(s: Session, round_id: UUID) -> dict:
     """每份對造書狀的遞狀人標示（有選遞狀人才標），放在該書狀每頁開頭。"""
     out = {}
+    case_id = s.get(Round, round_id).case_id
     for d in s.scalars(select(Document).where(Document.round_id == round_id, Document.kind == "opponent_brief")):
         if d.filed_by_party_id:
             party = s.get(CaseParty, d.filed_by_party_id)
-            if party is not None:
+            if party is not None and party.case_id == case_id:  # 與 claim_filers 一致：只信本案的當事人
                 out[d.id] = f"【遞狀人：{party.role} {party.name}（{ALIGNMENT_LABEL[party.alignment]}）】\n"
     return out
 

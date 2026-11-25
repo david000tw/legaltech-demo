@@ -105,6 +105,24 @@ describe('CaseDetail', () => {
     expect(await screen.findByText('資料已變更，建議重新執行')).toBeInTheDocument()
   })
 
+  it('disables the evidence upload while a slow upload is processing', async () => {
+    // 上傳還在處理時又選一次檔案，會多建一個證物編號
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
+    let finish: (r: api.UploadResult) => void = () => {}
+    vi.mocked(api.uploadDocuments).mockReturnValue(new Promise<api.UploadResult>((resolve) => { finish = resolve }))
+    renderAt()
+    await openTab('卷證與時間軸')
+    const input = await screen.findByLabelText('上傳卷證（依上傳順序自動編號）')
+    await userEvent.upload(input, new File(['收據'], '06_收據.txt', { type: 'text/plain' }))
+    const busy = await screen.findByRole('button', { name: '上傳中…' })
+    expect(busy).toBeDisabled()
+    expect(input).toBeDisabled()
+    expect(api.uploadDocuments).toHaveBeenCalledTimes(1)
+    finish({ id: 'd9', page_count: 1 })
+    expect(await screen.findByRole('button', { name: '上傳卷證' })).toBeEnabled()
+    expect(input).toBeEnabled()
+  })
+
   it('shows the evidence notes and timeline sections after the exhibits', async () => {
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
     renderAt()
@@ -402,6 +420,19 @@ describe('CaseDetail brief filer and notices', () => {
     await userEvent.click(box)
     expect(api.patchClaim).toHaveBeenCalledWith('k2', { selected: false })
     expect(await screen.findByText('未勾選的 1 條主張不會被回應')).toBeInTheDocument()
+  })
+
+  it('shows each claim source page and quote under its summary', async () => {
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [{ id: 'r1', seq: 1, status: 'extracted', error: null }] })
+    vi.mocked(api.getRound).mockResolvedValue({ ...extracted, claims: [
+      { ...extracted.claims[0], quote: '原告於路口未減速慢行致生事故', page_no: 3 },
+      { ...extracted.claims[1], quote: '慰撫金請求顯屬過高', page_no: null },
+    ] })
+    renderAt()
+    await openTab('書狀')
+    const first = await screen.findByText(/出處：第 3 頁「原告於路口未減速慢行致生事故」/)
+    expect(first).toHaveAttribute('title', '原告於路口未減速慢行致生事故')
+    expect(screen.getByText('出處：「慰撫金請求顯屬過高」')).toBeInTheDocument()
   })
 
   it('drafts after extract', async () => {

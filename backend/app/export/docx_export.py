@@ -120,7 +120,9 @@ def record_export(s: Session, draft_id: UUID, member: CurrentMember, data: bytes
 
 def render_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date | None = None) -> bytes:
     """鎖段落、檢查阻擋、產生 Word（不寫紀錄）。狀頭內容與順序照設計 5.6；today 預設為台灣時區的今天。"""
-    # 先鎖住整份草稿的段落（依 id 排序避免互鎖），檢查到產生檔案之間別人不能改段落或確認引用
+    # 先鎖草稿列：同一份草稿的匯出一個一個來（兩個匯出各持段落共享鎖、又都要寫驗證結果會互等而死結）
+    s.get(Draft, draft_id, with_for_update=True)
+    # 再鎖住整份草稿的段落（依 id 排序避免互鎖），檢查到產生檔案之間別人不能改段落或確認引用
     s.scalars(select(Paragraph.id).where(Paragraph.draft_id == draft_id).order_by(Paragraph.id)
               .with_for_update(read=True)).all()
     blockers = export_blockers(s, draft_id)  # 一律重新驗證
