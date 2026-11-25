@@ -267,14 +267,14 @@ def test_exhibit_numbering_locks_case_row(lawyer_client):
         with tenant_session(firm_id) as s:
             ingest_document(s, firm_id, case_id, "evidence", "01_a.txt", "內容一".encode())
     stmts = _capture_sql(go)
-    assert any("FROM cases" in st and "FOR UPDATE" in st for st in stmts)
+    assert any("FROM cases" in st and "FOR NO KEY UPDATE" in st for st in stmts)
 
 
 def test_create_round_locks_case_row(lawyer_client):
     client, _, _ = lawyer_client
     case_id = new_case(client)
     stmts = _capture_sql(lambda: client.post(f"/api/cases/{case_id}/rounds"))
-    assert any("FROM cases" in st and "FOR UPDATE" in st for st in stmts)
+    assert any("FROM cases" in st and "FOR NO KEY UPDATE" in st for st in stmts)
 
 
 def test_ingest_sets_ocr_state(lawyer_client):
