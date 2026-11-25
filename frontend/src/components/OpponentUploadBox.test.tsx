@@ -53,4 +53,26 @@ describe('OpponentUploadBox', () => {
       { briefKind: 'preparatory', strategy: '主打原告與有過失' })
     expect(onUploaded).toHaveBeenCalled()
   })
+
+  it('follows the brief kind of the next new round after an upload (審查 #7)', async () => {
+    const props = { caseId: 'c1', ourSide: 'defendant' as const, automation: 'auto' as const,
+      onUploaded: vi.fn(async () => {}), onError: vi.fn() }
+    const { rerender } = render(<OpponentUploadBox {...props} target={target({ seq: 1, brief_kind: 'answer' })} />)
+    expect(screen.getByRole('combobox', { name: '新一輪的書狀種類' })).toHaveValue('answer')
+    rerender(<OpponentUploadBox {...props} target={target({ seq: 2, brief_kind: 'preparatory' })} />)
+    expect(screen.getByRole('combobox', { name: '新一輪的書狀種類' })).toHaveValue('preparatory')
+    const file = new File(['%PDF'], '準備書狀.pdf', { type: 'application/pdf' })
+    await userEvent.upload(screen.getByLabelText('上傳對方的書狀'), file)
+    expect(api.uploadDocuments).toHaveBeenCalledWith('c1', [file], 'opponent_brief', undefined, undefined,
+      { briefKind: 'preparatory', strategy: '' })
+  })
+
+  it("keeps the lawyer's choice while the next round stays the same", async () => {
+    const props = { caseId: 'c1', ourSide: 'defendant' as const, automation: 'auto' as const,
+      onUploaded: vi.fn(async () => {}), onError: vi.fn() }
+    const { rerender } = render(<OpponentUploadBox {...props} target={target({ seq: 2 })} />)
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '新一輪的書狀種類' }), 'answer')
+    rerender(<OpponentUploadBox {...props} target={target({ seq: 2 })} />)
+    expect(screen.getByRole('combobox', { name: '新一輪的書狀種類' })).toHaveValue('answer')
+  })
 })

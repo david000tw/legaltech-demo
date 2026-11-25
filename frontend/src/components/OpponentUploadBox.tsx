@@ -17,7 +17,9 @@ export default function OpponentUploadBox({ caseId, ourSide, automation, target,
   onError: (message: string | null) => void
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
-  const [kind, setKind] = useState<api.BriefKind>(target.brief_kind)
+  // 律師選的種類只對「當時那個新一輪」有效；上傳後新一輪換成下一輪，就回到那一輪的預設種類
+  const [choice, setChoice] = useState<{ seq: number; kind: api.BriefKind } | null>(null)
+  const kind = choice && choice.seq === target.seq ? choice.kind : target.brief_kind
   const [strategy, setStrategy] = useState('')
   const [busy, setBusy] = useState(false)
   const kinds: api.BriefKind[] = ourSide === 'plaintiff' ? ['preparatory'] : ['answer', 'preparatory']
@@ -68,7 +70,7 @@ export default function OpponentUploadBox({ caseId, ourSide, automation, target,
       {target.new && (
         <label className="block text-xs text-slate-600">
           新一輪的書狀種類
-          <select aria-label="新一輪的書狀種類" value={kind} onChange={(e) => setKind(e.target.value as api.BriefKind)}
+          <select aria-label="新一輪的書狀種類" value={kind} onChange={(e) => setChoice({ seq: target.seq, kind: e.target.value as api.BriefKind })}
             className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm">
             {kinds.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
           </select>
