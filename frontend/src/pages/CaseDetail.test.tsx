@@ -120,6 +120,19 @@ describe('CaseDetail', () => {
     await waitFor(() => expect(screen.queryByText('「壞檔.pdf」上傳失敗：檔案損毀')).not.toBeInTheDocument())
   })
 
+  it('reloads the case after a partly failed upload so the uploaded files show up', async () => {
+    // 走查審查：前 1 份已上傳卻沒出現在清單，律師重選全部就會多出重複的證物
+    vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })
+    vi.mocked(api.uploadDocuments).mockRejectedValueOnce(new Error('「二.pdf」上傳失敗：檔案損毀（已上傳 1 份；未上傳：「二.pdf」）'))
+    renderAt()
+    await openTab('卷證與時間軸')
+    const calls = vi.mocked(api.getCase).mock.calls.length
+    await userEvent.upload(screen.getByLabelText('上傳卷證（依上傳順序自動編號）'),
+      [new File(['x'], '一.pdf', { type: 'application/pdf' }), new File(['x'], '二.pdf', { type: 'application/pdf' })])
+    expect(await screen.findByText(/「二.pdf」上傳失敗/)).toBeInTheDocument()
+    await waitFor(() => expect(vi.mocked(api.getCase).mock.calls.length).toBeGreaterThan(calls))
+  })
+
   it('disables the evidence upload while a slow upload is processing', async () => {
     // 上傳還在處理時又選一次檔案，會多建一個證物編號
     vi.mocked(api.getCase).mockResolvedValue({ ...baseCase, rounds: [] })

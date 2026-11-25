@@ -241,20 +241,28 @@ function uploadOne(caseId: string, files: File[], kind: 'evidence' | 'opponent_b
   return req<UploadResult>(`/cases/${caseId}/documents`, { method: 'POST', body: form })
 }
 
-// 上傳：一次選的全是照片時合成一份（一個證物號）；有 PDF、Word、純文字時逐份上傳，每份各自一個證物號
-// （後端一次只收一份文件）。中途失敗就停下，說明是哪一份、前面幾份已上傳
+// 上傳：照片合成一份（一個證物號）；PDF、Word、純文字逐份上傳，各自一個證物號（後端一次只收一份文件）。
+// 依檔名排序（數字照大小：1、2、10），證物號才會照「01_、02_」的順序。中途失敗就停下，說明哪幾份沒上傳
+const byName = (a: File, b: File) => a.name.localeCompare(b.name, 'zh-Hant', { numeric: true })
+
 export async function uploadDocuments(caseId: string, files: File[], kind: 'evidence' | 'opponent_brief',
   roundId?: string, filedByPartyId?: string): Promise<UploadResult[]> {
-  if (files.length <= 1 || files.every((f) => PHOTO.test(f.name))) {
-    return [await uploadOne(caseId, files, kind, roundId, filedByPartyId)]
+  const sorted = [...files].sort(byName)
+  const photos = sorted.filter((f) => PHOTO.test(f.name))
+  const batches: File[][] = []
+  for (const f of sorted) {
+    if (!PHOTO.test(f.name)) batches.push([f])
+    else if (f === photos[0]) batches.push(photos)  // 照片在第一張照片的位置合成一份
   }
   const done: UploadResult[] = []
-  for (const f of files) {
+  for (const [i, batch] of batches.entries()) {
     try {
-      done.push(await uploadOne(caseId, [f], kind, roundId, filedByPartyId))
+      done.push(await uploadOne(caseId, batch, kind, roundId, filedByPartyId))
     } catch (e) {
-      const before = done.length ? `（前 ${done.length} 份已上傳）` : ''
-      throw new Error(`「${f.name}」上傳失敗：${(e as Error).message}${before}`)
+      if (batches.length === 1) throw e
+      const left = batches.slice(i).flat().map((f) => `「${f.name}」`).join('')
+      const head = done.length ? `已上傳 ${done.length} 份；` : ''
+      throw new Error(`「${batch[0].name}」上傳失敗：${(e as Error).message}（${head}未上傳：${left}）`)
     }
   }
   return done

@@ -83,12 +83,12 @@ function RoundPanel({ caseId, caseType, round, parties, briefs, onChanged }: {
     try {
       // 多張照片合成一份對造書狀；掃描頁會自動辨識
       await api.uploadDocuments(caseId, files, 'opponent_brief', round.id, filer || undefined)
-      await ocrChanged()
     } catch (e) {
       setMessage((e as Error).message)
     } finally {
       setBusy(false)
       if (fileRef.current) fileRef.current.value = ''
+      await ocrChanged()  // 失敗也重讀：已上傳的那幾份要出現
     }
   }
 
@@ -602,14 +602,14 @@ export default function CaseDetail() {
     setUploading(true)
     setError(null)  // 上一次上傳失敗的訊息不要留到這一次
     try {
-      // 全是照片時合成一份卷證、一個證物號；有 PDF、Word、純文字時逐份上傳，各自一個證物號
+      // 照片合成一份卷證、一個證物號；PDF、Word、純文字逐份上傳，各自一個證物號
       await api.uploadDocuments(caseId, files, 'evidence')
-      await load()
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setUploading(false)
       if (evidenceRef.current) evidenceRef.current.value = ''
+      await load()  // 失敗也重讀：前面已上傳的那幾份要出現在清單，律師才不會重選而多出重複的證物
     }
   }
 
@@ -716,7 +716,7 @@ export default function CaseDetail() {
                       <input ref={evidenceRef} type="file" accept={UPLOAD_ACCEPT} multiple disabled={uploading}
                         onChange={uploadEvidence} />
                     </label>
-                    <span className="text-xs text-slate-500">依上傳順序自動編號；多張照片會合成一份卷證</span>
+                    <span className="text-xs text-slate-500">依檔名順序自動編號；多張照片合成一份卷證，PDF、Word 每份各一個證物號</span>
                     {pendingOcr > 0 && (
                       <button type="button" onClick={startCaseOcr} className={BTN_SECONDARY}>
                         {`開始辨識（${pendingOcr} 頁）`}

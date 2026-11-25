@@ -31,31 +31,35 @@ describe('api', () => {
     expect(f).toHaveBeenCalledWith('/api/cases/c1/documents', expect.objectContaining({ method: 'POST' }))
   })
 
-  it('uploadDocuments sends several non-photo files one by one, each as its own document', async () => {
-    // 走查：一次選好幾份 PDF 被擋下很煩；改成逐份上傳，每份各自一個證物號
-    const f = respond(200, { id: 'd1', page_count: 1, ocr: null })
-    const pdf1 = new File(['%PDF'], '一.pdf', { type: 'application/pdf' })
-    const pdf2 = new File(['%PDF'], '二.pdf', { type: 'application/pdf' })
-    const jpg = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
-    await uploadDocuments('c1', [pdf1, pdf2, jpg], 'evidence')
-    expect(f).toHaveBeenCalledTimes(3)
-    const sent = f.mock.calls.map((c) => {
+  function sentNames(f: ReturnType<typeof vi.fn>) {
+    return f.mock.calls.map((c) => {
       const body = (c as unknown as [string, RequestInit])[1].body as FormData
       return [...body.getAll('file'), ...body.getAll('files')].map((x) => (x as File).name)
     })
-    expect(sent).toEqual([['一.pdf'], ['二.pdf'], ['a.jpg']])
+  }
+  const file = (name: string) => new File(['x'], name, { type: name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg' })
+
+  it('uploadDocuments sends several non-photo files one by one in file-name order', async () => {
+    // 走查：一次選好幾份 PDF 被擋下很煩；改成逐份上傳，每份各自一個證物號，依檔名（數字大小）排序
+    const f = respond(200, { id: 'd1', page_count: 1, ocr: null })
+    await uploadDocuments('c1', [file('10_收據.pdf'), file('2_估價單.pdf'), file('1_研判表.pdf')], 'evidence')
+    expect(sentNames(f)).toEqual([['1_研判表.pdf'], ['2_估價單.pdf'], ['10_收據.pdf']])
   })
 
-  it('uploadDocuments stops at the first failed file and says which one', async () => {
+  it('uploadDocuments keeps the photos of a mixed selection together as one document', async () => {
+    // 10 張現場照片加 1 份報告：照片合成一份（一個證物號），不是 11 個證物
+    const f = respond(200, { id: 'd1', page_count: 1, ocr: null })
+    await uploadDocuments('c1', [file('b.jpg'), file('c.pdf'), file('a.jpg')], 'evidence')
+    expect(sentNames(f)).toEqual([['a.jpg', 'b.jpg'], ['c.pdf']])
+  })
+
+  it('uploadDocuments stops at the first failed file and lists what was not uploaded', async () => {
     const f = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'd1', page_count: 1, ocr: null }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ detail: '檔案損毀' }), { status: 422 }))
     vi.stubGlobal('fetch', f)
-    const pdf1 = new File(['%PDF'], '一.pdf', { type: 'application/pdf' })
-    const pdf2 = new File(['%PDF'], '二.pdf', { type: 'application/pdf' })
-    const pdf3 = new File(['%PDF'], '三.pdf', { type: 'application/pdf' })
-    await expect(uploadDocuments('c1', [pdf1, pdf2, pdf3], 'evidence')).rejects.toThrow(
-      '「二.pdf」上傳失敗：檔案損毀（前 1 份已上傳）')
+    await expect(uploadDocuments('c1', [file('一.pdf'), file('二.pdf'), file('三.pdf')], 'evidence')).rejects.toThrow(
+      '「二.pdf」上傳失敗：檔案損毀（已上傳 1 份；未上傳：「二.pdf」「三.pdf」）')
     expect(f).toHaveBeenCalledTimes(2)
   })
 
