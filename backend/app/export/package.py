@@ -15,7 +15,7 @@ import docx
 from sqlalchemy.orm import Session
 
 from app.auth import CurrentMember
-from app.export.docx_export import _cited_exhibits, _clean, export_brief_title, render_draft
+from app.export.docx_export import _cited_exhibits, _clean, _setup, exhibit_title, export_brief_title, render_draft
 from app.models import Document
 from app.storage import LocalStorage
 from app.verify.citations import body_paragraphs
@@ -37,6 +37,7 @@ def safe_filename(name: str) -> str:
 
 def _exhibit_list(rows: list[tuple[str, str, int]]) -> bytes:
     d = docx.Document()
+    _setup(d)  # 跟書狀同樣的 A4、字型、行距與頁碼
     d.add_paragraph("證物清單")
     table = d.add_table(rows=1, cols=3)
     table.style = "Table Grid"
@@ -44,7 +45,7 @@ def _exhibit_list(rows: list[tuple[str, str, int]]) -> bytes:
         cell.text = name
     for label, name, pages in rows:
         cells = table.add_row().cells
-        cells[0].text, cells[1].text, cells[2].text = _clean(label), _clean(name), str(pages)  # 檔名可能夾控制字元，Word 存不了
+        cells[0].text, cells[1].text, cells[2].text = _clean(label), exhibit_title(name), str(pages)  # 檔名可能夾控制字元，Word 存不了
     buf = io.BytesIO()
     d.save(buf)
     return buf.getvalue()

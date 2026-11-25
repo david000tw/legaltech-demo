@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re
 from datetime import date, datetime
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import docx
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 from sqlalchemy import select
@@ -32,22 +34,58 @@ class ExportBlocked(Exception):
         super().__init__(f"{len(blockers)} 個問題尚未解決")
 
 
+def _page_number_footer(sec) -> None:
+    """每頁下方中間編頁「第 N 頁」（司法院《民事訴訟資料標準化須知》）。"""
+    p = sec.footer.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run("第 ")
+    run = p.add_run()
+    for tag, attr in (("w:fldChar", "begin"), ("w:instrText", None), ("w:fldChar", "separate")):
+        el = OxmlElement(tag)
+        if attr:
+            el.set(qn("w:fldCharType"), attr)
+        else:
+            el.set(qn("xml:space"), "preserve")
+            el.text = " PAGE "
+        run._r.append(el)
+    run._r.append(OxmlElement("w:t"))
+    run._r[-1].text = "1"  # 開檔前的預設顯示，Word 開啟後自動更新
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    run._r.append(end)
+    p.add_run(" 頁")
+
+
 def _setup(d: docx.Document) -> None:
+    # 書狀規則第 3 條：A4（python-docx 預設是 Letter）；邊界 2.5 公分；固定行高 25 點（標準化須知：至少 25 點）
     for sec in d.sections:
+        sec.page_width, sec.page_height = Cm(21), Cm(29.7)
         sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Cm(2.5)
+        _page_number_footer(sec)
     normal = d.styles["Normal"]
     normal.font.name = FONT
     normal.font.size = Pt(14)
     normal.element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), FONT)
     pf = normal.paragraph_format
     pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-    pf.line_spacing = Pt(24)
-    pf.space_before = pf.space_after = Pt(0)  # 預設範本有段後距，會讓行距不是固定 24pt
+    pf.line_spacing = Pt(25)
+    pf.space_before = pf.space_after = Pt(0)  # 預設範本有段後距，會讓行距不是固定 25pt
 
 
 def roc_date(d: date) -> str:
     """民國紀年：date(2026, 11, 23) → 中華民國115年11月23日。"""
     return f"中華民國{d.year - 1911}年{d.month}月{d.day}日"
+
+
+_ORDER_PREFIX = re.compile(r"^\d{1,3}[_\-.、\s]+")
+_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,5}$")
+
+
+def exhibit_title(filename: str | None) -> str:
+    """證物清單的名稱：檔名去掉前面的排序編號與副檔名（「01_研判表.txt」→「研判表」），去完是空的就保留原名。"""
+    name = INVALID_XML_CHARS.sub("", filename or "").strip()
+    stem = _EXTENSION.sub("", name)
+    return _ORDER_PREFIX.sub("", stem).strip() or stem
 
 
 def _clean(v: str | None) -> str:
@@ -174,7 +212,7 @@ def render_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date 
     if exhibits:
         d.add_paragraph("證物名稱及件數")
         for ex, filename in exhibits:
-            d.add_paragraph(f"{ex.prefix}{ex.number}　{INVALID_XML_CHARS.sub('', filename or '')}")
+            d.add_paragraph(f"{ex.prefix}{ex.number}　{exhibit_title(filename)}")
     d.add_paragraph(roc_date(today or datetime.now(TAIPEI).date()))
     d.add_paragraph("具狀人：" + "、".join(_clean(p.name) for p in parties if p.alignment == "ours"))
     counsel = _attorneys(case)

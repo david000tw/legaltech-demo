@@ -3,7 +3,7 @@ import threading
 import time
 
 import docx
-from docx.enum.text import WD_LINE_SPACING
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 from sqlalchemy import select, update
@@ -68,8 +68,13 @@ def test_export_docx_format(db):
     assert normal.font.size == Pt(14)
     assert normal.element.rPr.rFonts.get(qn("w:eastAsia")) == "標楷體"
     assert normal.paragraph_format.line_spacing_rule == WD_LINE_SPACING.EXACTLY
-    assert normal.paragraph_format.line_spacing == Pt(24)
+    # 司法院《民事訴訟資料標準化須知》：固定行高至少 25 點、每頁下方中間編頁；書狀規則第 3 條：A4
+    assert normal.paragraph_format.line_spacing == Pt(25)
     assert normal.paragraph_format.space_after == Pt(0) and normal.paragraph_format.space_before == Pt(0)
+    assert abs(sec.page_width - Cm(21)) < Cm(0.01) and abs(sec.page_height - Cm(29.7)) < Cm(0.01)
+    footer = sec.footer.paragraphs[0]
+    assert footer.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    assert "PAGE" in footer._p.xml and footer.text.startswith("第")
     title = d.paragraphs[0]
     assert title.text == "民事準備書狀"
     assert all(run.bold and run.font.size == Pt(18) for run in title.runs)
@@ -82,7 +87,7 @@ def test_export_has_no_markers_and_renders_exhibit(db):
     text = all_text(d)
     assert "{{" not in text and "原證1第1頁" in text and "㈠關於路權" in text
     assert "臺灣臺中地方法院113年度中簡字第3946號民事判決" in text and f"「{J_REASONING}」" in text
-    assert "證物名稱及件數" in text and "原證1" in text.split("證物名稱及件數")[1] and "01_研判表.txt" in text
+    assert "證物名稱及件數" in text and "原證1" in text.split("證物名稱及件數")[1] and "原證1　研判表" in text
 
 
 def test_export_uses_renumbered_exhibit(db):
@@ -146,7 +151,7 @@ def test_control_chars_in_filename_are_dropped_on_export(db):
     review_all(ctx, cs["lawyer"])
     r = cs["lawyer"].post(f"/api/drafts/{ctx['draft_id']}/export")
     assert r.status_code == 200, r.text
-    assert "原證1　01_研判表.txt" in all_text(docx.Document(io.BytesIO(r.content)))
+    assert "原證1　研判表" in all_text(docx.Document(io.BytesIO(r.content)))
 
 
 def test_export_keeps_paragraphs_locked_until_done(db, monkeypatch):
@@ -234,7 +239,7 @@ def test_family_case_header(db):
     assert lines.count("訴訟代理人　王大明律師") == 1
     _in_order(lines, ["原告　宋文彬", "訴訟代理人　王大明律師", "被告　宋文德", "法定代理人　宋大德", "被告　宋文琪",
                       "為分割遺產事件，依法提出準備書狀事：", "㈠關於遺產範圍", "謹狀", "臺灣臺北地方法院家事法庭　公鑒",
-                      "證物名稱及件數", "原證1　01_研判表.txt", "中華民國115年11月23日", "具狀人：宋文彬",
+                      "證物名稱及件數", "原證1　研判表", "中華民國115年11月23日", "具狀人：宋文彬",
                       "撰狀人：訴訟代理人王大明律師"])
     assert "證物清單" not in text and "民事準備書狀" not in text and "民事庭" not in text
 

@@ -4,6 +4,8 @@ import io
 import zipfile
 
 import docx
+import pytest
+from docx.shared import Cm
 from sqlalchemy import func, select
 
 from app.db import admin_session, tenant_session
@@ -78,9 +80,20 @@ def test_exhibit_list_docx(db):
     ctx, cs = ready(db)
     force_reviewed(ctx["firm"], ctx["draft_id"])
     z = zipfile.ZipFile(io.BytesIO(_package(cs["lawyer"], ctx).content))
-    table = docx.Document(io.BytesIO(z.read("02_證物清單.docx"))).tables[0]
-    rows = [[c.text for c in row.cells] for row in table.rows]
-    assert rows == [["證物號碼", "名稱", "頁數"], ["原證1", "01_研判表.txt", "1"]]
+    d = docx.Document(io.BytesIO(z.read("02_證物清單.docx")))
+    rows = [[c.text for c in row.cells] for row in d.tables[0].rows]
+    # 名稱去掉檔名前面的排序編號與副檔名；版面跟書狀一樣是 A4
+    assert rows == [["證物號碼", "名稱", "頁數"], ["原證1", "研判表", "1"]]
+    assert abs(d.sections[0].page_width - Cm(21)) < Cm(0.01)
+
+
+@pytest.mark.parametrize("name,title", [
+    ("01_交通事故初步分析研判表.txt", "交通事故初步分析研判表"), ("診斷證明.pdf", "診斷證明"), ("3-收據.jpg", "收據"),
+    ("02 估價單.PDF", "估價單"), ("2023年報表.pdf", "2023年報表"), ("01.pdf", "01"), ("", ""),
+])
+def test_exhibit_title_drops_order_prefix_and_extension(name, title):
+    from app.export.docx_export import exhibit_title
+    assert exhibit_title(name) == title
 
 
 def test_exhibit_list_survives_control_char_in_filename(db):
@@ -93,7 +106,7 @@ def test_exhibit_list_survives_control_char_in_filename(db):
     assert r.status_code == 200, r.text
     z = zipfile.ZipFile(io.BytesIO(r.content))
     table = docx.Document(io.BytesIO(z.read("02_證物清單.docx"))).tables[0]
-    assert [c.text for c in table.rows[1].cells] == ["原證1", "01_研判表.txt", "1"]
+    assert [c.text for c in table.rows[1].cells] == ["原證1", "研判表", "1"]
 
 
 EXTRA = {  # 依上傳順序成為原證2、3、4
