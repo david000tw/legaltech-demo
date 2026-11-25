@@ -31,6 +31,7 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = ["real_ai: 會呼叫真的本機 Claude Code，預設不跑", "support_real: 跑真的支持度流程（AI 仍是假的）"]
+markers = ["real_ai: 會呼叫真的本機 Claude Code，預設不跑", "support_real: 跑真的支持度流程（AI 仍是假的）",
+           "automation_real: 跑真的自動流程（AI 仍是假的）"]
 addopts = "-m 'not real_ai'"
 filterwarnings = ["ignore:Using .httpx. with .starlette.testclient. is deprecated"]

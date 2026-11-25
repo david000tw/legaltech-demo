@@ -17,7 +17,7 @@ from app.case_types import (
 from app.db import CASE_LOCK, tenant_session
 from app.ingest.extract import UnreadableFile, UnsupportedFile, file_ext
 from app.ingest.service import current_page_text, ingest_document
-from app.models import Case, CaseParty, Document, Exhibit, Member, Page, Round
+from app.models import AUTOMATION_MODES, Case, CaseParty, Document, Exhibit, Member, Page, Round
 from app.ocr.job import current_texts, document_ocr_json, page_ocr_fields, pending_without_job
 from app.ocr.images import (
     HEIC_EXTS, HEIC_MESSAGE, IMAGE_EXTS, MAX_PHOTOS, MIXED_MESSAGE, TOO_MANY_PHOTOS, looks_scanned_with_text,
@@ -67,6 +67,7 @@ class CasePatch(CaseHeader):
     title: _text(300) | None = None
     our_side: Literal["plaintiff", "defendant"] | None = None
     case_type: str | None = None
+    automation: Literal[AUTOMATION_MODES] | None = None  # 自動化程度（設計 6.1）
 
     @field_validator("case_type")
     @classmethod
@@ -130,7 +131,7 @@ def patch_case(case_id: UUID, body: CasePatch, m: CurrentMember = Depends(curren
     with tenant_session(m.firm_id) as s:
         case = _case_or_404(s, case_id)
         for key, value in body.model_dump(exclude_unset=True).items():
-            if key in ("title", "our_side", "case_type") and value is None:
+            if key in ("title", "our_side", "case_type", "automation") and value is None:
                 continue  # 必填欄位不能清空
             setattr(case, key, [] if key == "attorneys" and value is None else value)
         s.flush()
@@ -232,6 +233,7 @@ def get_case(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
             "default_brief_kind": default_brief_kind(case.our_side, bool(rounds)),
             # 卷證說明、大事記的 AI 工作狀態（前端據此輪詢；設計 5.6、5.7）
             "jobs": {step: job_json(latest_job(s, case_id, None, step)) for step in ("evidence_notes", "timeline")},
+            "automation": case.automation,
         }
 
 

@@ -41,6 +41,16 @@ def _argv0(args) -> str:
 
 
 @pytest.fixture(autouse=True)
+def _automation_off(request, monkeypatch):
+    """一般測試的案件一律當成「每步自己按」，上傳不會自動跑 AI（設計 6.1 預設是全自動）。
+    標 automation_real 的測試跑真的自動流程（AI 仍是假的）。"""
+    if request.node.get_closest_marker("automation_real"):
+        return
+    from app.automation import decide
+    monkeypatch.setattr(decide, "mode_of", lambda s, case: "manual")
+
+
+@pytest.fixture(autouse=True)
 def _support_off(request, monkeypatch):
     """一般測試不跑支持度檢查（沒有輸入就不排入、不阻擋）。標 support_real 的測試跑真的流程。"""
     if request.node.get_closest_marker("support_real"):

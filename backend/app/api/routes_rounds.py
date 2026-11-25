@@ -20,7 +20,7 @@ from app.statements import AMOUNT_MARKER, round_total, statement_template
 from app.support import schedule as support_schedule
 from app.support import service as support
 from app.pipeline.run import (STALE_AFTER, RoundBusy, RoundRule, reset_round, run_draft, run_extract,
-                              settings_editable, start_stage)
+                              settings_editable, start_stage, strategy_editable)
 
 router = APIRouter(prefix="/api")
 
@@ -81,6 +81,7 @@ class RoundSettingsBody(BaseModel):
     provisional_execution: bool | None = None
     claim_value: int | None = Field(default=None, ge=0)
     statement_variant: Literal["alive", "deceased"] | None = None
+    strategy: str | None = Field(default=None, max_length=2000)  # 答辯策略（設計 6.4）
 
 
 @router.patch("/rounds/{round_id}")
@@ -91,7 +92,9 @@ def patch_round(round_id: UUID, body: RoundSettingsBody, m: CurrentMember = Depe
         rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)
         if rnd is None:
             raise HTTPException(404, "找不到輪次")
-        if set(fields) != {"claim_value"} and not settings_editable(rnd):
+        if "strategy" in fields and not strategy_editable(rnd):
+            raise HTTPException(409, "這一輪已開始起草，不能再改答辯策略")
+        if set(fields) - {"claim_value", "strategy"} and not settings_editable(rnd):
             raise HTTPException(409, "這一輪已開始起草，不能再改設定；訴訟標的金額仍可補填")
         for k, v in fields.items():
             setattr(rnd, k, v)
@@ -273,7 +276,7 @@ def get_round(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
             "can_review": m.role == "lawyer" and m.bar_verified,  # 只有律師能確認請求項目與金額
             "claims": [claim_json(s, c) for c in claims],
             # 起訴狀：案情說明、設定、確認金額的加總、訴之聲明預覽、沒送給 AI 的掃描頁
-            "narrative": rnd.narrative, "joint_liability": rnd.joint_liability,
+            "narrative": rnd.narrative, "strategy": rnd.strategy, "joint_liability": rnd.joint_liability,
             "provisional_execution": rnd.provisional_execution, "claim_value": rnd.claim_value,
             "statement_variant": rnd.statement_variant, "total_amount": round_total(s, rnd.id),
             "statement_preview": _statement_preview(s, rnd),

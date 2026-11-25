@@ -62,6 +62,12 @@ def settings_editable(rnd: Round) -> bool:
             or (rnd.status == "extracting" and _stale(rnd)))
 
 
+def strategy_editable(rnd: Round) -> bool:
+    """答辯策略（設計 6.4）在起草階段開始之前都能改：比輪次設定寬，拆解中也可以。"""
+    return (rnd.status in ("created", "extracting", "extracted")
+            or (rnd.status == "failed" and rnd.failed_stage == "extract"))
+
+
 def _check_transition(rnd: Round, stage: Stage) -> None:
     if rnd.status == "drafted":
         raise RoundBusy("這一輪已完成起草；要重寫請用「以這一輪為基礎重新起草」")
@@ -113,6 +119,9 @@ def start_stage(s: Session, round_id: UUID, stage: Stage) -> None:
     for model in models:
         s.execute(delete(model).where(model.round_id == round_id))
     rnd.status, rnd.started_at, rnd.error, rnd.failed_stage = _RUNNING[stage], _now(), None, None
+    if stage == "extract":  # 拆解時有哪些對方書狀：之後又上傳了，自動流程才知道要重拆（設計 6.2）
+        from app.automation.fingerprints import opponent_fingerprint
+        rnd.extract_fingerprint = opponent_fingerprint(s, round_id)
     s.commit()
 
 

@@ -23,6 +23,7 @@ from app.ocr.state import OCR_STATES
 
 ROUND_STATUSES = ("created", "extracting", "extracted", "drafting", "drafted", "failed")
 RUNNING_STATUSES = ("extracting", "drafting")
+AUTOMATION_MODES = ("auto", "pause", "manual")  # 案件的自動化程度：不停／拆完先停／每步自己按（設計 6.1）
 BRIEF_KIND_CODES = ("complaint", "answer", "preparatory")
 
 
@@ -110,6 +111,7 @@ class Case(Base):
     __table_args__ = (
         _enum("our_side", ("plaintiff", "defendant"), "ck_case_side"),
         _enum("case_type", tuple(CASE_TYPES), "ck_case_type"),
+        _enum("automation", AUTOMATION_MODES, "ck_case_automation"),
         _tenant_key("cases"),
         _tfk("created_by", "members"),
     )
@@ -128,6 +130,8 @@ class Case(Base):
     reference_date: Mapped[date | None] = mapped_column(Date)  # 基準日，名稱依案型
     created_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
     created_at: Mapped[datetime] = _created()
+    automation: Mapped[str] = mapped_column(String(10), default="auto", server_default="auto")  # 設計 6.1
+    notes_auto_fingerprint: Mapped[str | None] = mapped_column(String(64))  # 卷證說明最後一次自動（或手動）開始時的輸入
 
 
 class CaseParty(Base):
@@ -157,11 +161,13 @@ class Round(Base):
         _enum("brief_kind", BRIEF_KIND_CODES, "ck_round_brief_kind"),
         _enum("failed_stage", ("extract", "draft"), "ck_round_failed_stage"),
         _enum("statement_variant", ("alive", "deceased"), "ck_round_statement_variant"),
+        _enum("auto_next", ("extract", "draft"), "ck_round_auto_next"),
         UniqueConstraint("case_id", "seq", name="uq_round_case_seq"),
         _tenant_key("rounds"),
         _tfk("case_id", "cases", "CASCADE"),
         _tfk("copied_from_round_id", "rounds", "SET NULL (copied_from_round_id)"),
         _tfk("amounts_checked_by", "members"),
+        _tfk("auto_by", "members"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
@@ -183,6 +189,14 @@ class Round(Base):
     claim_value: Mapped[int | None] = mapped_column(BigInteger)  # 訴訟標的金額或價額（律師填寫）
     amounts_checked_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
     amounts_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 自動流程（設計 6.2）：下一步已排定（保留到該階段結束）、觸發者（用量記在他身上）、逾時自動重跑次數、
+    # 被規則擋住時給律師看的訊息、拆解開始時的對方書狀指紋
+    auto_next: Mapped[str | None] = mapped_column(String(10))
+    auto_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    auto_retries: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    auto_note: Mapped[str | None] = mapped_column(Text)
+    extract_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    strategy: Mapped[str | None] = mapped_column(Text)  # 律師答辯策略（設計 6.4），起草與重寫都會帶入
 
 
 class Document(Base):
