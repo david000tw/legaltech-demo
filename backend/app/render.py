@@ -26,23 +26,15 @@ def citation_label(s: Session, c: Citation) -> str | None:
     return None
 
 
-# 引用前面是這些字＝當成句子的一部分（依民法…、此有原證1…可稽、（…參照）），照原樣
-_LEAD_IN = ("依", "按", "據", "照", "見", "如", "及", "與", "和", "或", "、", "，", ",", "有", "（", "(", "「", "同", "參",
-            "於", "之")
-# 引用後面是這些（或段落結束）＝接在句尾當出處
-_SENTENCE_END = "。，；：、）)」』！？\n"
-
-
-def _is_trailing_reference(before: str, after: str) -> bool:
-    """接在句尾當出處的引用（「…為肇事次因{{cite:E1}}。」）：前面是內容、後面是標點或段落結束。"""
-    head = before.rstrip()
-    return bool(head) and not head.endswith(_LEAD_IN) and (not after or after[0] in _SENTENCE_END)
+_OPEN = ("（", "(")
+_CLOSE = ("）", ")")
 
 
 def render_text(s: Session, p: Paragraph) -> str:
     """先重新驗證，再只把驗證通過的引用展開；失敗的引用顯示【未驗證：代碼】。
-    接在句尾當出處的引用加括號：卷證「（原證1第1頁）」、判決「（…判決意旨參照）」、法條「（民法第217條參照）」，
-    相鄰的幾個合成一組括號。"""
+    AI 用括號包起來當出處的引用（提示詞規定寫成「（{{cite:代碼}}）」），補成卷證「（原證1第1頁）」、
+    判決「（…判決意旨參照）」、法條「（民法第217條參照）」；括號裡相鄰的幾個合成一組。
+    其他寫法照原樣：不靠前後字猜文法（「被告違反民法…」「此有原證1…可稽」都是句中用法）。"""
     verify_paragraph(s, p)
     cites = {c.code: c for c in paragraph_citations(s, p.id)}
 
@@ -57,14 +49,19 @@ def render_text(s: Session, p: Paragraph) -> str:
             return f"「{c.quote}」" if c.quote.strip() else f"【引用錯誤：{code}】"
         return citation_label(s, c) or f"【引用錯誤：{code}】"
 
-    def reference(group: list) -> str:
+    def in_parentheses(group: list, after: str) -> str | None:
+        """括號裡只有引用（後面可能接「參照」「意旨參照」）時的完整寫法；不適用回 None。"""
         found = [cites.get(m.group(2)) for m in group]
         if any(c is None or c.verify_status not in ("ok", "warn") or not citation_label(s, c) for c in found):
-            return "".join(sub(m) for m in group)  # 有錯的引用照原樣顯示錯誤，不包括號
+            return None  # 有錯的引用照原樣顯示錯誤
         evidence = [citation_label(s, c) for c in found if c.kind == "evidence"]
-        legal = [citation_label(s, c) + ("意旨" if c.kind == "judgment" else "") for c in found if c.kind != "evidence"]
-        parts = (["、".join(evidence)] if evidence else []) + (["、".join(legal) + "參照"] if legal else [])
-        return "（" + "；".join(parts) + "）"
+        judgments = [c.kind == "judgment" for c in found if c.kind != "evidence"]
+        if after.startswith(_CLOSE):
+            legal = [citation_label(s, c) + ("意旨" if c.kind == "judgment" else "") for c in found if c.kind != "evidence"]
+            return "；".join((["、".join(evidence)] if evidence else []) + (["、".join(legal) + "參照"] if legal else []))
+        if after.startswith("參照") and not evidence and judgments:  # AI 寫了「參照」：判決補「意旨」
+            return "、".join(citation_label(s, c) + ("意旨" if c.kind == "judgment" else "") for c in found)
+        return None
 
     text = p.text or ""
     matches = list(MARKER_RE.finditer(text))
@@ -77,10 +74,9 @@ def render_text(s: Session, p: Paragraph) -> str:
                and matches[k + len(group)].start() == group[-1].end()):
             group.append(matches[k + len(group)])
         end = group[-1].end()
-        if m.group(1) == "cite" and _is_trailing_reference(text[:m.start()], text[end:]):
-            pieces.append(reference(group))
-        else:
-            pieces.append("".join(sub(g) for g in group))
+        done = (in_parentheses(group, text[end:])
+                if m.group(1) == "cite" and text[:m.start()].endswith(_OPEN) else None)
+        pieces.append(done if done is not None else "".join(sub(g) for g in group))
         pos, k = end, k + len(group)
     pieces.append(text[pos:])
     out = "".join(pieces)
