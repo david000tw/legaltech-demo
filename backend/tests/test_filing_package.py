@@ -83,6 +83,19 @@ def test_exhibit_list_docx(db):
     assert rows == [["證物號碼", "名稱", "頁數"], ["原證1", "01_研判表.txt", "1"]]
 
 
+def test_exhibit_list_survives_control_char_in_filename(db):
+    """批次 B：證物檔名含控制字元時，證物清單的 Word 表格以前會讓整個遞狀包 500（Word 匯出本來就會清）。"""
+    ctx, cs = ready(db)
+    with tenant_session(ctx["firm"]) as s:
+        s.get(Document, ctx["exhibit_doc"]).filename = "01_研判\x01表.txt"
+    force_reviewed(ctx["firm"], ctx["draft_id"])
+    r = _package(cs["lawyer"], ctx)
+    assert r.status_code == 200, r.text
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    table = docx.Document(io.BytesIO(z.read("02_證物清單.docx"))).tables[0]
+    assert [c.text for c in table.rows[1].cells] == ["原證1", "01_研判表.txt", "1"]
+
+
 EXTRA = {  # 依上傳順序成為原證2、3、4
     "a/b:c?.txt": "證人王小明證稱事故當時天候晴朗且路面乾燥視線良好無遮蔽。",
     "同名.txt#1": "修車廠估價單記載前保險桿與右側葉子板均需更換費用共計四萬五千元。",
