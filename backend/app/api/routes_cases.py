@@ -265,6 +265,8 @@ def _check_filer(s, case_id: UUID, party_id: UUID | None) -> None:
         party = s.get(CaseParty, party_id)
         if party is None or party.case_id != case_id:
             raise HTTPException(422, "遞狀人不是本案的當事人")
+        if party.alignment == "ours":  # 對造書狀是對方（或立場相同者）遞的，不會是我方
+            raise HTTPException(422, "遞狀人不能是我方當事人")
 
 
 class FilerBody(BaseModel):
@@ -336,6 +338,10 @@ def upload_document(case_id: UUID, request: Request, background: BackgroundTasks
     uploads = ([file] if file is not None else []) + list(files or [])
     if not uploads:
         raise HTTPException(422, "請選擇要上傳的檔案")
+    if kind == "opponent_brief" and round_id is None:
+        raise HTTPException(422, "對造書狀要指定輪次")
+    if kind != "opponent_brief" and filed_by_party_id is not None:
+        raise HTTPException(422, "只有對造書狀有遞狀人")
     prep = _prepare_upload(uploads)
     storage = LocalStorage(request.app.state.settings.storage_dir)
     with tenant_session(m.firm_id) as s:

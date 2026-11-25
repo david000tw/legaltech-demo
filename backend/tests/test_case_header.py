@@ -366,3 +366,64 @@ def test_single_filer_labels_even_unverified_quotes(lawyer_client):
         extract_claims(s, rid, FakeProvider({"claims": {"claims": [_claim(1, "這段原文不在書狀裡，是AI自己改寫的摘要")]}}), None)
     with tenant_session(firm) as s:
         assert "提出者：被告 宋文琪（立場與我方相同，不得反駁）" in draft_context(s, rid)
+
+
+# ---- 小問題批次（C2～C4）：上傳的輪次與遞狀人檢查 ----
+def test_opponent_brief_upload_requires_round(lawyer_client):
+    """C2a：對造書狀一定屬於某一輪；沒帶輪次回 422 與中文說明，不留下孤兒文件。"""
+    client, firm, _ = lawyer_client
+    cid = _estate_case(client)
+    r = client.post(f"/api/cases/{cid}/documents", data={"kind": "opponent_brief"},
+                    files={"file": ("答辯狀.txt", BRIEF_A.encode(), "text/plain")})
+    assert r.status_code == 422 and r.json()["detail"] == "對造書狀要指定輪次"
+    with tenant_session(firm) as s:
+        assert s.scalars(select(Document).where(Document.case_id == cid)).all() == []
+
+
+def test_evidence_upload_rejects_filer(lawyer_client):
+    """C4：卷證沒有遞狀人，上傳時帶了就擋下（PATCH 本來就擋）。"""
+    client, firm, _ = lawyer_client
+    cid = _estate_case(client)
+    parties = client.put(f"/api/cases/{cid}/parties", json=PARTIES).json()
+    r = client.post(f"/api/cases/{cid}/documents", data={"kind": "evidence", "filed_by_party_id": parties[1]["id"]},
+                    files={"file": ("收據.txt", "收據內容".encode(), "text/plain")})
+    assert r.status_code == 422 and r.json()["detail"] == "只有對造書狀有遞狀人"
+    with tenant_session(firm) as s:
+        assert s.scalars(select(Document).where(Document.case_id == cid)).all() == []
+
+
+def test_filer_cannot_be_our_own_party(lawyer_client):
+    """C4：對造書狀的遞狀人不能是我方當事人；上傳與改遞狀人都擋。立場相同者可以（他們也會遞狀）。"""
+    client, firm, _ = lawyer_client
+    cid = _estate_case(client)
+    parties = client.put(f"/api/cases/{cid}/parties", json=PARTIES).json()
+    rid = client.post(f"/api/cases/{cid}/rounds").json()["id"]
+    r = _upload(client, cid, rid, parties[0]["id"])
+    assert r.status_code == 422 and r.json()["detail"] == "遞狀人不能是我方當事人"
+    with tenant_session(firm) as s:
+        assert s.scalars(select(Document).where(Document.case_id == cid)).all() == []
+    doc = _upload(client, cid, rid, parties[1]["id"]).json()["id"]
+    r = client.patch(f"/api/documents/{doc}", json={"filed_by_party_id": parties[0]["id"]})
+    assert r.status_code == 422 and r.json()["detail"] == "遞狀人不能是我方當事人"
+    with tenant_session(firm) as s:
+        assert str(s.get(Document, doc).filed_by_party_id) == parties[1]["id"]
+    assert client.patch(f"/api/documents/{doc}", json={"filed_by_party_id": parties[2]["id"]}).status_code == 200
+
+
+def test_claims_step_ignores_filer_from_another_case(lawyer_client):
+    """C3：拆解步驟的遞狀人標示也要確認當事人屬於本案（與 claim_filers 一致）。"""
+    from uuid import UUID
+
+    from app.pipeline.claims import extract_claims
+    from tests.fakes.fake_provider import FakeProvider
+    client, firm, _ = lawyer_client
+    cid, other = _estate_case(client), _estate_case(client)
+    foreign = client.put(f"/api/cases/{other}/parties", json=PARTIES).json()
+    rid = client.post(f"/api/cases/{cid}/rounds").json()["id"]
+    assert _upload(client, cid, rid).status_code == 200
+    with tenant_session(firm) as s:  # API 不允許，直接改資料庫模擬舊資料
+        s.scalars(select(Document).where(Document.case_id == cid)).one().filed_by_party_id = UUID(foreign[1]["id"])
+    fake = FakeProvider({"claims": {"claims": []}})
+    with tenant_session(firm) as s:
+        extract_claims(s, rid, fake, None)
+    assert "【遞狀人" not in fake.calls[0]["user"]
