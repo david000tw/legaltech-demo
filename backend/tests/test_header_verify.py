@@ -130,7 +130,39 @@ def test_case_view_shows_auto_filled_sources(ctx):
     _apply(ctx["firm"], ctx["case_id"], doc)
     body = ctx["clients"]["lawyer"].get(f"/api/cases/{ctx['case_id']}").json()
     assert body["header_auto"]["case_number"] == {"filename": "書狀.txt", "page_no": 1, "verified": False,
-                                                  "document_id": str(doc)}
+                                                  "document_id": str(doc), "value": "114年度訴字第123號"}
     assert body["header_unverified"] is True
     opp = next(p for p in body["parties"] if p["name"] == "林大明")
     assert opp["auto"] is True and opp["auto_verified"] is False
+
+
+def test_cleared_field_is_not_filled_again(ctx):
+    """審查 #2：律師清掉的自動帶入欄位，之後再上傳書狀也不會被填回去。"""
+    doc = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], PREPARATORY)
+    _apply(ctx["firm"], ctx["case_id"], doc)
+    assert ctx["clients"]["lawyer"].patch(f"/api/cases/{ctx['case_id']}", json={"case_number": None}).status_code == 200
+    later = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], PREPARATORY, name="準備書狀二.txt")
+    assert "case_number" not in _apply(ctx["firm"], ctx["case_id"], later)
+    with tenant_session(ctx["firm"]) as s:
+        assert s.get(Case, ctx["case_id"]).case_number is None
+
+
+def test_deleted_auto_party_is_not_added_again(ctx):
+    doc = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], COMPLAINT)
+    _apply(ctx["firm"], ctx["case_id"], doc)
+    lawyer = ctx["clients"]["lawyer"]
+    parties = lawyer.get(f"/api/cases/{ctx['case_id']}").json()["parties"]
+    keep = [p for p in parties if p["name"] != "林大明"]
+    assert lawyer.put(f"/api/cases/{ctx['case_id']}/parties", json=keep).status_code == 200
+    later = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], COMPLAINT, name="起訴狀副本.txt")
+    assert "林大明" not in _apply(ctx["firm"], ctx["case_id"], later)
+    with tenant_session(ctx["firm"]) as s:
+        names = [p.name for p in s.scalars(select(CaseParty).where(CaseParty.case_id == ctx["case_id"]))]
+    assert "林大明" not in names
+
+
+def test_case_view_shows_auto_filled_values(ctx):
+    doc = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], PREPARATORY)
+    _apply(ctx["firm"], ctx["case_id"], doc)
+    body = ctx["clients"]["lawyer"].get(f"/api/cases/{ctx['case_id']}").json()
+    assert body["header_auto"]["case_number"]["value"] == "114年度訴字第123號"

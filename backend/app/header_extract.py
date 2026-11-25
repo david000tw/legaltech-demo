@@ -19,7 +19,13 @@ from app.ingest.service import document_page_texts
 from app.models import Case, CaseParty, Document
 
 HEADER_FIELDS = ("court", "case_number", "division", "cause")
-_HEADING = re.compile(r"^[\s一二三四五六七八九十、．.（）()0-9]*(訴之聲明|答辯聲明|上訴聲明|聲明|事實及理由|理由|事實)\s*[:：]?\s*$")
+DISMISSED = "_dismissed_parties"  # header_auto 裡記「律師刪掉的自動帶入對造」姓名；底線開頭的鍵不是欄位
+# 標題：可帶「一、」「壹、」「(一)」等編號，也可以「答辯聲明：原告之訴駁回」同一行接內容
+_HEADING = re.compile(r"^[\s一二三四五六七八九十壹貳參肆伍陸柒捌玖拾、．.（）()0-9]*"
+                      r"(訴之聲明|答辯聲明|上訴聲明|聲明|事實及理由|理由|事實)\s*(?:[:：].*)?$")
+# 「被告　否認」「原告　主張」這類動詞不是名字
+_NOT_NAME_PREFIX = ("否認", "主張", "辯稱", "抗辯", "同意", "爭執", "自認", "答辯", "聲明", "表示")
+_NOT_NAME = {"陳述", "陳稱"}  # 陳是常見姓氏：只排除完全相同的兩字
 _CJK = r"[一-鿿]"
 _PERSON = rf"{_CJK}{{2,4}}"
 _COMPANY = rf"[一-鿿A-Za-z0-9()]{{2,30}}?(?:股份有限公司|有限公司|公司)"
@@ -65,7 +71,7 @@ def read_header(text: str, *, full_text: str | None = None) -> HeaderGuess:
     g = HeaderGuess()
     for i, line in enumerate(lines):
         m = _PARTY.match(line)
-        if m:
+        if m and not m.group("name").startswith(_NOT_NAME_PREFIX) and m.group("name") not in _NOT_NAME:
             (g.plaintiffs if m.group(1) == "原" else g.defendants).append(m.group("name"))
         if g.case_number is None and (n := _CASE_NO.search(line)):
             g.case_number = f"{n.group(1)}年度{n.group(2)}字第{n.group(3)}號"
@@ -108,7 +114,7 @@ def apply_header_guess(s: Session, case_id: UUID, document_id: UUID) -> list[str
     auto = dict(case.header_auto or {})
     for name in HEADER_FIELDS:
         value = getattr(guess, name)
-        if value and not getattr(case, name):
+        if value and not getattr(case, name) and name not in auto:  # 自動填過、律師又清掉的欄位不再填回
             setattr(case, name, value)
             auto[name] = {"document_id": str(document_id), "page_no": _page_of(pages, value),
                           "verified_by": None, "verified_bar": None, "verified_at": None}
@@ -117,7 +123,7 @@ def apply_header_guess(s: Session, case_id: UUID, document_id: UUID) -> list[str
     our_role, their_role = ("原告", "被告") if case.our_side == "plaintiff" else ("被告", "原告")
     theirs = guess.defendants if their_role == "被告" else guess.plaintiffs
     parties = list(s.scalars(select(CaseParty).where(CaseParty.case_id == case_id)))
-    known = {p.name for p in parties}
+    known = {p.name for p in parties} | set(auto.get(DISMISSED, []))  # 律師刪掉的自動帶入對造不再加回
     seq = (s.scalar(select(func.max(CaseParty.seq)).where(CaseParty.case_id == case_id)) or 0)
     for name in theirs:
         if name in known:
@@ -135,10 +141,21 @@ def apply_header_guess(s: Session, case_id: UUID, document_id: UUID) -> list[str
     return filled
 
 
+def auto_fields(case: Case) -> dict[str, dict]:
+    """header_auto 裡真正的欄位紀錄（略過 DISMISSED 這類底線開頭的鍵）。"""
+    return {k: v for k, v in (case.header_auto or {}).items() if not k.startswith("_")}
+
+
+def dismiss_auto_party(case: Case, name: str) -> None:
+    auto = dict(case.header_auto or {})
+    auto[DISMISSED] = sorted(set(auto.get(DISMISSED, [])) | {name})
+    case.header_auto = auto
+
+
 def header_unverified(s: Session, case_id: UUID) -> bool:
     """有自動帶入、還沒核對的狀頭欄位或對造當事人：匯出擋下（header_unverified）。"""
     case = s.get(Case, case_id)
-    if any(v.get("verified_by") is None for v in (case.header_auto or {}).values()):
+    if any(v.get("verified_by") is None for v in auto_fields(case).values()):
         return True
     return s.scalar(select(CaseParty.id).where(CaseParty.case_id == case_id, CaseParty.auto_document_id.is_not(None),
                                                CaseParty.auto_verified.is_(False)).limit(1)) is not None
@@ -149,8 +166,8 @@ def verify_header(s: Session, case_id: UUID, member_id: UUID, bar_number: str | 
     """律師核對：fields 為 None 時確認目前全部未核對的欄位與自動帶入的當事人。"""
     case = s.get(Case, case_id, with_for_update=CASE_LOCK)
     now = datetime.now(timezone.utc).isoformat()
-    auto = {}
-    for name, entry in (case.header_auto or {}).items():
+    auto = dict(case.header_auto or {})
+    for name, entry in auto_fields(case).items():
         if entry.get("verified_by") is None and (fields is None or name in fields):
             entry = {**entry, "verified_by": str(member_id), "verified_bar": bar_number, "verified_at": now}
         auto[name] = entry

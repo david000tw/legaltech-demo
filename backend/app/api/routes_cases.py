@@ -18,7 +18,7 @@ from app.db import CASE_LOCK, tenant_session
 from app.ingest.extract import UnreadableFile, UnsupportedFile, file_ext
 from app.ingest.service import current_page_text, ingest_document
 from app.automation import decide
-from app.header_extract import header_unverified, verify_header
+from app.header_extract import auto_fields, dismiss_auto_party, header_unverified, verify_header
 from app.automation import run as automation
 from app.automation.placement import (
     PlacementRule, opponent_target, place_opponent_upload, round_accepts_upload,
@@ -116,10 +116,11 @@ def _party_json(p: CaseParty) -> dict:
 def _header_auto_json(s, case: Case) -> dict:
     """自動帶入的欄位：來源（檔名、頁碼）與是否已核對（設計 6.6）。"""
     out = {}
-    for name, entry in (case.header_auto or {}).items():
+    for name, entry in auto_fields(case).items():
         doc = s.get(Document, UUID(entry["document_id"])) if entry.get("document_id") else None
         out[name] = {"document_id": entry.get("document_id"), "filename": doc.filename if doc else None,
-                     "page_no": entry.get("page_no"), "verified": entry.get("verified_by") is not None}
+                     "page_no": entry.get("page_no"), "verified": entry.get("verified_by") is not None,
+                     "value": getattr(case, name)}
     return out
 
 
@@ -162,7 +163,7 @@ def patch_case(case_id: UUID, body: CasePatch, m: CurrentMember = Depends(curren
                 changed.append(key)
             setattr(case, key, new)
         # 律師親手改過的自動帶入欄位視為已核對（值真的變了才算；助理的修改不算，設計 6.6）
-        auto_changed = tuple(k for k in changed if k in (case.header_auto or {}))
+        auto_changed = tuple(k for k in changed if k in auto_fields(case))
         if auto_changed and m.role == "lawyer" and m.bar_verified:
             verify_header(s, case_id, m.id, m.bar_number, auto_changed)
         s.flush()
@@ -188,7 +189,8 @@ def put_parties(case_id: UUID, body: Annotated[list[PartyBody], Field(max_length
     if len(ids) != len(set(ids)):
         raise HTTPException(422, "同一位當事人出現兩次")
     with tenant_session(m.firm_id) as s:
-        if s.get(Case, case_id, with_for_update=CASE_LOCK) is None:  # 鎖住案件列：兩個分頁同時儲存不會重複新增
+        case = s.get(Case, case_id, with_for_update=CASE_LOCK)  # 鎖住案件列：兩個分頁同時儲存不會重複新增
+        if case is None:
             raise HTTPException(404, "找不到案件")
         existing = {p.id: p for p in case_parties(s, case_id)}
         unknown = [str(b.id) for b in body if b.id is not None and b.id not in existing]
@@ -197,6 +199,8 @@ def put_parties(case_id: UUID, body: Annotated[list[PartyBody], Field(max_length
         keep = {b.id for b in body if b.id is not None}
         for pid, p in existing.items():
             if pid not in keep:
+                if p.auto_document_id is not None:  # 刪掉自動帶入的對造：之後的書狀不再把他加回來
+                    dismiss_auto_party(case, p.name)
                 s.delete(p)
         s.flush()
         out = []

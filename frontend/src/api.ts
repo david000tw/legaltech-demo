@@ -64,7 +64,10 @@ export type Alignment = 'ours' | 'opposing' | 'aligned'
 export type Party = { id: string; seq: number; name: string; role: string; alignment: Alignment; legal_rep: string | null
   position_note: string | null
   auto?: boolean; auto_verified?: boolean }  // 從對方書狀自動加入的對造、是否已核對（設計 6.6）
-export type HeaderAutoField = { document_id: string | null; filename: string | null; page_no: number | null; verified: boolean }
+export type HeaderAutoField = {
+  document_id: string | null; filename: string | null; page_no: number | null; verified: boolean
+  value: string | null  // 欄位目前的值；律師清掉了就是 null
+}
 export type PartyInput = { id?: string; name: string; role: string; alignment: Alignment; legal_rep: string | null
   position_note: string | null }
 export type Procedure = 'civil' | 'family'

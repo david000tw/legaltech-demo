@@ -66,3 +66,29 @@ def test_read_header_court_with_branch_before_seal():
     """驗收實測發現：「臺灣臺中地方法院臺中簡易庭　公鑒」也要讀出法院（庭名不限於民事庭、家事法庭）。"""
     text = "民事起訴狀\n原告：王建宏\n被告：張美玲\n為請求損害賠償事件，依法起訴事：\n二、事實及理由：\n內文\n此致\n臺灣臺中地方法院臺中簡易庭　公鑒\n"
     assert read_header(text).court == "臺灣臺中地方法院"
+
+
+FORMAL = """民事答辯狀
+被　　告　王小華
+壹、答辯聲明
+一、原告之訴駁回。
+貳、事實及理由
+一、按最高法院112年度台上字第123號判決意旨，被告並無過失。
+被告　否認
+"""
+
+
+def test_read_header_formal_numeral_headings_stop_reading():
+    """審查 #2：「壹、答辯聲明」「貳、事實及理由」也是標題；內文引用的判決字號、法院、「被告　否認」都不能讀成狀頭。"""
+    g = read_header(FORMAL)
+    assert g.court is None and g.case_number is None
+    assert g.defendants == ["王小華"] and g.plaintiffs == []
+
+
+def test_read_header_inline_heading_stops_reading():
+    g = read_header("民事答辯狀\n答辯聲明：原告之訴駁回。\n原　　告　林大明\n")
+    assert g.plaintiffs == []
+
+
+def test_read_header_verbs_are_not_names():
+    assert read_header("被　　告　否認\n原　　告　主張\n").defendants == []

@@ -36,7 +36,7 @@ export default function HeaderAutoNotice({ caseId, auto, parties, missing = [], 
           <li key={name}>
             <button type="button" className="text-left hover:underline" disabled={!f.document_id}
               onClick={() => f.document_id && onOpenDocument(f.document_id)}>
-              {`${FIELD_LABEL[name] ?? name}：從對方書狀「${f.filename ?? ''}」第 ${f.page_no ?? 1} 頁帶入${f.verified ? '（已核對）' : '，請核對'}`}
+              {`${FIELD_LABEL[name] ?? name}${f.value ? `「${f.value}」` : '（已清空）'}：從對方書狀「${f.filename ?? ''}」第 ${f.page_no ?? 1} 頁帶入${f.verified ? '（已核對）' : '，請核對'}`}
             </button>
           </li>
         ))}
