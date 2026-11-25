@@ -15,6 +15,7 @@ from app.api import (
 )
 from app.config import Settings
 from app.corpus.importer import fetch_pdf
+from app.automation.recovery import interrupt_running_work
 from app.ocr.job import interrupt_running_ocr_jobs
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,13 @@ async def lifespan(app: FastAPI):
                 log.warning("啟動時把 %d 筆上次留下的辨識工作標成中斷", n)
         except Exception:
             log.exception("啟動時標記中斷的辨識工作失敗；這些工作要等心跳逾時才會出現「繼續辨識」")
+        try:  # 輪次階段與其他 AI 工作也一樣：自動排定的階段下一次打開頁面時會自動重跑一次（設計 6.2）
+            rounds, jobs = await asyncio.wait_for(run_in_threadpool(interrupt_running_work),
+                                                  STARTUP_RECOVERY_TIMEOUT_S)
+            if rounds or jobs:
+                log.warning("啟動時把 %d 個輪次階段、%d 筆 AI 工作標成中斷", rounds, jobs)
+        except Exception:
+            log.exception("啟動時標記中斷的輪次與 AI 工作失敗；這些要等逾時才會出現「重試」")
     yield
 
 
