@@ -29,7 +29,8 @@ from app.models import (
     AIJob, Candidate, Case, Claim, Document, HealthReport, Judgment, JudgmentPassage, Round, StatuteArticle,
 )
 from app.pipeline.candidates import (
-    SELECT_TOKEN_LIMIT, claims_header, format_candidates, format_claims, resolve_references, round_candidates,
+    SELECT_TOKEN_LIMIT, claims_header, format_candidates, format_claims, resolve_reference, resolve_references,
+    round_candidates,
 )
 from app.pipeline.case_context import case_context
 from app.pipeline.claims import claim_filers, selected_claims
@@ -37,6 +38,8 @@ from app.pipeline.evidence_notes import document_fingerprint
 from app.pipeline.jobs import JobContext, JobRule
 from app.sources import SourcePage, check_source, code_key, pending_ocr, soften, source_pages, source_view
 from app.statements import confirmed_requests
+from app.text_norm import normalize_text
+from app.verify.citations import scan_case_numbers
 
 REF_KINDS = ("judgment", "statute")
 
@@ -112,6 +115,22 @@ def _references(s: Session, item: dict, cands: dict[str, Candidate]) -> tuple[li
     return refs, not_in_list
 
 
+def _check_written_case_numbers(s: Session, text: str, cands: dict[str, Candidate], refs: list[str],
+                                not_in_list: list[str]) -> None:
+    """標題與說明裡直接寫的判決字號（與起草的「自行寫字號」同一套掃描）：對得回本輪候選判決的補進參考
+    （判決在候選裡但有好幾個段落時，字號本身沒有錯，不補也不列），對不回的列「不在清單」。
+    已經列在 not_in_list 裡的不重複列。"""
+    seen = [normalize_text(t) for t in not_in_list]
+    for hit in scan_case_numbers(text):
+        r = resolve_reference(s, hit, cands)
+        if r["status"] == "mapped" and cands[r["code"]].kind in REF_KINDS:
+            if r["code"] not in refs:
+                refs.append(r["code"])
+        elif r["status"] == "unmatched" and not any(normalize_text(hit) in x for x in seen):
+            not_in_list.append(hit)
+            seen.append(normalize_text(hit))
+
+
 def _save(s: Session, job: AIJob, data: dict, pages: dict[tuple[str, int], SourcePage], complaint: bool,
           fingerprint: str) -> None:
     cands = round_candidates(s, job.round_id)
@@ -120,8 +139,10 @@ def _save(s: Session, job: AIJob, data: dict, pages: dict[tuple[str, int], Sourc
         title = soften(str(it.get("title", "")).strip())
         if it.get("level") not in HEALTH_LEVELS or not title:
             continue
+        explanation = soften(str(it.get("explanation", "")).strip())
         refs, not_in_list = _references(s, it, cands)
-        items.append({"level": it["level"], "title": title, "explanation": soften(str(it.get("explanation", "")).strip()),
+        _check_written_case_numbers(s, f"{title}\n{explanation}", cands, refs, not_in_list)
+        items.append({"level": it["level"], "title": title, "explanation": explanation,
                       "claim_seqs": [x for x in it.get("claim_seqs", []) or [] if isinstance(x, int)],
                       "absence": bool(it.get("absence")),
                       "basis": [_basis(pages, ev)[0] for ev in it.get("evidence", []) or []],

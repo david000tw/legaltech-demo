@@ -26,7 +26,7 @@ export default function CitationTag({ citation, onClick }: { citation: CitationV
     <button type="button" onClick={onClick} data-state={state} title={title}
       className={`rounded border px-2 py-0.5 text-xs ${STYLE[state]}`}>
       {citation.code}・{citation.label ?? '來源不明'}
-      {citation.annotation && (
+      {citation.annotation?.startsWith('少數見解') && (  // 與後端 corpus/search.py 的 MINORITY_PREFIX 一致：只有「少數見解」開頭才算
         <span title={citation.annotation} className="ml-1 rounded bg-purple-100 px-1 text-purple-800">少數見解</span>
       )}
     </button>

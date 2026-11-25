@@ -101,3 +101,19 @@ def test_level1_court_section_children_stay_court():
     assert _kinds(passages, "綜上，原告請求為有理由") == {"court_reasoning"}
     assert _kinds(passages, "訴訟費用負擔之依據") == {"other"}
     assert _kinds(passages, "同意原告請求") == {"party_claim"}
+
+
+def test_lue_yi_heading_is_party_claim():
+    """「原告略以：」「被告略以：」是當事人主張的標題，和「略謂」一樣不能被當成法院判斷。"""
+    text = """主文
+原告之訴駁回。
+事實及理由
+一、原告略以：被告駕車未注意車前狀況撞傷原告，致原告受有傷害，應賠償醫療費用10萬元。
+二、被告略以：原告自己超速，應負主要過失責任，請求金額過高等語。
+三、本院之判斷：
+㈠經查原告受有傷害，有診斷證明書可稽。
+"""
+    passages = split_judgment(text)
+    assert _kinds(passages, PLAINTIFF) == {"party_claim"}
+    assert _kinds(passages, DEFENDANT) == {"party_claim"}
+    assert _kinds(passages, COURT) == {"court_reasoning"}

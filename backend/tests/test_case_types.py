@@ -286,3 +286,20 @@ def test_real_civil_case_words_still_read(number, word):
     """暫代文字擋掉之後，真的民事字別（含簡寫格式）仍要讀得出來。"""
     assert procedure_for("estate_partition", number) == "civil"
     assert word in procedure_warning("estate_partition", number)
+
+
+# ---- 批次 B：簡寫案號前面帶法院名稱也要讀得出字別 ----
+@pytest.mark.parametrize("number,word,procedure", [
+    ("臺灣臺北地方法院113家繼訴89", "家繼訴", "family"),
+    ("臺灣高等法院112上易123", "上易", "civil"),
+    ("臺灣高等法院臺中分院112上易123", "上易", "civil"),
+    ("臺灣高等法院 臺中分院 112 上易 123", "上易", "civil"),
+    ("臺灣臺北地方法院113年度家訴字第5號", "家訴", "family"),
+    ("最高法院112台上123", "台上", "civil"),
+    ("臺灣高雄少年及家事法院113訴5", "訴", "civil"),  # 法院名稱裡的「家」不是字別
+])
+def test_short_case_number_with_court_prefix_reads_word(number, word, procedure):
+    assert procedure_for("traffic_tort" if procedure == "family" else "estate_partition", number) == procedure
+    ct = "traffic_tort" if procedure == "family" else "estate_partition"
+    warning = procedure_warning(ct, number)
+    assert warning is not None and "無法判讀" not in warning and f"「{word}」" in warning

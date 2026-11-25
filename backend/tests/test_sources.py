@@ -141,3 +141,28 @@ def test_page_source_other_firm_404(lawyer_client, db):
     assert login(b, "b@example.test").status_code == 200
     assert b.get(f"/api/pages/{ev}/source").status_code == 404
     assert client.get(f"/api/pages/{uuid.uuid4()}/source").status_code == 404
+
+
+# ---- 批次 B：soften 要涵蓋「業已／業經／已經／獲得證實」，而且改完讀起來要通順 ----
+import pytest  # noqa: E402
+
+from app.sources import soften  # noqa: E402
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("收據已證實原告支出醫療費用", "收據可佐證原告支出醫療費用"),
+    ("金額已驗證無誤", "金額可佐證無誤"),
+    ("收據業已證實原告支出醫療費用", "收據可佐證原告支出醫療費用"),  # 不能留下「業可佐證」
+    ("收據業經證實原告支出醫療費用", "收據可佐證原告支出醫療費用"),
+    ("收據已經證實原告支出醫療費用", "收據可佐證原告支出醫療費用"),
+    ("原告之主張獲得證實", "原告之主張獲得佐證"),
+    ("沒有誇大的字眼", "沒有誇大的字眼"),
+])
+def test_soften_overclaim_wording(raw, expected):
+    assert soften(raw) == expected
+
+
+def test_soften_leaves_no_overclaim_word_behind():
+    out = soften("業已證實、業經證實、已經證實、獲得證實、已證實、已驗證")
+    for word in ("證實", "驗證"):
+        assert word not in out

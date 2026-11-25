@@ -53,6 +53,9 @@ _NOT_WORD = re.compile(r"[\d〇零一二三四五六七八九十百千\s年度�
 _DIGIT = re.compile(r"[\d〇零一二三四五六七八九十百千]")
 # 字別要像字別：1～8 個漢字，且含常見字別用字。「尚未分案」「待補」「○○」「XX」這類暫代文字不算（最終審查 I1）。
 _WORD_SHAPE = re.compile(r"^[\u4e00-\u9fff]{1,8}$")
+# 案號前面可能帶法院名稱（「臺灣臺北地方法院113家繼訴89」「臺灣高等法院臺中分院112上易123」）：先去掉，
+# 否則法院名稱會讓字別超過 8 字，也會把「少年及家事法院」的「家」誤當成字別。
+_COURT_PREFIX = re.compile(r"^\s*[\u4e00-\u9fff]{2,12}?法院(?:\s*[\u4e00-\u9fff]{1,6}分院)?")
 _WORD_CHARS = set("訴簡上抗調繼聲執全家婚親再救小促重移監輔護養財非易司債票拍消勞智國交選原金醫建審")
 
 
@@ -66,7 +69,7 @@ def case_type_of(code: str | None) -> CaseType:
 
 def _word(case_number: str | None) -> str | None:
     """案號的字別，例如「113年度家繼訴字第89號」→「家繼訴」。"""
-    text = normalize_text(case_number or "")
+    text = _COURT_PREFIX.sub("", normalize_text(case_number or ""), count=1)
     m = _CASE_WORD.search(text)
     if m:
         return m.group(1) if _looks_like_word(m.group(1)) else None

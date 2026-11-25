@@ -520,3 +520,55 @@ def test_exhibit_numbers_and_lists_are_not_cross_references(db, text):
     pid = make_paragraph(ctx, text, [])
     reasons, _ = para(ctx, pid)
     assert not any(r.startswith("numbered_cross_reference:") for r in reasons), (text, reasons)
+
+
+# ---- 批次 B：同一段落對同一代碼給了不同引文，不能默默丟掉第二筆 ----
+def _other_quote(ctx) -> str:
+    """同一個 J1 法院判斷段裡另一段 15 字以上、與 J_REASONING 不同的逐字引文。"""
+    from app.db import admin_session
+    from app.models import JudgmentPassage
+    with admin_session() as s:
+        text = s.get(JudgmentPassage, ctx["j1"]).text
+    other = text[:20]
+    assert normalize_text(other) != normalize_text(J_REASONING)
+    return other
+
+
+def test_same_code_different_quotes_flagged(db):
+    ctx = setup_verify_round()
+    other = _other_quote(ctx)
+    pid = make_paragraph(ctx, "查{{cite:J1}}認：{{quote:J1}}。又認：{{quote:J1}}。",
+                         [("J1", J_REASONING), ("J1", other)])
+    reasons, cites = para(ctx, pid)
+    assert "citation_quote_conflict:J1" in reasons
+    assert len(cites) == 1 and cites["J1"].quote == J_REASONING  # 仍只存一筆（第一筆）
+    assert cites["J1"].verify_status == "failed"
+    with tenant_session(ctx["firm"]) as s:
+        blockers = [b.reason for b in export_blockers(s, ctx["draft_id"])]
+    assert "citation_quote_conflict:J1" in blockers  # 匯出前重新驗證也還在，不會因為重驗而消失
+
+
+def test_same_code_same_quote_not_flagged(db):
+    ctx = setup_verify_round()
+    pid = make_paragraph(ctx, "查{{cite:J1}}認：{{quote:J1}}。",
+                         [("J1", J_REASONING), ("J1", "  " + J_REASONING + " ")])
+    reasons, cites = para(ctx, pid)
+    assert reasons == []
+    assert cites["J1"].verify_status == "ok"
+
+
+# ---- 批次 B：「包括(一)…、(二)…」是列舉，不是段落編號參照 ----
+@pytest.mark.parametrize("text", [
+    "被告之過失包括(一)未減速、(二)未注意車前狀況、(三)闖紅燈。",
+    "請求項目包括㈠醫療費用、㈡薪資損失。",
+    "損害包括：(一)醫療費、(二)看護費。",
+])
+def test_enumerated_list_with_dun_and_baokuo_not_flagged(text):
+    from app.verify.citations import scan_numbered_cross_references
+    assert scan_numbered_cross_references(text) == [], text
+
+
+@pytest.mark.parametrize("text", ["如前述(二)所示，被告應負責。", "同(二)所述，被告應負責。", "如前述(二)、(三)所示。"])
+def test_real_cross_references_still_flagged_after_list_fix(text):
+    from app.verify.citations import scan_numbered_cross_references
+    assert scan_numbered_cross_references(text), text

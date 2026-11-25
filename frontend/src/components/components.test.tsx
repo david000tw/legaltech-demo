@@ -102,6 +102,11 @@ describe('minority opinion', () => {
     render(<CitationTag citation={cite({ annotation: null })} onClick={vi.fn()} />)
     expect(screen.queryByText('少數見解')).not.toBeInTheDocument()
   })
+
+  it('shows no minority badge for an annotation that does not start with 少數見解', () => {
+    render(<CitationTag citation={cite({ annotation: '本判決已由上級審廢棄，請改引新判決' })} onClick={vi.fn()} />)
+    expect(screen.queryByText('少數見解')).not.toBeInTheDocument()
+  })
 })
 
 describe('ExportButton numbering', () => {

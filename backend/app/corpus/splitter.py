@@ -43,7 +43,7 @@ _OTHER = re.compile(r"訴訟費用|假執行|據上論結|爭執事項|原審|�
 _CLOSERS = tuple("。：:；;」）)")
 _TRIM = " \t\u3000\xa0ˉ"  # 空白、tab、全形空白、不換行空白、PDF 常見的 ˉ
 SHORT_HEADING = 12
-_PARTY = re.compile(r"(原告|被告|上訴人|被上訴人|聲請人|相對人).*?(主張|起訴|則以|抗辯|辯稱|答辯|略謂|部分|稱)")
+_PARTY = re.compile(r"(原告|被告|上訴人|被上訴人|聲請人|相對人).*?(主張|起訴|則以|抗辯|辯稱|答辯|略謂|略以|部分|稱)")
 _DATE = re.compile(r"^\s*中\s*華\s*民\s*國")
 COURT_MIN_RATIO = 0.15
 

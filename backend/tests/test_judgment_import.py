@@ -1,5 +1,6 @@
 """子專案丙 Task 2：律師貼司法院判決網址，系統自己向司法院下載 PDF 加入判決庫。測試一律不連網。"""
 import email.message
+import http.client
 import io
 import json
 import threading
@@ -314,3 +315,30 @@ def test_import_other_firm_case_404(db):
     _fetcher(client, calls)
     assert client.post(f"/api/cases/{case_b}/judgments/import", json={"url": URL_DATA}).status_code == 404
     assert calls == [] and _count(Judgment) == 0
+
+
+class _ReadFails(io.BytesIO):
+    def read(self, *a):
+        raise http.client.IncompleteRead(b"%PDF-1.7", 100)
+
+
+def test_fetch_pdf_http_client_errors_are_friendly(monkeypatch):
+    """批次 B：分塊傳輸中斷（IncompleteRead）、狀態列壞掉（BadStatusLine）不是 OSError，
+    以前會變成 500，現在要和其他下載失敗一樣回「司法院網站沒有回傳判決 PDF」。"""
+    url = pdf_url(parse_judgment_url(URL_FILE))
+    _use(monkeypatch, FakeHTTPS(error=http.client.BadStatusLine("garbage")))
+    with pytest.raises(ImportRejected) as e:
+        importer.fetch_pdf(url)
+    assert e.value.message == FETCH_FAILED
+
+    class Truncated(FakeHTTPS):
+        def https_open(self, req):
+            msg = email.message.Message()
+            resp = urllib.response.addinfourl(_ReadFails(), msg, req.full_url, 200)
+            resp.msg = "fake"
+            return resp
+
+    _use(monkeypatch, Truncated())
+    with pytest.raises(ImportRejected) as e:
+        importer.fetch_pdf(url)
+    assert e.value.message == FETCH_FAILED

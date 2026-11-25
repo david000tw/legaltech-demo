@@ -131,6 +131,60 @@ def test_health_not_in_list(db):
     assert got["not_in_list"] == ["J9", "最高法院100年度台上字第1號"]
 
 
+def test_health_case_number_in_explanation_not_in_list(db):
+    """批次 B：AI 在標題或說明裡直接寫的判決字號，不在候選清單就要列「不在清單」，不能只是原樣顯示。"""
+    ctx = drafted()
+    item = {**HIGH, "title": "與有過失可能成立（參照最高法院99年度台上字第2號）",
+            "explanation": "參照最高法院100年度台上字第1號判決意旨，對造主張原告未減速。"}
+    report, _, _ = run(ctx, report_data(items=[item]), db)
+    got = report["items"][0]
+    assert got["not_in_list"] == ["99年度台上字第2號", "100年度台上字第1號"]
+    assert [r["code"] for r in got["references"]] == ["J1", "S1"]
+
+
+def test_health_candidate_case_number_in_explanation_is_not_flagged(db):
+    ctx = drafted()
+    item = {**HIGH, "references": ["S1"],
+            "explanation": "可參臺灣臺中地方法院113年度中簡字第3946號判決，該判決也認定未減速的責任。"}
+    report, _, _ = run(ctx, report_data(items=[item]), db)
+    got = report["items"][0]
+    assert got["not_in_list"] == []  # 這則判決在候選裡（J1、J2 是同一則的兩個段落），字號沒有錯
+
+
+def test_health_case_number_of_unique_candidate_added_to_references(db):
+    from datetime import date
+
+    from app.db import admin_session
+    from app.models import Candidate, Judgment, JudgmentPassage
+    ctx = drafted()
+    with admin_session() as s:
+        j = Judgment(citation="測試法院113年度測字第77號", court="測試法院", court_level="district",
+                     decided_on=date(2024, 1, 1), source_url="https://example.invalid/", full_text="x",
+                     status="active", curated=False)
+        s.add(j)
+        s.flush()
+        p = JudgmentPassage(judgment_id=j.id, seq=1, passage_type="court_reasoning", text="x", status="active")
+        s.add(p)
+        s.flush()
+        pid = p.id
+    with tenant_session(ctx["firm"]) as s:
+        s.add(Candidate(firm_id=ctx["firm"], round_id=ctx["round_id"], code="J3", kind="judgment",
+                        judgment_passage_id=pid))
+    item = {**HIGH, "references": ["S1"], "explanation": "可參測試法院113年度測字第77號判決的見解。"}
+    report, _, _ = run(ctx, report_data(items=[item]), db)
+    got = report["items"][0]
+    assert got["not_in_list"] == []
+    assert [r["code"] for r in got["references"]] == ["S1", "J3"]
+
+
+def test_health_case_number_not_listed_twice(db):
+    ctx = drafted()
+    item = {**HIGH, "explanation": "參照最高法院100年度台上字第1號判決意旨。",
+            "other_references": ["最高法院100年度台上字第1號"]}
+    report, _, _ = run(ctx, report_data(items=[item]), db)
+    assert report["items"][0]["not_in_list"] == ["最高法院100年度台上字第1號"]
+
+
 def test_health_undisputed_from_opponent(db):
     ctx = drafted()
     undisputed = [{"fact": "被告承認原告未減速", "source": "對造書狀A", "page_no": 1, "quote": OPP_QUOTE},
