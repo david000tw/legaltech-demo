@@ -15,7 +15,7 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.models import Document, OpponentExhibit, Page
+from app.models import CaseParty, Document, OpponentExhibit, Page, PageText
 
 # 依長度由長到短：「被上證」要先於「上證」、「原告證」要先於「原證」比對
 PREFIXES = ("被上證", "原告證", "被告證", "原證", "被證", "上證", "聲證", "相證")
@@ -153,3 +153,47 @@ def opponent_exhibit_for_page(s: Session, page_id: UUID) -> tuple[OpponentExhibi
                                                  OpponentExhibit.first_page_no <= page.page_no,
                                                  OpponentExhibit.last_page_no >= page.page_no)).first()
     return (ex, page.page_no - ex.first_page_no + 1) if ex is not None else None
+
+
+# ---- 標籤與可引用頁（Task 3） ----
+
+# 沒有遞狀人時由前綴推角色
+_PREFIX_ROLE = {"原證": "原告", "原告證": "原告", "被證": "被告", "被告證": "被告", "上證": "上訴人",
+                "被上證": "被上訴人", "聲證": "聲請人", "相證": "相對人"}
+
+
+def _collides(s: Session, ex: OpponentExhibit, doc: Document) -> bool:
+    """同一案件另一份「不同檔案」的對方書狀也有同一個編號（複製輪次的同一份檔案不算）。"""
+    return s.scalar(select(OpponentExhibit.id).join(Document, Document.id == OpponentExhibit.document_id)
+                    .where(Document.case_id == doc.case_id, Document.sha256 != doc.sha256,
+                           OpponentExhibit.prefix == ex.prefix, OpponentExhibit.number == ex.number)
+                    .limit(1)) is not None
+
+
+def opponent_label(s: Session, ex: OpponentExhibit, n: int) -> str:
+    """例：「原告所提原證3第1頁」；撞號時加遞狀人姓名（「被告王小華所提被證1第1頁」）或檔名。"""
+    doc = s.get(Document, ex.document_id)
+    filer = s.get(CaseParty, doc.filed_by_party_id) if doc.filed_by_party_id else None
+    who = filer.role if filer is not None else _PREFIX_ROLE.get(ex.prefix, "對造")
+    tail = ""
+    if _collides(s, ex, doc):
+        if filer is not None:
+            who = f"{filer.role}{filer.name}"
+        else:
+            tail = f"（{doc.filename}）"
+    return f"{who}所提{ex.prefix}{ex.number}{tail}第{n}頁"
+
+
+def opponent_exhibit_pages(s: Session, case_id: UUID) -> list[PageText]:
+    """本案對方證物頁的目前文字版本（同一份檔案只算一次，依上傳順序、頁碼）；沒有文字的頁不列。"""
+    from app.ingest.service import document_page_texts
+    from app.sources import opponent_docs
+    out: list[PageText] = []
+    for _, doc in opponent_docs(s, case_id):
+        rows = s.scalars(select(OpponentExhibit).where(OpponentExhibit.document_id == doc.id)).all()
+        if not rows:
+            continue
+        for page, pt in document_page_texts(s, doc.id):
+            if pt is not None and any(r.first_page_no <= page.page_no <= r.last_page_no for r in rows):
+                out.append(pt)
+    return out

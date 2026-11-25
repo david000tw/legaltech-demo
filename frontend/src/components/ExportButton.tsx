@@ -42,6 +42,7 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
   // 計畫 2A：寫進書狀的辨識文字要先對照原圖
   image_unverified: (a) => `${a} 的頁尚未對照原圖`,
   quote_unreadable: () => '引文含看不清楚的字，請先修正辨識文字',
+  opponent_page_not_exhibit: () => '這一頁不是可引用的對方證物',
   inline_quote_image_unverified: (a) => `引文「${a}…」出自未對照原圖的對造書狀頁`,
   amount_image_unverified: (a) => {
     const i = a.indexOf(':')

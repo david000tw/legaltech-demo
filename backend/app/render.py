@@ -47,7 +47,12 @@ def render_text(s: Session, p: Paragraph) -> str:
             return f"【未驗證：{code}】"
         if kind == "quote":
             return f"「{c.quote}」" if c.quote.strip() else f"【引用錯誤：{code}】"
-        return citation_label(s, c) or f"【引用錯誤：{code}】"
+        label = citation_label(s, c)
+        if label and "所提" in label:  # AI 寫了「原告所提{{cite:E7}}」：不要變成「原告所提原告所提…」
+            head = label[:label.index("所提") + 2]
+            if text[:m.start()].endswith(head):
+                label = label[len(head):]
+        return label or f"【引用錯誤：{code}】"
 
     def in_parentheses(group: list, after: str) -> str | None:
         """括號裡只有引用（後面可能接「參照」「意旨參照」）時的完整寫法；不適用回 None。"""

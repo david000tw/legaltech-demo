@@ -94,6 +94,12 @@ def search_pages(s: Session, case_id: UUID, query: str, k: int) -> list[PageText
     return _top([(score(q, pt.text), pt) for pt in current], k)
 
 
+def search_page_texts(pages: list[PageText], query: str, k: int) -> list[PageText]:
+    """在給定的頁裡搜尋（對方證物頁用）。"""
+    q = bigrams(query)
+    return _top([(score(q, pt.text), pt) for pt in pages], k)
+
+
 def article_display(statute_name: str, article_no: str) -> str:
     main, _, sub = article_no.partition("-")
     return f"{statute_name}第{main}條" + (f"之{sub}" if sub else "")

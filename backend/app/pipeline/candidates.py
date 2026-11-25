@@ -17,7 +17,7 @@ from app.ai.usage import call_ai
 from app.ai.schemas import select_schema
 from app.ai.tokens import estimate_tokens
 from app.corpus.pins import pinned_passages
-from app.corpus.search import article_display, search_articles, search_pages, search_passages
+from app.corpus.search import article_display, search_articles, search_page_texts, search_pages, search_passages
 from app.exhibit_labels import evidence_label
 from app.ingest.service import current_page_text
 from app.models import (
@@ -67,11 +67,22 @@ def build_candidates(s: Session, round_id: UUID) -> list[Candidate]:
     queries = [claim_query(c) for c in claims]
 
     all_pages = _evidence_pages(s, rnd.case_id)
-    if sum(estimate_tokens(pt.text) for pt in all_pages) <= EVIDENCE_TOKEN_BUDGET:
+    ours = sum(estimate_tokens(pt.text) for pt in all_pages)
+    if ours <= EVIDENCE_TOKEN_BUDGET:
         evidence = all_pages
     else:
         hit_ids = {pt.id for q in queries for pt in search_pages(s, rnd.case_id, q, PAGES_PER_CLAIM)}
         evidence = [pt for pt in all_pages if pt.id in hit_ids]
+    # 對方證物頁（對方證物計畫）：我方頁優先，放得下剩下的預算就全收，否則依主張搜尋
+    from app.opponent_exhibits import opponent_exhibit_pages, refresh_case_opponent_exhibits
+    refresh_case_opponent_exhibits(s, rnd.case_id)
+    theirs = opponent_exhibit_pages(s, rnd.case_id)
+    left = EVIDENCE_TOKEN_BUDGET - ours
+    if left >= 0 and sum(estimate_tokens(pt.text) for pt in theirs) <= left:
+        evidence = evidence + theirs
+    else:
+        hit_ids = {pt.id for q in queries for pt in search_page_texts(theirs, q, PAGES_PER_CLAIM)}
+        evidence = evidence + [pt for pt in theirs if pt.id in hit_ids]
     case_type = s.get(Case, rnd.case_id).case_type  # 同類型加權、不排除（設計 5.3）
     # 律師釘選的段落排最前面，一定拿到最前面的 J 代碼（設計 5.9）
     pinned = pinned_passages(s, rnd.case_id)

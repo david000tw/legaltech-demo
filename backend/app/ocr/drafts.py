@@ -32,5 +32,15 @@ def unverified_ocr_pages(s: Session, rnd: Round) -> list[str]:
     ).all()
     evidence = sorted(rows, key=lambda r: (r[1].prefix, r[1].number, r[0].page_no))
     out = [page_label(s, page.id) for page, _ in evidence if _listed(page, current_page_text(s, page.id))]
-    out += [page_label(s, op.page.id) for op in opponent_pages(s, rnd.id) if _listed(op.page, op.text)]
+    mine = opponent_pages(s, rnd.id)
+    out += [page_label(s, op.page.id) for op in mine if _listed(op.page, op.text)]
+    seen = {op.page.id for op in mine}
+    other = s.scalars(  # 前幾輪上傳、本輪候選引用到的對方證物頁（對方證物計畫）
+        select(Page).join(PageText, PageText.page_id == Page.id)
+        .join(Candidate, Candidate.page_text_id == PageText.id)
+        .join(Document, Document.id == Page.document_id)
+        .where(Candidate.round_id == rnd.id, Candidate.kind == "evidence", Document.kind == "opponent_brief")
+        .distinct()).all()
+    out += [page_label(s, pg.id) for pg in sorted(other, key=lambda pg: (str(pg.document_id), pg.page_no))
+            if pg.id not in seen and _listed(pg, current_page_text(s, pg.id))]
     return out

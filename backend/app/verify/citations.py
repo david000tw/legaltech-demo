@@ -320,6 +320,11 @@ def verify_citation(s: Session, c: Citation) -> list[str]:
     elif c.kind == "evidence":
         pt = s.get(PageText, c.page_text_id)
         reasons = _quote_reasons(pt.text, c.quote)
+        page = s.get(Page, pt.page_id)
+        if s.get(Document, page.document_id).kind == "opponent_brief":
+            from app.opponent_exhibits import opponent_exhibit_for_page
+            if opponent_exhibit_for_page(s, page.id) is None:
+                reasons.append("opponent_page_not_exhibit")  # 對方書狀本文或沒有編號的附件：不能引用
         if UNREADABLE in (c.quote or ""):  # 辨識時看不清楚的字：要先修正辨識文字，不能寫進書狀
             reasons.append("quote_unreadable")
         latest = current_page_text(s, pt.page_id)
@@ -412,9 +417,15 @@ def _amount_sources(s: Session, rnd: Round) -> tuple[set[int], dict[int, str]]:
         pt = current_page_text(s, pg.id)
         if pt is not None:
             add(pt.text, pg.id, pt)
+    listed = set()
     for op in opponent_pages(s, rnd.id):
+        listed.add(op.page.id)
         if op.text is not None:
             add(op.text.text, op.page.id, op.text)
+    from app.opponent_exhibits import opponent_exhibit_pages
+    for pt in opponent_exhibit_pages(s, rnd.case_id):  # 前幾輪的對方證物也可能被引用（對方證物計畫）
+        if pt.page_id not in listed:
+            add(pt.text, pt.page_id, pt)
     # 原文摘錄只算「確實在原文找到」的（設計 5.1）：畫面標紅「未找到原文」的摘錄可能是 AI 編的，不能拿來放行金額
     for c in s.scalars(select(Claim).where(Claim.round_id == rnd.id).order_by(Claim.seq)):
         if c.quote_verified:
