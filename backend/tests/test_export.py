@@ -333,3 +333,26 @@ def test_concurrent_exports_of_one_draft_do_not_deadlock(db, monkeypatch):
     assert errors == []
     with tenant_session(ctx["firm"]) as s:
         assert len(s.scalars(select(ExportRecord).where(ExportRecord.draft_id == ctx["draft_id"])).all()) == 2
+
+
+def test_draft_page_reload_waits_for_a_running_export(db):
+    """草稿頁讀取會重新驗證並寫回結果，要跟匯出一樣先鎖草稿列排隊；
+    否則匯出依段落 id 持共享鎖、讀取依段落順序寫入，兩邊順序不同會互等而死結。"""
+    from app.models import Draft
+    ctx, cs = ready(db)
+    started, done = threading.Event(), threading.Event()
+    result: dict = {}
+
+    def reload_page():
+        started.set()
+        result["status"] = cs["lawyer"].get(f"/api/drafts/{ctx['draft_id']}").status_code
+        done.set()
+
+    with tenant_session(ctx["firm"]) as s:
+        s.get(Draft, ctx["draft_id"], with_for_update=True)  # 模擬匯出進行中：持有草稿列鎖
+        t = threading.Thread(target=reload_page)
+        t.start()
+        started.wait(5)
+        assert not done.wait(1.5), "匯出進行中，草稿頁讀取應該排隊等候"
+    t.join(30)
+    assert result["status"] == 200

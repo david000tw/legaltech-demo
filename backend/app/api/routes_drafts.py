@@ -95,6 +95,8 @@ def get_draft(draft_id: UUID, request: Request, background: BackgroundTasks,
     support_schedule.request_and_schedule(request, background, m.firm_id, draft_id, m.id)
     with tenant_session(m.firm_id) as s:
         draft = _get_or_404(s, Draft, draft_id, "草稿")
+        # 重新驗證會寫回結果：先鎖草稿列，跟匯出排隊（匯出依段落 id 持共享鎖、這裡依段落順序寫入，不排隊會互等而死結）
+        s.get(Draft, draft_id, with_for_update=True)
         blockers = export_blockers(s, draft_id)  # 會重新驗證每一段
         rnd = s.get(Round, draft.round_id)
         statement = statement_of(s, draft_id)
