@@ -83,6 +83,9 @@ _SENTENCE_END = re.compile(r"[。！？!?\n]")
 QUOTE_GROUP_GAP = 3  # 引號段之間只隔幾個字時，視為同一段引文（防止拆成兩段各 14 字）
 MIN_QUOTE = 15
 KIND_BY_PREFIX = {"E": "evidence", "J": "judgment", "S": "statute"}
+# 同一段落對同一代碼給了不同引文：一個代碼只存一筆引文（標記只帶代碼），多出來的那筆不會被展開也不會被驗證。
+# 這個標記記在引用的 verify_reasons 上，每次重新驗證都保留，直到段落被改寫（改寫會重建引用）。
+QUOTE_CONFLICT = "quote_conflict"
 
 
 def _scan_form(text: str) -> str:
@@ -214,12 +217,13 @@ def _candidate(s: Session, round_id: UUID, code: str) -> Candidate | None:
 def attach_citations(s: Session, p: Paragraph, items: list[tuple[str, str]]) -> list[Citation]:
     """依候選清單把 (代碼, 引文) 綁到段落；清單外的代碼也建立，但沒有來源，驗證時會失敗。"""
     round_id = _round_id_for(s, p)
-    out, seen = [], set()
+    out, seen = [], {}
     for code, quote in items:
         code = str(code)
         if code in seen:
+            if normalize_text(seen[code].quote) != normalize_text(str(quote or "")):
+                seen[code].verify_reasons = [QUOTE_CONFLICT]  # 不能默默丟掉第二筆：留記號，驗證時擋下
             continue
-        seen.add(code)
         cand = _candidate(s, round_id, code)
         c = Citation(firm_id=p.firm_id, paragraph_id=p.id, code=code,
                      kind=cand.kind if cand else KIND_BY_PREFIX.get(code[:1], "evidence"),
@@ -228,6 +232,7 @@ def attach_citations(s: Session, p: Paragraph, items: list[tuple[str, str]]) -> 
                      judgment_passage_id=cand.judgment_passage_id if cand else None,
                      statute_article_id=cand.statute_article_id if cand else None)
         s.add(c)
+        seen[code] = c
         out.append(c)
     s.flush()
     return out
@@ -318,6 +323,8 @@ def verify_citation(s: Session, c: Citation) -> list[str]:
             reasons = ["quote_not_found"]
         else:
             reasons = []
+    if QUOTE_CONFLICT in (c.verify_reasons or []):
+        reasons.append(QUOTE_CONFLICT)
     c.verify_reasons = reasons
     if not reasons:
         c.verify_status = "ok"
@@ -421,6 +428,9 @@ def verify_paragraph(s: Session, p: Paragraph, cache: dict | None = None) -> lis
     for code in sorted({code for kind, code in markers if kind == "quote"}):
         if code in cites and not cites[code].quote.strip():
             reasons.append(f"quote_marker_without_quote:{code}")
+    for code in sorted(cites):  # 同一代碼給了不同引文（見 attach_citations）
+        if QUOTE_CONFLICT in (cites[code].verify_reasons or []):
+            reasons.append(f"citation_quote_conflict:{code}")
     if MARKER_RE.search(p.heading or ""):  # 標題不展開標記，有標記就會原樣印進書狀
         reasons.append("marker_in_heading")
     # 金額標記 {{amount}} 只能在起訴狀的聲明段落；其他地方一律標錯（設計 5.2）

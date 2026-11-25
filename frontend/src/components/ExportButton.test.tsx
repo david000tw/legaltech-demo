@@ -20,4 +20,9 @@ describe('ExportButton reason labels', () => {
     expect(reasonLabel('support_misuse:J1')).toBe('J1 經 AI 判斷是把當事人主張當成法院見解，請修改或填理由放行')
     expect(reasonLabel('support_partial:E1')).toBe('E1 只部分支持這句話，請確認後放行')
   })
+
+  it('labels the same-code different-quotes conflict', () => {
+    expect(reasonLabel('citation_quote_conflict:J1')).toBe('同一判決引文不一致：J1 在同一段出現了兩段不同的引文，系統只保留第一段，請改寫或拆開')
+    expect(reasonLabel('quote_conflict')).toBe('同一代碼出現了不同的引文')
+  })
 })
