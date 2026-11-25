@@ -22,6 +22,23 @@ def test_parse_amounts(text, expected):
     assert parse_amounts(text) == expected
 
 
+# 2026-11-25 使用者決定：沒寫「元」時，萬、億結尾或前面有「新臺幣」的也算金額（卷證、對話紀錄常這樣寫）；
+# 純數字不算（容易和日期、條號、案號混淆）；後面接人、公里等單位的不算
+@pytest.mark.parametrize("text,expected", [
+    ("16萬", [160000]), ("請求賠償16萬，被告拒絕", [160000]), ("3.5萬", [35000]), ("四十萬", [400000]),
+    ("新臺幣160000", [160000]), ("新台幣(下同)160,000，另", [160000]), ("1億2千萬", [120000000]),
+    ("16萬元", [160000]), ("40萬5,000元", [405000]), ("修車16萬、醫療費3萬元", [160000, 30000]),
+])
+def test_parse_amounts_without_yuan(text, expected):
+    assert parse_amounts(text) == expected
+
+
+@pytest.mark.parametrize("text", ["60000", "車號6000", "3萬人", "行駛1萬公里", "千萬不要", "十萬火急", "第184條",
+                                  "民國113年4月2日", "113年度訴字第123號"])
+def test_not_amounts_without_yuan(text):
+    assert parse_amounts(text) == []
+
+
 def test_parse_several_amounts():
     assert parse_amounts("零件費110,000元、工資50,000元，合計16萬元") == [110000, 50000, 160000]
 

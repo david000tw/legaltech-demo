@@ -3,6 +3,9 @@
 一律先正規化（全形轉半形、去空白）再找「數字＋元」。數字可以是阿拉伯數字（可含千分位逗號、小數點）、
 中文數字或大寫數字，也可以混用萬、億（例：40萬5,000元、四十萬五千元、肆萬伍仟元、8.6萬元）。
 只有單位、沒有數字的（例：「每萬元」的「萬」）不算金額。
+
+沒寫「元」的（卷證、對話紀錄常見；2026-11-25 使用者決定）：萬、億結尾（16萬、3.5萬）或前面緊接「新臺幣」
+（新臺幣160000）也算；後面接人、公里這類單位的不算；純數字（60000）不算，容易和日期、條號、案號混淆。
 """
 from __future__ import annotations
 
@@ -51,13 +54,35 @@ def _value(token: str) -> int | None:
     return None if v is None else int(round(total + v))
 
 
+_NUMBER = re.compile("[0-9.," + "".join(_DIGITS) + "".join(_UNITS) + "萬億]+")
+_CURRENCY_BEFORE = re.compile(r"(?:新[臺台]幣|NT\$?)(?:\(下同\))?$")
+# 萬、億後面接這些字就是數量不是錢（3萬人、1萬公里、2萬次）
+_NOT_MONEY_NEXT = set("人次件輛台臺張份筆戶名位株本頁字里公平坪尺噸度年月日天個股隻條支步分秒歲倍%")
+
+
 def parse_amounts(text: str) -> list[int]:
-    out: list[int] = []
-    for m in _TOKEN.finditer(normalize_text(text or "")):
+    t = normalize_text(text or "")
+    found: list[tuple[int, int]] = []  # (位置, 金額)
+    taken: list[tuple[int, int]] = []  # 「數字＋元」佔掉的範圍，沒寫元的規則不重複算
+    for m in _TOKEN.finditer(t):
+        taken.append(m.span())
         token = m.group(1).strip(",.")
         if not _HAS_DIGIT.search(token):
             continue
         value = _value(token)
         if value is not None:
-            out.append(value)
-    return out
+            found.append((m.start(), value))
+    for m in _NUMBER.finditer(t):
+        if any(a <= m.start() < b for a, b in taken):
+            continue
+        token = m.group(0).strip(",.")
+        if not _HAS_DIGIT.search(token):
+            continue
+        after = t[m.start() + len(m.group(0).rstrip(",.")):][:1]
+        wan = token.endswith(("萬", "億")) and after not in _NOT_MONEY_NEXT
+        if not (wan or _CURRENCY_BEFORE.search(t[:m.start()])):
+            continue
+        value = _value(token)
+        if value:
+            found.append((m.start(), value))
+    return [v for _, v in sorted(found)]
