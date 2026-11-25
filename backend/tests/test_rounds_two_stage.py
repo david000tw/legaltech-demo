@@ -225,3 +225,49 @@ def test_stale_flag_for_new_states(api):
         r = s.get(Round, rid)
         r.status, r.started_at = "extracting", datetime.now(timezone.utc) - STALE_AFTER - timedelta(minutes=1)
     assert client.get(f"/api/rounds/{rid}").json()["stale"] is True
+
+
+# ---- 鎖定點要重讀資料庫（populate_existing）：同一個 session 先讀過輪次，別的交易改了狀態，鎖住後不能還看到舊狀態 ----
+
+def _set_status(firm, round_id, status):
+    with tenant_session(firm) as s:
+        r = s.get(Round, round_id)
+        r.status, r.started_at = status, datetime.now(timezone.utc)
+
+
+def test_start_stage_relocks_fresh_status(db, firm):
+    """路由先 s.get(Round) 檢查存在、再 start_stage 鎖列：中間被別人開始了，這裡不能用 identity map 裡的舊狀態再開始一次。"""
+    _, rid = round_with_evidence(firm)
+    with tenant_session(firm) as s:
+        held = s.get(Round, rid)  # 要留著參照：identity map 是弱參照，物件被回收就不會有舊狀態
+        assert held.status == "created"
+        _set_status(firm, rid, "extracting")  # 別的交易已開始並提交
+        with pytest.raises(RoundBusy, match="正在執行中"):
+            start_stage(s, rid, "extract")
+
+
+def test_reset_round_relocks_fresh_status(db, firm):
+    _, rid = round_with_evidence(firm)
+    _extract(firm, rid, fake_all(claims=TWO_CLAIMS), db)
+    with tenant_session(firm) as s:
+        held = s.get(Round, rid)
+        assert held.status == "extracted"
+        _set_status(firm, rid, "drafting")
+        with pytest.raises(RoundBusy):
+            reset_round(s, rid, True)
+
+
+def test_editable_claim_relocks_fresh_status(db, firm):
+    from fastapi import HTTPException
+
+    from app.api.routes_rounds import _editable_claim
+    _, rid = round_with_evidence(firm)
+    _extract(firm, rid, fake_all(claims=TWO_CLAIMS), db)
+    claim_id = _claims(firm, rid)[0][0]
+    with tenant_session(firm) as s:
+        held = s.get(Round, rid)
+        assert held.status == "extracted"
+        _set_status(firm, rid, "drafting")
+        with pytest.raises(HTTPException) as e:
+            _editable_claim(s, claim_id)
+        assert e.value.status_code == 409

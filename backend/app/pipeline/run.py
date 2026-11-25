@@ -103,7 +103,7 @@ def _check_extract_ready(s: Session, rnd: Round) -> None:
 
 
 def start_stage(s: Session, round_id: UUID, stage: Stage) -> None:
-    rnd = s.get(Round, round_id, with_for_update=True)  # 鎖住輪次列：同時按兩次只會有一個開始
+    rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)  # 鎖住輪次列：同時按兩次只會有一個開始
     _check_transition(rnd, stage)
     if stage == "draft":
         _check_draft_ready(s, rnd)
@@ -118,7 +118,7 @@ def start_stage(s: Session, round_id: UUID, stage: Stage) -> None:
 
 def reset_round(s: Session, round_id: UUID, confirm: bool) -> None:
     """重新拆解前回到「已建立」：清掉主張（含勾選）、候選與草稿。律師改過勾選或確認過請求項目時要先確認。"""
-    rnd = s.get(Round, round_id, with_for_update=True)
+    rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)
     if rnd.status not in ("extracted", "failed"):
         raise RoundBusy("只有待確認或失敗的輪次可以重新拆解")
     claims = list(s.scalars(select(Claim).where(Claim.round_id == round_id)))
@@ -145,7 +145,7 @@ def _still_current(s: Session, round_id: UUID, token: datetime | None) -> None:
 
 def _mark_failed(firm_id: UUID, round_id: UUID, error: str, token: datetime | None, stage: Stage) -> None:
     with tenant_session(firm_id) as s:
-        rnd = s.get(Round, round_id, with_for_update=True)
+        rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)
         if rnd.started_at != token:
             return
         rnd.status, rnd.error, rnd.failed_stage = "failed", error[:1000], stage

@@ -88,7 +88,7 @@ def patch_round(round_id: UUID, body: RoundSettingsBody, m: CurrentMember = Depe
     """輪次設定（設計 5.2）。拆解前、待確認、拆解失敗或逾時都能改；訴訟標的金額只影響 Word 狀頭，起草後也能補填。"""
     fields = body.model_dump(exclude_unset=True)
     with tenant_session(m.firm_id) as s:
-        rnd = s.get(Round, round_id, with_for_update=True)
+        rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)
         if rnd is None:
             raise HTTPException(404, "找不到輪次")
         if set(fields) != {"claim_value"} and not settings_editable(rnd):
@@ -115,7 +115,7 @@ def copy(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
 def amounts_checked(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
     """多位原告或非連帶被告時，金錢聲明由律師自己寫，匯出前要由律師勾選「金額已自行核對」並留紀錄（設計 5.2）。"""
     with tenant_session(m.firm_id) as s:
-        rnd = s.get(Round, round_id, with_for_update=True)
+        rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)
         if rnd is None:
             raise HTTPException(404, "找不到輪次")
         require_lawyer(m)
@@ -137,7 +137,7 @@ def _editable_claim(s, claim_id: UUID, kind: str | None = None) -> Claim:
         raise HTTPException(404, "找不到主張或請求項目")
     if kind is not None and claim.kind != kind:
         raise HTTPException(422, "只有起訴狀的請求項目可以這樣操作")
-    if s.get(Round, claim.round_id, with_for_update=True).status != "extracted":
+    if s.get(Round, claim.round_id, with_for_update=True, populate_existing=True).status != "extracted":
         raise HTTPException(409, "這一輪已不在待確認狀態，不能再修改")
     return claim
 
@@ -195,7 +195,7 @@ class RequestBody(BaseModel):
 @router.post("/rounds/{round_id}/requests")
 def add_request(round_id: UUID, body: RequestBody, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
-        rnd = s.get(Round, round_id, with_for_update=True)
+        rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)
         if rnd is None:
             raise HTTPException(404, "找不到輪次")
         if rnd.brief_kind != "complaint" or rnd.status != "extracted":
