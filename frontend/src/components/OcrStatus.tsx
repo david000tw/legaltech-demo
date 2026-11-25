@@ -22,26 +22,34 @@ function ocrStopReason(error: string): string {
   return `辨識已停下：${error.replace(/^[a-z_]+: /, '')}`
 }
 
-// 橫幅顯示的狀態（工作、進度、能不能繼續）；整個案件回應與輕量狀態端點算出同樣的內容，用它比對有沒有變
-const signature = (o: Pick<api.DocOcr, 'job' | 'progress' | 'can_resume'> | undefined) => JSON.stringify(
-  o ? [o.job?.id, o.job?.status, o.job?.stale, o.job?.error, o.progress, o.can_resume] : null)
+// 橫幅顯示的狀態（工作、各種頁數、能不能繼續）；整個案件回應與輕量狀態端點算出同樣的內容，用它比對有沒有變。
+// 不含 minutes_left：那是依經過時間估的，不動手也會一直變，放進來會變成每次輪詢都重讀整個案件
+const signature = (o: Pick<api.DocOcr, 'job' | 'progress' | 'can_resume'> | undefined) => {
+  if (!o) return 'none'
+  const { total, done, failed, proofing } = o.progress
+  return JSON.stringify([o.job?.id, o.job?.status, o.job?.stale, o.job?.error, total, done, failed, proofing,
+    o.can_resume])
+}
 
-// 工作在跑時每隔 pollMs 讀一次輕量狀態（不重讀整個案件）；狀態和畫面上的不一樣了才通知上層重讀，
-// 同一個變化只通知一次（上層重讀失敗也不會每 3 秒重試整個案件）
+// 工作在跑時每隔 pollMs 讀一次輕量狀態（不重讀整個案件）；和畫面上的不一樣才通知上層重讀。
+// 重讀沒讓畫面更新（失敗）就下一次輪詢再試；重讀還在進行時不重複通知
 function useOcrPolling(docId: string, running: boolean, shown: string, onChanged: () => Promise<void>,
   pollMs: number) {
-  const reported = useRef(shown)  // 最後一次畫面上的或已通知過的狀態
-  const notify = useRef(onChanged)
-  useEffect(() => { reported.current = shown }, [shown])
-  useEffect(() => { notify.current = onChanged })
+  const current = useRef({ shown, onChanged })
+  const busy = useRef(false)
+  useEffect(() => { current.current = { shown, onChanged } })
   useEffect(() => {
     if (!running) return
     const t = setInterval(() => {
+      if (busy.current) return
       void api.getDocumentOcrStatus(docId).then(async (status) => {
-        const sig = signature(status)
-        if (sig === reported.current) return
-        reported.current = sig
-        await notify.current()
+        if (busy.current || signature(status) === current.current.shown) return
+        busy.current = true
+        try {
+          await current.current.onChanged()
+        } finally {
+          busy.current = false
+        }
       }).catch(() => { /* 下一輪再試 */ })
     }, pollMs)
     return () => clearInterval(t)
