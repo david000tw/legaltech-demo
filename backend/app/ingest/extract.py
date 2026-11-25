@@ -114,11 +114,19 @@ def _table_rows(tbl) -> list[str]:
 def _docx(data: bytes) -> list[str]:
     body = docx.Document(io.BytesIO(data)).element.body
     pages: list[list[str]] = [[]]
-    for child in body.iterchildren():
-        if child.tag == qn("w:p"):
-            _paragraph_runs(child, pages)
-        elif child.tag == qn("w:tbl"):
-            pages[-1].extend(_table_rows(child))
+
+    def walk(parent) -> None:
+        for child in parent.iterchildren():
+            if child.tag == qn("w:p"):
+                _paragraph_runs(child, pages)
+            elif child.tag == qn("w:tbl"):
+                pages[-1].extend(_table_rows(child))
+            elif child.tag == qn("w:sdt"):  # 內容控制項（範本、表單常見）：文字在 w:sdtContent 裡
+                content = child.find(qn("w:sdtContent"))
+                if content is not None:
+                    walk(content)
+
+    walk(body)
     texts = ["\n".join(lines).strip("\n") for lines in pages]
     while len(texts) > 1 and not texts[-1].strip():
         texts.pop()

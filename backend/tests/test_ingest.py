@@ -295,3 +295,22 @@ def test_ingest_sets_ocr_state(lawyer_client):
     with tenant_session(firm_id) as s:
         states = [{p.ocr_state for p in s.scalars(select(Page).where(Page.document_id == i))} for i in ids]
     assert states == [{"pending"}, {"none"}, {"none"}]
+
+
+def _wrap_in_content_control(d) -> None:
+    """把一段文字與一個表格包進文件層級的內容控制項（w:sdt），範本與表單檔常見這種結構。"""
+    from docx.oxml import OxmlElement
+    p = d.add_paragraph("原告於民國114年3月9日支付醫療費用新臺幣5,870元")
+    t = d.add_table(rows=1, cols=1)
+    t.cell(0, 0).text = "診斷證明書"
+    sdt, content = OxmlElement("w:sdt"), OxmlElement("w:sdtContent")
+    sdt.append(content)
+    p._p.addprevious(sdt)
+    content.append(p._p)
+    content.append(t._tbl)
+
+
+def test_docx_text_inside_content_controls_is_extracted():
+    pages = extract_pages(_docx_bytes(_wrap_in_content_control), "表單.docx")
+    assert "支付醫療費用新臺幣5,870元" in pages[0].text
+    assert "診斷證明書" in pages[0].text
