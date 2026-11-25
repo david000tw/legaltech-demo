@@ -653,12 +653,14 @@ export default function CaseDetail() {
     </aside>
   )
   const pendingOcr = data.pending_ocr_pages ?? 0
-  // 卷證說明與大事記的「待辨識，未處理」「待處理」看的是頁有沒有文字：辨識結束、手動輸入或重新辨識後要重新讀取。
-  // 辨識進行中不重讀（免得打斷正在改的說明）；結束時 key 從 running 變成還沒有文字的頁數，就會重新讀一次
-  const ocrRunning = data.documents.some((d) => d.ocr?.job?.status === 'running' && !d.ocr.job.stale)
-  const textlessPages = data.documents.reduce((n, d) => n + d.pages.filter(
+  // 卷證說明與大事記的「待辨識，未處理」「待處理」看的是頁有沒有文字：文件的辨識結束、手動輸入或重新辨識後要重新讀取。
+  // 以「還在辨識的文件數」與「沒在辨識的文件裡還沒有文字的頁數」當 key：一份文件結束就重讀（不必等整批排隊的最後一份），
+  // 同一份文件辨識中每讀完一頁不會重讀（免得打斷正在改的說明）；開始辨識時也會重讀一次
+  const isRunning = (d: api.CaseDocument) => d.ocr?.job?.status === 'running' && !d.ocr.job.stale
+  const runningDocs = data.documents.filter(isRunning).length
+  const idleTextless = data.documents.filter((d) => !isRunning(d)).reduce((n, d) => n + d.pages.filter(
     (p) => p.ocr_state === 'pending' || p.ocr_state === 'failed').length, 0)
-  const ocrKey = ocrRunning ? 'ocr-running' : `ocr-${textlessPages}`
+  const ocrKey = `ocr-${runningDocs}-${idleTextless}`
 
   return (
     <AppShell caseTitle={data.title} caseId={caseId}>
