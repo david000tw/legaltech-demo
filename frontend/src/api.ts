@@ -78,7 +78,11 @@ export type CaseDetail = CaseSummary & { header: CaseHeader; parties: Party[]; p
   // 卷證說明、大事記的 AI 工作狀態（沒執行過是 null）
   jobs?: { evidence_notes: JobView | null; timeline: JobView | null }
   // 沒有進行中辨識工作的待辨識頁數（「開始辨識（N 頁）」）
-  pending_ocr_pages?: number }
+  pending_ocr_pages?: number
+  automation?: AutomationMode  // 案件的自動化程度（設計 6.1）
+  opponent_target?: OpponentTarget }  // 上傳對方書狀會放進哪一輪（設計 6.2）
+export type AutomationMode = 'auto' | 'pause' | 'manual'
+export type OpponentTarget = { round_id: string | null; seq: number; new: boolean; brief_kind: BriefKind }
 // 新步驟（卷證說明、大事記、健檢）的原文出處（設計 5.1）：label 讀取時才算（證物可以改號）
 // status：found＝摘錄在那一頁；not_found＝沒過（reasons 說明哪一項）；absence＝缺漏類；unchecked＝律師填的，不比對
 export type SourceView = { page_id: string | null; label: string | null; quote: string
@@ -208,7 +212,8 @@ export const me = () => req<Me>('/me')
 export const listCases = () => req<CaseSummary[]>('/cases')
 export const getCaseOptions = () => req<CaseOptions>('/case-options')
 export const createCase = (body: CaseInput) => req<CaseSummary>('/cases', json('POST', body))
-export const patchCase = (id: string, body: Partial<CaseInput>) => req<CaseSummary>(`/cases/${id}`, json('PATCH', body))
+export const patchCase = (id: string, body: Partial<CaseInput> & { automation?: AutomationMode }) =>
+  req<CaseSummary>(`/cases/${id}`, json('PATCH', body))
 // 依序整批替換：帶 id 的保留原列，沒列到的刪除（其遞狀人變空白）
 export const putParties = (id: string, parties: PartyInput[]) => req<Party[]>(`/cases/${id}/parties`, json('PUT', parties))
 export const getCase = (id: string) => req<CaseDetail>(`/cases/${id}`)
@@ -239,22 +244,26 @@ export function uploadDocument(caseId: string, file: File, kind: 'evidence' | 'o
 const PHOTO = /\.(jpe?g|png)$/i
 
 function uploadOne(caseId: string, files: File[], kind: 'evidence' | 'opponent_brief', roundId?: string,
-  filedByPartyId?: string) {
+  filedByPartyId?: string, extra: Record<string, string> = {}) {
   const form = new FormData()
   const field = files.length === 1 && !PHOTO.test(files[0].name) ? 'file' : 'files'
   for (const f of files) form.append(field, f)
   form.append('kind', kind)
   if (roundId) form.append('round_id', roundId)
   if (filedByPartyId) form.append('filed_by_party_id', filedByPartyId)
+  for (const [k, v] of Object.entries(extra)) form.append(k, v)
   return req<UploadResult>(`/cases/${caseId}/documents`, { method: 'POST', body: form })
 }
+
+// 對方書狀建新輪次時的書狀種類、答辯策略（設計 6.2、6.4）
+export type UploadOptions = { briefKind?: BriefKind; strategy?: string }
 
 // 上傳：照片合成一份（一個證物號）；PDF、Word、純文字逐份上傳，各自一個證物號（後端一次只收一份文件）。
 // 依檔名排序（數字照大小：1、2、10），證物號才會照「01_、02_」的順序。中途失敗就停下，說明哪幾份沒上傳
 const byName = (a: File, b: File) => a.name.localeCompare(b.name, 'zh-Hant', { numeric: true })
 
 export async function uploadDocuments(caseId: string, files: File[], kind: 'evidence' | 'opponent_brief',
-  roundId?: string, filedByPartyId?: string): Promise<UploadResult[]> {
+  roundId?: string, filedByPartyId?: string, opts: UploadOptions = {}): Promise<UploadResult[]> {
   const sorted = [...files].sort(byName)
   const photos = sorted.filter((f) => PHOTO.test(f.name))
   const batches: File[][] = []
@@ -265,7 +274,11 @@ export async function uploadDocuments(caseId: string, files: File[], kind: 'evid
   const done: UploadResult[] = []
   for (const [i, batch] of batches.entries()) {
     try {
-      done.push(await uploadOne(caseId, batch, kind, roundId, filedByPartyId))
+      // 最後一份才觸發自動流程（一次選多份只拆解一次，設計 6.2）；中途失敗的話，打開頁面時會補做
+      const extra: Record<string, string> = { batch_last: i === batches.length - 1 ? 'true' : 'false' }
+      if (opts.briefKind) extra.brief_kind = opts.briefKind
+      if (opts.strategy?.trim()) extra.strategy = opts.strategy.trim()
+      done.push(await uploadOne(caseId, batch, kind, roundId, filedByPartyId, extra))
     } catch (e) {
       if (batches.length === 1) throw e
       const left = batches.slice(i).flat().map((f) => `「${f.name}」`).join('')
@@ -298,7 +311,10 @@ export const pageImageUrl = (pageId: string) => `/api/pages/${pageId}/image`
 
 // 兩段式執行：先拆解（停在待確認，律師勾選），再起草
 export const extractRound = (roundId: string) => req<{ status: string }>(`/rounds/${roundId}/extract`, json('POST'))
-export const draftRound = (roundId: string) => req<{ status: string }>(`/rounds/${roundId}/draft`, json('POST'))
+// force：「先起草（不含還沒辨識的頁）」；ignoreNewBriefs：「不納入，直接起草」（設計 6.2）
+export const draftRound = (roundId: string, opts: { force?: boolean; ignoreNewBriefs?: boolean } = {}) =>
+  req<{ status: string }>(`/rounds/${roundId}/draft`, json('POST', {
+    ...(opts.force ? { force: true } : {}), ...(opts.ignoreNewBriefs ? { ignore_new_briefs: true } : {}) }))
 // 重新拆解：律師改過勾選時，後端回 409 confirm_reset，畫面要先確認再帶 confirm=true
 export const resetRound = (roundId: string, confirm: boolean) =>
   req<{ status: string }>(`/rounds/${roundId}/reset`, json('POST', { confirm }))

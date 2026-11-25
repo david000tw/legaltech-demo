@@ -63,6 +63,16 @@ describe('api', () => {
     expect(f).toHaveBeenCalledTimes(2)
   })
 
+  it('uploadDocuments marks only the last request of a selection as the end of the batch', async () => {
+    const f = respond(200, { id: 'd1', page_count: 1, ocr: null })
+    const files = ['1_起訴狀.pdf', '2_附件.pdf', '3_附件.pdf'].map((n) => new File(['%PDF'], n, { type: 'application/pdf' }))
+    await uploadDocuments('c1', files, 'opponent_brief', undefined, undefined, { briefKind: 'answer', strategy: '主打與有過失' })
+    const forms = f.mock.calls.map((c) => (c as unknown as [string, RequestInit])[1].body as FormData)
+    expect(forms.map((x) => x.get('batch_last'))).toEqual(['false', 'false', 'true'])
+    expect(forms.map((x) => x.get('strategy'))).toEqual(['主打與有過失', '主打與有過失', '主打與有過失'])
+    expect(forms[0].get('brief_kind')).toBe('answer')
+  })
+
   it('startDocumentOcr reports confirm_ocr as an ApiError code', async () => {
     const f = respond(409, { detail: { code: 'confirm_ocr', message: '要開始辨識嗎？' } })
     const err = await startDocumentOcr('d1', { confirm: false }).catch((e) => e)

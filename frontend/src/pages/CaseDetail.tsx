@@ -11,6 +11,7 @@ import EvidenceNotesSection from '../components/EvidenceNotesSection'
 import HealthTab from '../components/HealthTab'
 import JudgmentSearchTab from '../components/JudgmentSearchTab'
 import OcrStatus from '../components/OcrStatus'
+import OpponentUploadBox from '../components/OpponentUploadBox'
 import PageCheckPanel from '../components/PageCheckPanel'
 import PartiesEditor from '../components/PartiesEditor'
 import RequestItemsEditor from '../components/RequestItemsEditor'
@@ -547,6 +548,36 @@ const TABS = [
 ] as const
 type TabKey = typeof TABS[number][0]
 
+// 案件資料分頁：自動化程度（設計 6.1），從下一份上傳的對方書狀開始生效
+const AUTOMATION_LABEL: Record<api.AutomationMode, string> = {
+  auto: '全自動寫到初稿', pause: '拆完主張先停，讓我勾選', manual: '每一步我自己按' }
+
+function AutomationSetting({ caseId, mode, onSaved, onError }: {
+  caseId: string; mode: api.AutomationMode; onSaved: () => Promise<void>; onError: (m: string | null) => void
+}) {
+  async function change(next: api.AutomationMode) {
+    try {
+      await api.patchCase(caseId, { automation: next })
+      await onSaved()
+    } catch (e) {
+      onError((e as Error).message)
+    }
+  }
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+      <label className="text-slate-700">
+        上傳對方書狀之後
+        <select aria-label="自動化程度" value={mode} onChange={(e) => void change(e.target.value as api.AutomationMode)}
+          className="ml-2 rounded border border-slate-300 px-2 py-1 text-sm">
+          {(Object.keys(AUTOMATION_LABEL) as api.AutomationMode[]).map((k) => (
+            <option key={k} value={k}>{AUTOMATION_LABEL[k]}</option>
+          ))}
+        </select>
+      </label>
+    </section>
+  )
+}
+
 export default function CaseDetail() {
   const { caseId = '' } = useParams()
   const navigate = useNavigate()
@@ -698,6 +729,7 @@ export default function CaseDetail() {
                 onSaved={saved} onError={setError} />
               <PartiesSection data={data} options={options} draft={partyDraft} setDraft={setPartyDraft}
                 onSaved={partiesSaved} onError={setError} />
+              <AutomationSetting caseId={caseId} mode={data.automation ?? 'auto'} onSaved={saved} onError={setError} />
             </>
           )}
 
@@ -745,6 +777,10 @@ export default function CaseDetail() {
 
           {tab === 'briefs' && (
             <section className="space-y-3">
+              {data.opponent_target && (
+                <OpponentUploadBox caseId={caseId} ourSide={data.our_side} automation={data.automation ?? 'auto'}
+                  target={data.opponent_target} onUploaded={load} onError={setError} />
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={newRound} className={BTN_PRIMARY}>建立新一輪</button>
                 {(data.brief_kind_options ?? []).length > 0 && (
