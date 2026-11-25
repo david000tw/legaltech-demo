@@ -113,7 +113,8 @@ function ParagraphCard({ p, draftId, canReview, onShowSource, onChanged, onError
       {p.citations.some((c) => c.support) && (
         <div className="space-y-1">
           {p.citations.map((c) => (
-            <SupportBadge key={c.id} citation={c} draftId={draftId} canReview={canReview} onAction={act} />
+            <SupportBadge key={c.id} citation={c} draftId={draftId} canReview={canReview} busy={busy}
+              onAction={act} />
           ))}
         </div>
       )}

@@ -102,6 +102,36 @@ def test_timeout_fails_remaining_at_once(db):
         ("failed", "timeout: Claude Code 超過 240 秒沒有回應")}
 
 
+def test_malformed_ids_do_not_strand_rows(db):
+    # AI 回了奇怪的 id（例如陣列）：不能讓整個工作中斷、列卡在「檢查中」
+    ctx, ids = _rows(3)
+    bad = {"items": [{"id": ["C1"], "verdict": "supports", "explanation": "x"}]}
+    _run(ctx, ids, FakeProvider({"support": bad}))
+    assert {r.status for r in _all(ctx).values()} == {"failed"}
+
+
+def test_provider_factory_error_fails_claimed_rows(db):
+    # 建立 AI 來源時發生非預期錯誤：認領的列記成尚未檢查，不卡在「檢查中」
+    ctx, ids = _rows(2)
+
+    def broken(settings, firm):
+        raise RuntimeError("boom")
+    run_support_checks(ctx["firm"], ids, dbmod.settings(), provider_factory=broken)
+    assert {(r.status, r.error) for r in _all(ctx).values()} == {("failed", "other: 系統內部錯誤")}
+
+
+def test_long_judgment_passage_is_sent_whole(db):
+    # 判決段落很長、「被告辯稱」在很前面：要整段送，AI 才看得出引文是當事人主張
+    lead = "被告辯稱：原告係為避免贈與稅乃以他人名義登記云云。"
+    src = lead + "甲" * 6000 + "系爭不動產為原告所出資購買"
+    ctx, ids = _rows(1, source=src, kind="judgment")
+    with tenant_session(ctx["firm"]) as s:
+        s.execute(update(SupportCheck).values(quote="系爭不動產為原告所出資購買"))
+    fake = FakeProvider({"support": _answer()})
+    _run(ctx, ids, fake)
+    assert lead in fake.calls[0]["user"]
+
+
 def test_other_error_fails_batch_and_continues(db):
     ctx, ids = _rows(10)
     calls = []

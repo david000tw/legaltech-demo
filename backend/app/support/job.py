@@ -32,6 +32,8 @@ log = logging.getLogger(__name__)
 
 SUPPORT_BATCH = 8
 SOURCE_WINDOW = 2000  # 字
+# 判決段落整段送（系統內最長約 7,100 字）：「被告辯稱……」可能寫在離引文很遠的前面，截掉就看不出是當事人主張
+JUDGMENT_WINDOW = 8000
 KIND_ZH = {"evidence": "卷證", "judgment": "判決", "statute": "法條"}
 # 之後的批次也不會成功，剩下的直接記失敗。逾時也算：AI 卡住時若一批一批各等 240 秒，
 # 後面的引用會「檢查中」好幾十分鐘、律師不能放行（設計 7.3）；記成尚未檢查後按一次「重新檢查」即可
@@ -107,7 +109,8 @@ def _fail(firm_id: UUID, token: UUID, ids: list[UUID], error: str) -> None:
 def _write(firm_id: UUID, token: UUID, codes: dict[str, _Item], data: dict) -> None:
     answers: dict[str, tuple[str, str]] = {}
     for x in (data or {}).get("items") or []:
-        if isinstance(x, dict) and x.get("id") in codes and x.get("verdict") in SUPPORT_VERDICTS:
+        if (isinstance(x, dict) and isinstance(x.get("id"), str) and x["id"] in codes
+                and x.get("verdict") in SUPPORT_VERDICTS):
             answers.setdefault(x["id"], (x["verdict"], str(x.get("explanation") or "")))
     now = _now()
     with tenant_session(firm_id) as s:
@@ -131,7 +134,8 @@ def _user_prompt(items: list[_Item]) -> tuple[dict[str, _Item], str]:
     body: list[str] = []
     codes: dict[str, _Item] = {}
     for n, item in enumerate(items, start=1):
-        excerpt = source_excerpt(item.source, item.quote)
+        excerpt = source_excerpt(item.source, item.quote,
+                                 JUDGMENT_WINDOW if item.kind == "judgment" else SOURCE_WINDOW)
         key = (item.kind, excerpt)
         if key not in sources:
             sources[key] = f"S{len(sources) + 1}"
@@ -162,6 +166,10 @@ def run_support_checks(firm_id: UUID, check_ids: list[UUID], settings: Settings,
         except (ProviderNotAllowed, ProviderNotEnabled) as e:
             _fail(firm_id, token, remaining, f"provider: {e}")
             return
+        except Exception:  # noqa: BLE001  認領的列不能卡在「檢查中」
+            log.exception("support check provider setup failed")
+            _fail(firm_id, token, remaining, OTHER)
+            return
     batches: list[list[_Item]] = []
     for _, group in groupby(items, key=lambda i: i.case_id):
         group = list(group)
@@ -178,6 +186,7 @@ def run_support_checks(firm_id: UUID, check_ids: list[UUID], settings: Settings,
             result = call_ai(provider, firm_id=firm_id, case_id=todo[0].case_id, member_id=member_id,
                              step="support", system=load_prompt("support"), user=user,
                              schema=support_schema(list(codes)), effort="medium", timeout_s=SUPPORT_TIMEOUT_S)
+            _write(firm_id, token, codes, result.data)  # 寫入出錯也只讓這一批記失敗
         except AIError as e:
             _fail(firm_id, token, ids, f"{e.kind}: {e.message}")
             if e.kind in STOP_KINDS:
@@ -191,4 +200,3 @@ def run_support_checks(firm_id: UUID, check_ids: list[UUID], settings: Settings,
             log.exception("support check batch failed")
             _fail(firm_id, token, ids, OTHER)
             continue
-        _write(firm_id, token, codes, result.data)

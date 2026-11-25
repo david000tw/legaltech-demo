@@ -22,10 +22,21 @@ function releasedText(s: api.SupportView): string {
   return `${head}：${who}${r.reason ? `：${r.reason}` : ''}`
 }
 
-export default function SupportBadge({ citation, draftId, canReview, onAction }: {
+// 「支持度尚未檢查」的原因（後端 error 記成「種類: 訊息」）：額度用完時重查沒用，律師該改用放行
+function uncheckedReason(error: string | null): string | null {
+  if (!error) return null
+  if (error.startsWith('usage_limit')) return '原因：Claude 用量額度已用完，額度恢復後再重新檢查，或填理由放行'
+  if (error.startsWith('not_logged_in')) return '原因：本機 Claude Code 尚未登入'
+  if (error.startsWith('timeout')) return '原因：AI 逾時，可以重新檢查'
+  if (error.startsWith('invalid_output')) return '原因：AI 回傳不完整，可以重新檢查'
+  return `原因：${error.replace(/^[a-z_]+: /, '')}`
+}
+
+export default function SupportBadge({ citation, draftId, canReview, busy = false, onAction }: {
   citation: api.CitationView
   draftId: string
   canReview: boolean
+  busy?: boolean  // 同一段有操作在進行：按鈕停用，避免連按送出兩次
   onAction: (f: () => Promise<unknown>) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
@@ -69,22 +80,23 @@ export default function SupportBadge({ citation, draftId, canReview, onAction }:
         {tag}
         {!failed && s.explanation && <span className="text-slate-700">{s.explanation}</span>}
         {failed && (
-          <button type="button" onClick={() => onAction(() => api.retrySupport(draftId))}
-            className="rounded border px-2 py-0.5">重新檢查</button>
+          <button type="button" disabled={busy} onClick={() => onAction(() => api.retrySupport(draftId))}
+            className="rounded border px-2 py-0.5 disabled:opacity-50">重新檢查</button>
         )}
         {canReview && !open && (
-          <button type="button" onClick={() => setOpen(true)}
-            className="rounded border border-amber-400 px-2 py-0.5 text-amber-800">
+          <button type="button" disabled={busy} onClick={() => setOpen(true)}
+            className="rounded border border-amber-400 px-2 py-0.5 text-amber-800 disabled:opacity-50">
             {partial ? '確認放行' : '填理由放行'}
           </button>
         )}
       </div>
+      {failed && uncheckedReason(s.error) && <p className="text-slate-600">{uncheckedReason(s.error)}</p>}
       {canReview && open && (
         <div className="flex flex-wrap items-center gap-2">
           <input aria-label="放行理由" value={reason} onChange={(e) => setReason(e.target.value)}
             placeholder={needsReason ? '請填寫放行理由' : '理由（可不填）'}
             className="min-w-48 flex-1 rounded border border-slate-300 px-2 py-1" />
-          <button type="button" disabled={needsReason && !reason.trim()} onClick={() => void send()}
+          <button type="button" disabled={busy || (needsReason && !reason.trim())} onClick={() => void send()}
             className="rounded bg-amber-600 px-2 py-1 text-white disabled:opacity-50">送出</button>
           <button type="button" onClick={() => { setOpen(false); setReason('') }}
             className="rounded border px-2 py-1">取消</button>

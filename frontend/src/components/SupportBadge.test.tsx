@@ -17,12 +17,16 @@ const done = (verdict: api.SupportVerdict, extra: Partial<api.SupportView> = {})
 const released = { name: 'lawyer', bar_number: '(110)北律字第0001號', at: '2026-11-25T03:00:00+00:00',
   reason: '原文第二段另有說明' }
 
-function show(support: api.SupportView | null, opts: { canReview?: boolean; court?: boolean } = {}) {
+function show(support: api.SupportView | null,
+  opts: { canReview?: boolean; court?: boolean; busy?: boolean } = {}) {
   const onAction = vi.fn(async (f: () => Promise<unknown>) => { await f() })
   render(<SupportBadge citation={{ ...base, court_confirmed: opts.court ?? false, support }} draftId="d1"
-    canReview={opts.canReview ?? true} onAction={onAction} />)
+    canReview={opts.canReview ?? true} busy={opts.busy} onAction={onAction} />)
   return onAction
 }
+
+const failed = (error: string): api.SupportView => ({ status: 'failed', verdict: null, explanation: null, error,
+  blocking: true, released: null, version: 'v1' })
 
 describe('SupportBadge', () => {
   beforeEach(() => { vi.resetAllMocks() })
@@ -38,6 +42,23 @@ describe('SupportBadge', () => {
     show({ status: 'pending', verdict: null, explanation: null, error: null, blocking: true, released: null })
     expect(screen.getByText('支持度檢查中')).toBeInTheDocument()
     expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it.each([
+    ['usage_limit: x', '原因：Claude 用量額度已用完，額度恢復後再重新檢查，或填理由放行'],
+    ['not_logged_in: x', '原因：本機 Claude Code 尚未登入'],
+    ['timeout: x', '原因：AI 逾時，可以重新檢查'],
+    ['invalid_output: 缺少結果', '原因：AI 回傳不完整，可以重新檢查'],
+    ['other: 系統內部錯誤', '原因：系統內部錯誤'],
+  ])('failed shows why it was not checked (%s)', (error, text) => {
+    show(failed(error))
+    expect(screen.getByText(text)).toBeInTheDocument()
+  })
+
+  it('buttons are disabled while another action is running', () => {
+    show(failed('timeout: x'), { busy: true })
+    expect(screen.getByRole('button', { name: '重新檢查' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '填理由放行' })).toBeDisabled()
   })
 
   it('failed offers retry for the whole draft and a lawyer release', async () => {

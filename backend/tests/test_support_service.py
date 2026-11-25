@@ -192,6 +192,19 @@ def test_unclaimed_and_stale_rows(db):
         assert j.status == "pending" and j.claim_token is not None
 
 
+def test_request_does_not_lock_fresh_pending_rows(db):
+    # 存段落的交易還沒結束時，同時開始的背景工作要能認領剛排入的列（不能被 request_checks 鎖住而略過）
+    from sqlalchemy import text
+    ctx, _ = _draft()
+    with tenant_session(ctx["firm"]) as s:
+        support.request_checks(s, ctx["draft_id"])
+    with tenant_session(ctx["firm"]) as s:
+        support.request_checks(s, ctx["draft_id"])  # 交易還開著
+        with tenant_session(ctx["firm"]) as other:
+            locked = other.execute(text("SELECT id FROM support_checks FOR UPDATE NOWAIT")).all()
+            assert len(locked) == 2
+
+
 def test_retry_failed_unreleased_only(db):
     ctx, pid = _draft()
     lawyer = _member(ctx)

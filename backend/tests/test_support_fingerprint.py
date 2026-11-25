@@ -23,6 +23,16 @@ def test_split_sentences_keeps_closing_quote_with_sentence():
         "原告稱「被告闖紅燈。」", "此有{{cite:E1}}可稽。"]
 
 
+def test_period_inside_quotation_marks_does_not_split():
+    # 律師在「」裡打句號：引號內不切句；引號以句號收尾時照舊在引號後切開
+    assert split_sentences("被告稱「我沒有闖紅燈。是原告超速。」此有{{cite:E1}}可稽。") == [
+        "被告稱「我沒有闖紅燈。是原告超速。」", "此有{{cite:E1}}可稽。"]
+    assert split_sentences("依「第一條。第二條」之規定，{{cite:S1}}應適用。") == [
+        "依「第一條。第二條」之規定，{{cite:S1}}應適用。"]
+    # 引號沒有關上：換行時重新計算，不會整段黏在一起
+    assert split_sentences("他說「好。\n下一行。") == ["他說「好。", "下一行。"]
+
+
 def test_citing_sentences_marker_after_period_and_two_sentences():
     text = "按{{cite:J1}}認{{quote:J1}}。被告應賠償。另參{{cite:J1}}意旨。"
     assert citing_sentences(text, "J1") == ["按{{cite:J1}}認{{quote:J1}}。", "另參{{cite:J1}}意旨。"]

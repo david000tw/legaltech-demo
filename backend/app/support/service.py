@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -82,7 +82,12 @@ def request_checks(s: Session, draft_id: UUID, paragraph_ids: list[UUID] | None 
         ).on_conflict_do_nothing(index_elements=["case_id", "fingerprint"]).returning(SupportCheck.id))
         if rid is not None:
             out.append(rid)
-    for row in _rows_for_update(s, case_id, fps, SupportCheck.status == "pending", skip_locked=True):
+    # 只鎖真的卡住的列：剛排入的列不能被鎖住，否則同時開始的背景工作認領時會略過它們（SKIP LOCKED）
+    unclaimed = and_(SupportCheck.claim_token.is_(None), SupportCheck.requested_at < now - SUPPORT_UNCLAIMED_AFTER)
+    stale = and_(SupportCheck.claim_token.is_not(None),
+                 func.coalesce(SupportCheck.claimed_at, SupportCheck.requested_at) < now - SUPPORT_STALE_AFTER)
+    for row in _rows_for_update(s, case_id, fps, SupportCheck.status == "pending", or_(unclaimed, stale),
+                                skip_locked=True):
         if row.claim_token is None and row.requested_at < now - SUPPORT_UNCLAIMED_AFTER:
             row.requested_at = now
             out.append(row.id)

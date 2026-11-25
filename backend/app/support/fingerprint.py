@@ -19,6 +19,7 @@ from app.verify.citations import MARKER_RE, paragraph_citations
 TERMINATORS = "。！？!?；"
 CLOSERS = "」』）)”’"  # 句末標點後面緊接的收尾符號算在同一句
 BRACKETS = "（）()「」『』"
+QUOTE_OPEN, QUOTE_CLOSE = "「『", "」』"
 
 
 @dataclass(frozen=True)
@@ -39,22 +40,31 @@ def _is_empty(fragment: str) -> bool:
 
 
 def split_sentences(text: str) -> list[str]:
+    """引號「」『』內的句號不切句；引號以句號收尾（。」）時在引號後切開。換行一律切開，引號層數歸零。"""
     raw: list[str] = []
     buf: list[str] = []
+    depth = 0
     i, n = 0, len(text)
     while i < n:
         ch = text[i]
         if ch == "\n":
             raw.append("".join(buf))
-            buf = []
+            buf, depth = [], 0
         elif ch in TERMINATORS:
             buf.append(ch)
             while i + 1 < n and (text[i + 1] in CLOSERS or text[i + 1] in TERMINATORS):
                 i += 1
                 buf.append(text[i])
-            raw.append("".join(buf))
-            buf = []
+                if text[i] in QUOTE_CLOSE:
+                    depth = max(0, depth - 1)
+            if depth == 0:
+                raw.append("".join(buf))
+                buf = []
         else:
+            if ch in QUOTE_OPEN:
+                depth += 1
+            elif ch in QUOTE_CLOSE:
+                depth = max(0, depth - 1)
             buf.append(ch)
         i += 1
     raw.append("".join(buf))
