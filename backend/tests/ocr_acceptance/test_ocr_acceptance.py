@@ -3,8 +3,10 @@
 
 會用訂閱額度（約 30 頁），預設不跑：
   LEGALTECH_TEST_DB=legaltech_test_impl PYTHONUTF8=1 uv run pytest -q -s -m real_ai tests/ocr_acceptance
+模式：預設量測產品目前的「只用 AI」；加 OCR_ACCEPTANCE_PROOFREAD=1 量測「AI 讀、校對員比對」（2A 原始驗收的模式）。
 先檢查流程（不花額度）：加 OCR_ACCEPTANCE_DRY=1，改用假的 AI 回標準答案、不跑校對員，報告不寫入 docs。
-重播（不花額度）：加 OCR_ACCEPTANCE_REPLAY=1，假的 AI 依序回上次真實驗收存下的 AI 文字、校對員照跑，
+重播（不花額度）：加 OCR_ACCEPTANCE_REPLAY=1，假的 AI 依序回上次真實驗收存下的 AI 文字（重算校對提醒要再加
+OCR_ACCEPTANCE_PROOFREAD=1，校對員才會跑），
 用目前的比對規則重算提醒；結果寫到 ocr_acceptance_2a_replay.json，不覆蓋真實驗收的報告（秒數、token 無意義）。
 """
 from __future__ import annotations
@@ -190,8 +192,10 @@ def write_report(summary: dict, pages: list[dict], traps: list[dict], handwritin
 def test_ocr_acceptance(db, tmp_path):
     dry = os.environ.get("OCR_ACCEPTANCE_DRY") == "1"
     replay = os.environ.get("OCR_ACCEPTANCE_REPLAY") == "1" and not dry
-    paddle = PADDLE if Path(PADDLE[0]).exists() and not dry else []
-    settings = make_settings(tmp_path, paddle_cmd=paddle)
+    # 2026-11-25 起產品預設只用 AI；量測「AI 讀、校對員比對」模式要加 OCR_ACCEPTANCE_PROOFREAD=1（2A 原始驗收是這個模式）
+    proofread = os.environ.get("OCR_ACCEPTANCE_PROOFREAD") == "1"
+    paddle = PADDLE if proofread and Path(PADDLE[0]).exists() and not dry else []
+    settings = make_settings(tmp_path, paddle_cmd=paddle, ocr_proofread=proofread)
     dbmod.configure(settings)
     firm = create_firm("驗收事務所", internal=True)
     create_member(firm, "lawyer@accept.test")

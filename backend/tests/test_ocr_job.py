@@ -103,7 +103,7 @@ def kinds(pt) -> list[str]:
 
 
 def use_paddle(monkeypatch, tmp_path, mode="ok", cells=None):
-    dbmod.configure(make_settings(tmp_path, paddle_cmd=FAKE_PADDLE))
+    dbmod.configure(make_settings(tmp_path, paddle_cmd=FAKE_PADDLE, ocr_proofread=True))
     monkeypatch.setenv("FAKE_PADDLE", mode)
     if cells is not None:
         monkeypatch.setenv("FAKE_PADDLE_CELLS", json.dumps(cells, ensure_ascii=False))
@@ -129,7 +129,7 @@ def test_upload_auto_starts_and_reads_all_pages(lawyer_client):
     pts = texts(firm, doc_id)
     assert [pt.text for pt in pts] == ["收據一", "收據二", "收據三"]
     assert all(pt.source == "ai_ocr" and pt.needs_image_check and not pt.verified_against_image for pt in pts)
-    assert all(kinds(pt) == ["proofreader_missing"] for pt in pts)  # 測試沒有校對員
+    assert all(kinds(pt) == [] for pt in pts)  # 預設只用 AI：沒有「校對員未執行」
     assert [(len(c["images"]), c["effort"], c["timeout_s"], c["model"]) for c in provider.calls] == [(1, "low", 120, "opus")] * 3
     assert provider.calls[0]["system"] == ocr_job.OCR_SYSTEM and provider.calls[0]["user"] == "請抄錄這一頁。"
     with tenant_session(firm) as s:
@@ -279,7 +279,8 @@ def test_proof_wait_beats_past_stale_threshold(db, tmp_path, monkeypatch):
 
 # ---- 校對結果 ----
 
-def test_proofreader_missing_marks_pages(db):
+def test_proofreader_missing_marks_pages(db, tmp_path):
+    dbmod.configure(make_settings(tmp_path, ocr_proofread=True))  # 校對模式但沒有校對員
     firm = create_firm("甲事務所")
     _, doc = make_doc(firm, 2)
     job_id, _ = queue(firm, doc)
@@ -353,7 +354,7 @@ def test_case_ocr_button_counts_old_pending(lawyer_client):
     assert detail["pending_ocr_pages"] == 0
     d = next(x for x in detail["documents"] if x["id"] == str(doc))
     assert [(p["ocr_state"], p["needs_check"], p["alert_count"], p["verified"]) for p in d["pages"]] == [
-        ("done", True, 1, False), ("done", True, 1, False)]
+        ("done", True, 0, False), ("done", True, 0, False)]  # 只用 AI：沒有「校對員未執行」
     assert d["ocr"]["progress"]["done"] == 2 and d["ocr"]["job"]["document_id"] == str(doc)
 
 

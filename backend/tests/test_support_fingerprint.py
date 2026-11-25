@@ -114,3 +114,10 @@ def test_support_inputs_skips_statement_and_uncited(db):
         assert support_inputs(s, p) == {}
         p.text, p.kind = "此有{{cite:E1}}可稽。", "statement"
         assert support_inputs(s, p) == {}
+
+
+def test_unbalanced_quote_falls_back_to_plain_split():
+    # 引號沒關上（多段引文只在最後一段收引號也是這樣）：這一行改回不看引號切句，不能整段黏成一句
+    text = "被告稱「我沒有闖紅燈。原告超速。此有{{cite:E1}}可稽。被告應賠償{{cite:J1}}。另查{{cite:S1}}意旨。"
+    assert citing_sentences(text, "J1") == ["被告應賠償{{cite:J1}}。"]
+    assert citing_sentences(text, "E1") == ["此有{{cite:E1}}可稽。"]

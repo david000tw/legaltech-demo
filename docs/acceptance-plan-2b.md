@@ -123,9 +123,10 @@
 ## 延後的小問題（2026-11-25 使用者決定修正，已全部修好）
 
 1. 存段落和背景檢查剛好同時時，少數檢查晚約 2 分鐘才開始：排入檢查時只鎖真的卡住的列，剛排入的列不鎖（測試 `test_request_does_not_lock_fresh_pending_rows`）。
-2. 背景檢查寫結果或建立 AI 來源時出錯，那一批停在「檢查中」約 10 分鐘：現在當下就改成「尚未檢查」（`test_malformed_ids_do_not_strand_rows`、`test_provider_factory_error_fails_claimed_rows`）。
+2. 背景檢查寫結果、更新進度或建立 AI 來源時出錯，那一批停在「檢查中」約 10 分鐘：現在當下就改成「尚未檢查」（`test_malformed_ids_do_not_strand_rows`、`test_provider_factory_error_fails_claimed_rows`、`test_heartbeat_error_fails_claimed_rows`）。
 3. 「放行」「重新檢查」連按兩下會跳錯：同一段有操作進行中時，按鈕先停用。「尚未檢查」現在會顯示原因，例如額度用完、AI 逾時、本機 Claude Code 尚未登入。
-4. 律師在「」引號裡打句號時，句子會在引號中間被切開：引號裡的句號不再切句（`test_period_inside_quotation_marks_does_not_split`）。
+4. 律師在「」引號裡打句號時，句子會在引號中間被切開：引號裡的句號不再切句（`test_period_inside_quotation_marks_does_not_split`）。引號沒關上時（打錯，或多段引文只在最後一段收引號），那一行改回不看引號切句，不會整段黏成一句（`test_unbalanced_quote_falls_back_to_plain_split`）。
+   - **影響舊資料**：引號裡有句號的段落，以及以引用開頭的句子（見上一節），引用的「那句話」範圍變了，指紋跟著變。下次打開草稿時，這些引用會重新檢查（花一點額度），原本的放行紀錄不再適用，要重新放行。
 5. 原文超過 2000 字的判決段落只送引文前後各約 1000 字：判決段落改成整段送（上限 8000 字，系統內最長約 7,100 字），所以「被告辯稱」寫在很前面也看得到（`test_long_judgment_passage_is_sent_whole`）。
 
 另外：自動測試的 1,005 個後端測試中，一般測試會關閉支持度檢查。支持度與既有流程的搭配，靠標記 `support_real` 的測試與瀏覽器實測驗證。

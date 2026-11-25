@@ -39,25 +39,22 @@ def _is_empty(fragment: str) -> bool:
     return all(c.isspace() or c in BRACKETS or unicodedata.category(c).startswith("P") for c in rest)
 
 
-def split_sentences(text: str) -> list[str]:
-    """引號「」『』內的句號不切句；引號以句號收尾（。」）時在引號後切開。換行一律切開，引號層數歸零。"""
+def _split_line(line: str, quotes: bool) -> tuple[list[str], int]:
+    """切一行；quotes＝引號內的句號不切。回傳片段與行尾還沒關上的引號層數。"""
     raw: list[str] = []
     buf: list[str] = []
     depth = 0
-    i, n = 0, len(text)
+    i, n = 0, len(line)
     while i < n:
-        ch = text[i]
-        if ch == "\n":
-            raw.append("".join(buf))
-            buf, depth = [], 0
-        elif ch in TERMINATORS:
+        ch = line[i]
+        if ch in TERMINATORS:
             buf.append(ch)
-            while i + 1 < n and (text[i + 1] in CLOSERS or text[i + 1] in TERMINATORS):
+            while i + 1 < n and (line[i + 1] in CLOSERS or line[i + 1] in TERMINATORS):
                 i += 1
-                buf.append(text[i])
-                if text[i] in QUOTE_CLOSE:
+                buf.append(line[i])
+                if line[i] in QUOTE_CLOSE:
                     depth = max(0, depth - 1)
-            if depth == 0:
+            if depth == 0 or not quotes:
                 raw.append("".join(buf))
                 buf = []
         else:
@@ -68,6 +65,16 @@ def split_sentences(text: str) -> list[str]:
             buf.append(ch)
         i += 1
     raw.append("".join(buf))
+    return raw, depth
+
+
+def split_sentences(text: str) -> list[str]:
+    """引號「」『』內的句號不切句；引號以句號收尾（。」）時在引號後切開。換行一律切開。
+    一行裡引號沒關上（打錯，或多段引文只在最後一段收引號）時，這一行改回不看引號切句，不會整段黏成一句。"""
+    raw: list[str] = []
+    for line in text.split("\n"):
+        frags, depth = _split_line(line, quotes=True)
+        raw += _split_line(line, quotes=False)[0] if depth > 0 else frags
     out: list[str] = []
     for frag in (f.strip() for f in raw):
         if not frag:

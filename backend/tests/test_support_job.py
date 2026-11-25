@@ -120,6 +120,20 @@ def test_provider_factory_error_fails_claimed_rows(db):
     assert {(r.status, r.error) for r in _all(ctx).values()} == {("failed", "other: 系統內部錯誤")}
 
 
+def test_heartbeat_error_fails_claimed_rows(db, monkeypatch):
+    # 每批送出前更新心跳時資料庫出錯：認領的列當下記成尚未檢查，不卡在「檢查中」等 10 分鐘
+    from app.support import job as support_job
+    ctx, ids = _rows(3)
+
+    def broken(*a, **kw):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(support_job, "_beat", broken)
+    fake = FakeProvider({"support": _answer()})
+    _run(ctx, ids, fake)
+    assert fake.calls == []
+    assert {(r.status, r.error) for r in _all(ctx).values()} == {("failed", "other: 系統內部錯誤")}
+
+
 def test_long_judgment_passage_is_sent_whole(db):
     # 判決段落很長、「被告辯稱」在很前面：要整段送，AI 才看得出引文是當事人主張
     lead = "被告辯稱：原告係為避免贈與稅乃以他人名義登記云云。"

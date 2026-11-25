@@ -106,6 +106,8 @@ def para(firm, pid) -> Paragraph:
 
 def test_save_text_creates_manual_version_with_alerts(lawyer_client):
     client, firm, member_id = lawyer_client
+    # 校對模式：修正後用已存的校對結果重新比對（只用 AI 的情形見 test_ocr_ai_only）
+    client.app.state.settings = client.app.state.settings.model_copy(update={"ocr_proofread": True})
     case_id, _ = make_round(firm)
     _, pid = ocr_page(firm, case_id, "醫療費用合計新臺弊5,870元", proof=[cell("醫療費用合計新臺弊5,870元")])
     r = put_text(client, pid, "醫療費用合計新臺幣5,870元", 1)
@@ -204,7 +206,7 @@ def test_correction_after_verify_requires_new_verification(db):
     assistant = member(firm, "assistant@ocr.test", role="assistant")
     review(firm, pid, lawyer)
     with tenant_session(firm) as s:
-        save_page_text(s, page, EVIDENCE_TEXT + "（更正）", assistant, base_version=1, verify=False)
+        save_page_text(s, page, EVIDENCE_TEXT + "（更正）", assistant, base_version=1, proofread=False, verify=False)
     p = para(firm, pid)
     assert p.status == "unreviewed" and p.source_notice == NOTICE
     with tenant_session(firm) as s:
@@ -223,7 +225,7 @@ def test_correction_repoints_candidates_and_citations(db):
     pid = make_paragraph(ctx, "按{{cite:E1}}可稽。", [("E1", E_QUOTE)])
     with tenant_session(firm) as s:
         new = save_page_text(s, page, EVIDENCE_TEXT, member(firm, "a@ocr.test", "assistant"), base_version=1,
-                             verify=False)
+                             proofread=False, verify=False)
         new_id = new.id
     with tenant_session(firm) as s:
         cand = s.scalars(select(Candidate).where(Candidate.round_id == ctx["round_id"], Candidate.code == "E1")).one()
@@ -255,7 +257,7 @@ def test_correction_on_extracted_round_recomputes_claims(db):
     firm = create_firm("甲事務所")
     rid, page, claim_id, lawyer = _request_round(firm, "extracted")
     with tenant_session(firm) as s:
-        save_page_text(s, page, "醫療費用合計新臺幣54,000元，已繳清。", lawyer, base_version=1, verify=False)
+        save_page_text(s, page, "醫療費用合計新臺幣54,000元，已繳清。", lawyer, base_version=1, proofread=False, verify=False)
     with tenant_session(firm) as s:
         c = s.get(Claim, claim_id)
         assert c.evidence[0]["found"] is False and c.confirmed_by is None and c.quote_verified is False
@@ -272,7 +274,7 @@ def test_correction_on_extracted_round_recomputes_claims(db):
         s.flush()
         c2_id = c2.id
     with tenant_session(firm2) as s:
-        save_page_text(s, opp, "原告並無過失。", member(firm2, "x@ocr.test"), base_version=1, verify=False)
+        save_page_text(s, opp, "原告並無過失。", member(firm2, "x@ocr.test"), base_version=1, proofread=False, verify=False)
     with tenant_session(firm2) as s:
         assert s.get(Claim, c2_id).quote_verified is False
 
@@ -292,7 +294,7 @@ def test_correction_on_drafted_round_keeps_amounts(db):
     review(firm, st_id, lawyer)
     with tenant_session(firm) as s:
         before = round_total(s, rid)
-        save_page_text(s, page, "醫療費用合計新臺幣54,000元，已繳清。", lawyer, base_version=1, verify=False)
+        save_page_text(s, page, "醫療費用合計新臺幣54,000元，已繳清。", lawyer, base_version=1, proofread=False, verify=False)
     with tenant_session(firm) as s:
         assert s.get(Claim, claim_id).confirmed_by is not None and round_total(s, rid) == before == 45000
     p = para(firm, st_id)
@@ -434,7 +436,7 @@ def test_correction_during_drafting_flags_statement_and_citing_paragraphs(db):
     firm = create_firm("甲事務所")
     rid, page, claim_id, lawyer = _request_round(firm, "drafting")
     with tenant_session(firm) as s:
-        save_page_text(s, page, "醫療費用合計新臺幣4,500元，已繳清。", lawyer, base_version=1, verify=False)
+        save_page_text(s, page, "醫療費用合計新臺幣4,500元，已繳清。", lawyer, base_version=1, proofread=False, verify=False)
     st_id, body_id = _drafted_while_correcting(firm, rid, page)
     with tenant_session(firm) as s:
         refresh_round_sources(s, rid)
@@ -450,7 +452,7 @@ def test_correction_during_drafting_elsewhere_on_page_keeps_statement_quiet(db):
     firm = create_firm("甲事務所")
     rid, page, claim_id, lawyer = _request_round(firm, "drafting")
     with tenant_session(firm) as s:
-        save_page_text(s, page, "醫療費用合計新臺幣45,000元，已繳清。經辦人王小美", lawyer, base_version=1, verify=False)
+        save_page_text(s, page, "醫療費用合計新臺幣45,000元，已繳清。經辦人王小美", lawyer, base_version=1, proofread=False, verify=False)
     st_id, body_id = _drafted_while_correcting(firm, rid, page)
     with tenant_session(firm) as s:
         refresh_round_sources(s, rid)
@@ -501,7 +503,7 @@ def test_timeline_source_flags_after_correction(db):
     with tenant_session(firm) as s:
         assert [e["source"]["status"] for e in timeline_view(s, case_id)] == ["found", "unchecked"]
         save_page_text(s, pid, "民國114年3月28日於中華東路口發生碰撞", member(firm, "a@ocr.test", "assistant"),
-                       base_version=1, verify=False)
+                       base_version=1, proofread=False, verify=False)
     with tenant_session(firm) as s:
         ai, lw = timeline_view(s, case_id)
         assert (ai["source"]["status"], ai["source"]["reasons"]) == ("not_found", ["quote_not_found"])
@@ -522,7 +524,7 @@ def test_concurrent_correction_and_proof_write(db):
         try:
             barrier.wait()
             with tenant_session(firm) as s:
-                save_page_text(s, pid, "醫療費用合計新臺幣5,870元整", who, base_version=1, verify=False)
+                save_page_text(s, pid, "醫療費用合計新臺幣5,870元整", who, base_version=1, proofread=False, verify=False)
         except Exception as e:  # noqa: BLE001
             errors.append(e)
 

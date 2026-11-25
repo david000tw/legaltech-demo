@@ -1,8 +1,9 @@
-"""辨識工作（計畫 2A，設計 6.2）：一份文件一筆 AI 工作，逐頁讓 AI（Opus）讀、校對員（PaddleOCR）比對。
+"""辨識工作（計畫 2A，設計 6.2）：一份文件一筆 AI 工作，逐頁讓 AI（Opus）讀。
 
+- 預設只用 AI（設定 ocr_proofread=False，設計 5.1 備案）：每頁讀完就完成，不啟動校對員。
 - 排入：上傳後自動開始；本案排隊中的頁數加這份超過上限時改成「等待確認」；
-- 執行：每批 PROOF_BATCH 頁。先在背景啟動校對員，同時逐頁呼叫 AI、讀完立刻存；最後等校對結果
-  （等待期間持續更新心跳），寫在該頁「目前」的文字版本上；
+- 執行：每批 PROOF_BATCH 頁，逐頁呼叫 AI、讀完立刻存。ocr_proofread=True 時另在背景啟動校對員（PaddleOCR），
+  最後等校對結果（等待期間持續更新心跳），寫在該頁「目前」的文字版本上；
 - 一頁失敗不擋整份；額度用完、沒登入時整份停下，已讀完的頁照常可以對照；
 - 中斷（後端重啟、過期）後可以「繼續辨識」：只補做還沒讀、還沒校對的頁。
 """
@@ -185,7 +186,8 @@ def _lock_page(s: Session, page_id: UUID) -> Page:
     return s.get(Page, page_id, with_for_update=True, populate_existing=True)
 
 
-def _save_read(s: Session, page_id: UUID, text: str) -> None:
+def _save_read(s: Session, page_id: UUID, text: str, *, done: bool = False) -> None:
+    """done＝只用 AI：讀完就完成（不經「校對中」），律師可以馬上對照原圖。"""
     page = _lock_page(s, page_id)
     if page.ocr_state != "pending":
         return  # 辨識期間已有人手動輸入或改了狀態：不覆蓋
@@ -193,7 +195,7 @@ def _save_read(s: Session, page_id: UUID, text: str) -> None:
     pt = PageText(firm_id=page.firm_id, page_id=page_id, version=(old.version + 1) if old else 1, source="ai_ocr",
                   text=text, needs_image_check=True, alerts=compute_alerts(text, None, True))
     s.add(pt)
-    page.ocr_state, page.ocr_error = "read", None
+    page.ocr_state, page.ocr_error = ("done" if done else "read"), None
     s.flush()
     if old is not None:  # 原本已有文字（例：改用辨識）：引用它的地方改指新版本並退回未審
         from app.ocr.service import after_text_change
@@ -278,7 +280,7 @@ def _run_batch(job: AIJob, ctx, settings, storage: LocalStorage, batch: list[tup
                 ctx.write(lambda s, pid=page_id, err=f"{e.kind}: {e.message}": _mark_failed(s, pid, err))
                 continue
             text = str(result.data.get("text") or "")
-            ctx.write(lambda s, pid=page_id, t=text: _save_read(s, pid, t))
+            ctx.write(lambda s, pid=page_id, t=text: _save_read(s, pid, t, done=not proofread))
             read.append(page_id)
         if not proofread:
             ctx.write(stop_unproofed)

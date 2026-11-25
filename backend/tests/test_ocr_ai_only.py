@@ -70,3 +70,61 @@ def test_manual_correction_has_no_missing_proofreader_alert(db, tmp_path, monkey
                                                    "verify": False})
     assert r.status_code == 200, r.text
     assert kinds(texts(firm, doc)[0]) == []
+
+
+def test_page_is_done_as_soon_as_it_is_read(db, tmp_path, monkeypatch):
+    # 同一批後面的頁還在辨識時，讀完的頁已經完成：不顯示「校對中」，律師可以勾「已對照原圖」
+    from app.ocr.service import verify_page
+    from tests.fakes.fake_provider import FakeProvider
+    from tests.test_ocr_correction import member
+    _ai_only(tmp_path, monkeypatch)
+    firm = create_firm("甲事務所")
+    lawyer = member(firm, "lawyer@a.test")
+    _, doc = make_doc(firm, 2)
+    p1, _ = page_ids(firm, doc)
+    seen: list = []
+
+    def handler(call):
+        if seen:  # 第二頁辨識中
+            with tenant_session(firm) as s:
+                seen.append(s.get(Page, p1).ocr_state)
+                verify_page(s, p1, 1, lawyer)
+        seen.append("call")
+        return {"text": "第一頁" if len(seen) == 1 else "第二頁"}
+    job_id, _ = queue(firm, doc)
+    run_job(firm, job_id, dbmod.settings(), provider=FakeProvider({"ocr": handler}))
+    assert seen == ["call", "done", "call"]
+
+
+def test_usage_limit_stop_finishes_read_pages(db, tmp_path, monkeypatch):
+    from app.ai.provider import AIError
+    from app.models import AIJob
+    _ai_only(tmp_path, monkeypatch)
+    firm = create_firm("甲事務所")
+    _, doc = make_doc(firm, 3)
+    job_id, _ = queue(firm, doc)
+    run_job(firm, job_id, dbmod.settings(), provider=fake("第一頁", AIError("usage_limit", "額度用完")))
+    assert states(firm, doc) == ["done", "pending", "pending"]
+    assert kinds(texts(firm, doc)[0]) == []
+    with tenant_session(firm) as s:
+        assert s.get(AIJob, job_id).status == "failed"
+
+
+def test_correction_ignores_old_proofreader_result(db, tmp_path, monkeypatch):
+    # 改成只用 AI 之前已校對過的頁：修正文字後不再拿舊的校對結果比對，不出現「校對不一致」
+    from tests.test_ocr_correction import cell
+    settings = _ai_only(tmp_path, monkeypatch)
+    firm = create_firm("甲事務所")
+    create_member(firm, "lawyer@a.test")
+    client = TestClient(create_app(settings))
+    assert login(client, "lawyer@a.test").status_code == 200
+    _, doc = make_doc(firm, 1)
+    job_id, _ = queue(firm, doc)
+    run_job(firm, job_id, settings, provider=fake("醫療費用合計新臺幣5,780元"))
+    (pid,) = page_ids(firm, doc)
+    with tenant_session(firm) as s:
+        s.get(Page, pid).proof = [cell("完全不同的一行字")]
+    r = client.put(f"/api/pages/{pid}/text", json={"text": "醫療費用合計新臺幣5,870元", "base_version": 1,
+                                                   "verify": False})
+    assert r.status_code == 200, r.text
+    assert kinds(texts(firm, doc)[0]) == []

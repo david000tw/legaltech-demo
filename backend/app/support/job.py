@@ -175,14 +175,19 @@ def run_support_checks(firm_id: UUID, check_ids: list[UUID], settings: Settings,
         group = list(group)
         batches.extend(group[k:k + SUPPORT_BATCH] for k in range(0, len(group), SUPPORT_BATCH))
     for batch in batches:
-        mine = _beat(firm_id, token, remaining, [i.id for i in batch])
+        try:
+            mine = _beat(firm_id, token, remaining, [i.id for i in batch])
+        except Exception:  # noqa: BLE001  資料庫出錯：認領的列當下記成尚未檢查，不卡在「檢查中」
+            log.exception("support check heartbeat failed")
+            _fail(firm_id, token, remaining, OTHER)
+            return
         remaining = [i for i in remaining if i not in {b.id for b in batch}]
         todo = [i for i in batch if i.id in mine]
         if not todo:
             continue
-        codes, user = _user_prompt(todo)
         ids = [i.id for i in todo]
         try:
+            codes, user = _user_prompt(todo)
             result = call_ai(provider, firm_id=firm_id, case_id=todo[0].case_id, member_id=member_id,
                              step="support", system=load_prompt("support"), user=user,
                              schema=support_schema(list(codes)), effort="medium", timeout_s=SUPPORT_TIMEOUT_S)
