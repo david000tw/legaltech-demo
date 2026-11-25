@@ -438,6 +438,8 @@ class Paragraph(Base):
     review_request_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
     review_request_version: Mapped[str | None] = mapped_column(String(64))
     review_note: Mapped[str | None] = mapped_column(Text)  # 自動完成被取消時給律師看的原因
+    # 這段回應的主張編號（設計 6.5，AI 標註、規則只留有效編號）；None＝這個功能上線前產生的舊草稿
+    claim_seqs: Mapped[list | None] = mapped_column(JSONB)
 
 
 class Citation(Base):

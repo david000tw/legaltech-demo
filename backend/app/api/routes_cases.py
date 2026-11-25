@@ -17,7 +17,9 @@ from app.case_types import (
 from app.db import CASE_LOCK, tenant_session
 from app.ingest.extract import UnreadableFile, UnsupportedFile, file_ext
 from app.ingest.service import current_page_text, ingest_document
-from app.models import AUTOMATION_MODES, Case, CaseParty, Document, Exhibit, Member, Page, Round
+from app.models import (
+    AUTOMATION_MODES, AIJob, Case, CaseParty, Document, Exhibit, HealthReport, Member, Page, Round,
+)
 from app.ocr.job import current_texts, document_ocr_json, page_ocr_fields, pending_without_job
 from app.ocr.images import (
     HEIC_EXTS, HEIC_MESSAGE, IMAGE_EXTS, MAX_PHOTOS, MIXED_MESSAGE, TOO_MANY_PHOTOS, looks_scanned_with_text,
@@ -206,6 +208,9 @@ def get_case(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
         rounds = s.scalars(select(Round).where(Round.case_id == case_id).order_by(Round.seq)).all()
         seq_of = {r.id: r.seq for r in rounds}
         procedure = procedure_for(case.case_type, case.case_number)
+        round_ids = [r.id for r in rounds]
+        with_health = (set(s.scalars(select(HealthReport.round_id).where(HealthReport.round_id.in_(round_ids))))
+                       | set(s.scalars(select(AIJob.round_id).where(AIJob.round_id.in_(round_ids), AIJob.step == "health"))))
         return {
             **_case_summary(case),
             "header": _header_json(case),
@@ -227,7 +232,9 @@ def get_case(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
                           "filename": names.get(e.document_id)} for e in exhibits],
             "rounds": [{"id": str(r.id), "seq": r.seq, "status": r.status, "error": r.error,
                         "brief_kind": r.brief_kind, "failed_stage": r.failed_stage,
-                        "copied_from_seq": seq_of.get(r.copied_from_round_id)} for r in rounds],
+                        "copied_from_seq": seq_of.get(r.copied_from_round_id),
+                        # 有健檢報告或健檢工作：起草失敗時健檢分頁仍列出（設計 6.3）
+                        "has_health": r.id in with_health} for r in rounds],
             # 建立輪次時可選的書狀種類：原告不能寫答辯狀，被告不能寫起訴狀（設計 5.1）
             "brief_kind_options": [{"code": k, "label": BRIEF_KINDS[k]} for k in allowed_brief_kinds(case.our_side)],
             "default_brief_kind": default_brief_kind(case.our_side, bool(rounds)),

@@ -153,7 +153,7 @@ def test_patch_round_settings_only_before_draft(lawyer_client):
 
 @pytest.mark.parametrize("status,failed_stage,minutes_ago,expected", [
     ("failed", "extract", 0, 200),      # 拆解失敗（例如卷證都是掃描檔）：補上卷證後要能改案情說明再拆解
-    ("extracting", None, 76, 200),      # 拆解逾時（超過 STALE_AFTER＝75 分鐘）：畫面的「重新開始」會先存設定
+    ("extracting", None, 96, 200),      # 拆解逾時（超過 STALE_AFTER＝95 分鐘）：畫面的「重新開始」會先存設定
     ("extracting", None, 1, 409),       # 正在拆解中
     ("failed", "draft", 0, 409),        # 起草失敗：重新起草不用改設定
 ])
@@ -182,7 +182,7 @@ def test_answer_round_prompts_say_answer(db):
     _, rid = _answer_round(firm)
     fake = fake_all()
     run_two_stage(firm, rid, db, provider=fake)
-    assert [c["step"] for c in fake.calls] == ["claims", "select", "draft"]
+    assert [c["step"] for c in fake.calls] == ["claims", "select", "health", "draft"]
     for call in fake.calls:
         assert "書狀名稱：民事答辯狀" in call["user"], call["step"]
     assert fake.calls[-1]["user"].endswith("請依寫作規則，逐條回應原告起訴狀之主張，撰寫答辯狀之答辯理由段落。")

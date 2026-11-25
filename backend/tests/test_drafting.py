@@ -26,8 +26,11 @@ DRAFT_OK = {"paragraphs": [{"heading": "㈠關於原告與有過失之主張",
                             "citations": [{"code": "E1", "quote": E_QUOTE}]}]}
 
 
+HEALTH_EMPTY = {"items": [], "undisputed": [], "issues": []}  # 起草階段裡、起草之前會跑一次健檢（設計 6.3）
+
+
 def fake_all(**override):
-    responses = {"claims": CLAIMS_OK, "select": SELECT_OK, "draft": DRAFT_OK}
+    responses = {"claims": CLAIMS_OK, "select": SELECT_OK, "health": HEALTH_EMPTY, "draft": DRAFT_OK}
     responses.update(override)
     return FakeProvider(responses)
 
@@ -86,7 +89,7 @@ def test_run_round_success_sets_drafted(db):
     fake = fake_all()
     run_two_stage(firm, round_id, db, provider=fake)
     assert status_of(firm, round_id) == ("drafted", None)
-    assert fake.steps() == ["claims", "select", "draft"]
+    assert fake.steps() == ["claims", "select", "health", "draft"]
     assert counts(firm, round_id) == (1, 1, 1)
 
 

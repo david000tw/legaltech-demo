@@ -159,6 +159,20 @@ def note_json(s: Session, n: EvidenceNote) -> dict:
             "source": source_view(s, n.page_id, n.quote, n.status, n.reasons or [])}
 
 
+def evidence_notes_for_draft(s: Session, case_id: UUID) -> str:
+    """送進起草的卷證說明（設計 6.3）：只放出處有找到原文的句子（規則優先於 AI），依證物分組。"""
+    label = {"proves": "證明方向", "caution": "注意事項"}
+    blocks = []
+    for code, doc, _pages in evidence_documents(s, case_id):
+        notes = s.scalars(select(EvidenceNote).where(EvidenceNote.document_id == doc.id,
+                                                     EvidenceNote.status == "found")).all()
+        notes = sorted(notes, key=lambda n: (KINDS.index(n.kind), n.seq, n.created_at))
+        if notes:
+            blocks.append(f"{code}（{doc.filename}）\n" + "\n".join(f"- {label.get(n.kind, n.kind)}：{n.text}"
+                                                                    for n in notes))
+    return "【卷證說明】\n" + "\n".join(blocks) if blocks else ""
+
+
 def notes_view(s: Session, case_id: UUID) -> list[dict]:
     docs = evidence_documents(s, case_id)
     pending = {d.id for d in documents_needing_notes(s, case_id, docs)}

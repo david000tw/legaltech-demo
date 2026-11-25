@@ -17,7 +17,9 @@ CLAIMS_SCHEMA = _obj({
 _CITATIONS = {"type": "array", "items": _obj({"code": _STR, "quote": _STR})}
 
 DRAFT_SCHEMA = _obj({
-    "paragraphs": {"type": "array", "items": _obj({"heading": _STR, "text": _STR, "citations": _CITATIONS})},
+    # claim_seqs：這段回應的主張（或請求項目）編號，前言、結論可以留空（設計 6.5）
+    "paragraphs": {"type": "array", "items": _obj({"heading": _STR, "text": _STR, "citations": _CITATIONS,
+                                                   "claim_seqs": {"type": "array", "items": _INT}})},
 })
 
 REWRITE_SCHEMA = _obj({"text": _STR, "citations": _CITATIONS})

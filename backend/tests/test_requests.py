@@ -203,13 +203,13 @@ def test_complaint_draft_context_lists_items_and_total(db, firm):
                                                ("精神慰撫金", 150000)), start=1):
             s.add(Claim(firm_id=firm, round_id=rid, seq=seq, summary=label, quote="", kind="request",
                         request_type="monetary", amount=amount, confirmed_by=lawyer, confirmed_at=now, evidence=[]))
-    fake = FakeProvider({"select": SELECT_OK, "draft": DRAFT_OK})
+    fake = FakeProvider({"select": SELECT_OK, "health": {"items": [], "issues": []}, "draft": DRAFT_OK})
     with tenant_session(firm) as s:
         start_stage(s, rid, "draft")
     run_draft(firm, rid, None, db, provider=fake)
     with tenant_session(firm) as s:
         assert s.get(Round, rid).status == "drafted"
-    select_call, draft_call = fake.calls
+    select_call, _health_call, draft_call = fake.calls
     assert "【我方請求項目】" in select_call["user"] and "請求項目1：醫療費用（新臺幣45,000元）" in select_call["user"]
     assert draft_call["system"] == load_prompt("draft_complaint")
     assert "【我方請求項目與對應結果】" in draft_call["user"]

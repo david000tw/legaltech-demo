@@ -219,13 +219,15 @@ def test_health_too_long_fails_without_calling_ai(db, monkeypatch):
     assert job.error == "卷證太多，超過一次健檢能處理的長度" and fake.calls == [] and report is None
 
 
-def test_health_requires_drafted(lawyer_client):
+def test_health_requires_candidates(lawyer_client):
+    """健檢移到起草前（設計 6.3）：前提從「已起草」改成「本輪已有候選清單」。"""
     client, firm, _ = lawyer_client
     _, rid = make_round(firm)
     with tenant_session(firm) as s:
         s.get(Round, rid).status = "extracted"
     r = client.post(f"/api/rounds/{rid}/health")
-    assert r.status_code == 409 and r.json()["detail"] == {"code": "not_drafted", "message": "起草完成後才能執行健檢"}
+    assert r.status_code == 409 and r.json()["detail"] == {"code": "no_candidates",
+                                                             "message": "起草準備完成後才能執行健檢"}
     with tenant_session(firm) as s:
         assert s.scalar(select(func.count()).select_from(AIJob)) == 0
 

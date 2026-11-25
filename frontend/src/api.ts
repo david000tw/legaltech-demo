@@ -54,7 +54,8 @@ export type UploadResult = { id: string; page_count: number
 export type Exhibit = { id: string; label: string; prefix: string; number: number; document_id: string;
   filename: string | null }
 export type RoundSummary = { id: string; seq: number; status: RoundStatus; error: string | null
-  brief_kind?: BriefKind; failed_stage?: 'extract' | 'draft' | null; copied_from_seq?: number | null }
+  brief_kind?: BriefKind; failed_stage?: 'extract' | 'draft' | null; copied_from_seq?: number | null
+  has_health?: boolean }  // 有健檢結果（起草失敗時也看得到，設計 6.3）
 // 狀頭欄位（設計 5.2）：都可以空著，匯出時留空白讓律師補；reference_date 是 YYYY-MM-DD
 export type CaseHeader = { court: string | null; case_number: string | null; division: string | null; cause: string | null
   addressee: string | null; attorneys: string[]; reference_date: string | null }

@@ -116,7 +116,7 @@ def test_stage_transitions_refused(db, firm):
 def test_stale_after_exceeds_worst_case_run():
     """還在跑的輪次不能被判成逾時而重跑（重複花額度）：門檻要大於最壞情況（步驟數 × 重試次數 × 單次逾時）。"""
     worst = timedelta(seconds=ROUND_MAX_AI_STEPS * AI_CALL_ATTEMPTS * AI_CALL_TIMEOUT_S)
-    assert worst == timedelta(minutes=60)
+    assert worst == timedelta(minutes=80)  # 起草階段多了健檢（設計 6.3）：4 步 × 2 次 × 10 分鐘
     assert STALE_AFTER > worst
     # 常數要與實際呼叫 AI 的預設值一致，否則上面的推算只是紙上談兵
     assert inspect.signature(call_ai).parameters["timeout_s"].default == AI_CALL_TIMEOUT_S

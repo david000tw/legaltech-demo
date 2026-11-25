@@ -25,7 +25,7 @@ from app.pipeline.requests import evidence_pages, extract_requests
 log = logging.getLogger(__name__)
 AI_CALL_TIMEOUT_S = 600  # 單次 AI 呼叫的逾時（與 call_ai 的預設一致）
 AI_CALL_ATTEMPTS = 2  # 輸出不合法或拒答時重試一次（見 ClaudeCodeLocalProvider.run；Bedrock 供應來源尚是空殼，計畫 5 接上時要重新核對）
-ROUND_MAX_AI_STEPS = 3  # 一段最多的 AI 步驟數（拆解 1 步、起草 2 步，再留一步的餘裕）
+ROUND_MAX_AI_STEPS = 4  # 一段最多的 AI 步驟數（拆解 1 步；起草 3 步：挑選、健檢、起草；再留一步的餘裕）
 # 最壞情況 3 步 × 2 次 × 600 秒 = 60 分鐘；門檻須大於它再加餘裕，否則還在跑的輪次會被判逾時而重跑、重複花額度
 STALE_AFTER = timedelta(seconds=ROUND_MAX_AI_STEPS * AI_CALL_ATTEMPTS * AI_CALL_TIMEOUT_S) + timedelta(minutes=15)
 NO_TEXT = "no_text: 對造書狀沒有可讀文字，請等辨識完成，或手動輸入辨識失敗的頁"
@@ -211,6 +211,23 @@ def run_extract(firm_id: UUID, round_id: UUID, member_id: UUID | None, settings:
     _run("extract", body, firm_id, round_id, settings, provider, provider_factory)
 
 
+def _health_before_draft(s: Session, firm_id: UUID, round_id: UUID, member_id: UUID | None, settings: Settings,
+                         provider: AIProvider) -> UUID | None:
+    """健檢移到起草前（設計 6.3）：用同一份候選清單跑一次，結果照舊存成健檢工作與報告，健檢面板讀得到。
+    健檢跑不了或失敗都不擋起草（run_job 自己會把錯誤記在工作上）；回傳這次健檢工作的 id，起草只採用它的報告。"""
+    from app.pipeline.jobs import JobBusy, JobRule, run_job, start_job
+    case_id = s.get(Round, round_id).case_id
+    try:
+        job_id = start_job(s, case_id, round_id, "health", member_id).id
+    except (JobBusy, JobRule):
+        s.rollback()
+        return None
+    s.commit()
+    run_job(firm_id, job_id, settings, provider=provider)
+    s.expire_all()
+    return job_id
+
+
 def run_draft(firm_id: UUID, round_id: UUID, member_id: UUID | None, settings: Settings,
               provider: AIProvider | None = None,
               provider_factory: Callable[[Settings, Firm], AIProvider] = get_provider) -> None:
@@ -221,7 +238,10 @@ def run_draft(firm_id: UUID, round_id: UUID, member_id: UUID | None, settings: S
         select_for_claims(s, round_id, provider, member_id)
         _still_current(s, round_id, token)
         s.commit()
-        draft_round(s, round_id, provider, member_id)
+        health_job_id = _health_before_draft(s, firm_id, round_id, member_id, settings, provider)
+        _still_current(s, round_id, token)
+        s.commit()  # 放掉輪次列的鎖再呼叫 AI 起草（與前兩步相同）：起草要好幾分鐘，期間別人要能接手或修改
+        draft_round(s, round_id, provider, member_id, health_job_id=health_job_id)
         _still_current(s, round_id, token)
         from app.ocr import service as ocr_service
         ocr_service.refresh_round_sources(s, round_id)  # 起草期間有頁被修正：引用改指目前版本

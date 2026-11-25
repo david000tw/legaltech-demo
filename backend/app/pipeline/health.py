@@ -57,8 +57,33 @@ def health_fingerprint(s: Session, round_id: UUID) -> str:
 
 
 def ready(s: Session, round_id: UUID) -> None:
-    if s.get(Round, round_id).status != "drafted":
-        raise JobRule("not_drafted", "起草完成後才能執行健檢")
+    """健檢用本輪的候選清單（設計 6.3：起草階段裡、起草之前就跑）；有候選清單就能健檢。"""
+    if s.scalar(select(Candidate.id).where(Candidate.round_id == round_id).limit(1)) is None:
+        raise JobRule("no_candidates", "起草準備完成後才能執行健檢")
+
+
+def health_for_draft(s: Session, round_id: UUID, job_id: UUID | None) -> str:
+    """送進起草的健檢提醒（設計 6.3）：只用這一次健檢工作產生的報告；只放依據有找到原文的高風險與補強建議；
+    清單外的判決、法條名稱不放（規則優先於 AI：沒經過檢查的內容不當作起草材料）。"""
+    if job_id is None:
+        return ""
+    job = s.get(AIJob, job_id)
+    report = s.scalars(select(HealthReport).where(HealthReport.round_id == round_id)).first()
+    if job is None or job.status != "done" or report is None or report.created_at < job.started_at:
+        return ""
+    lines = []
+    for it in report.items or []:
+        if it.get("level") not in ("high", "suggest"):
+            continue
+        if not any(b.get("status") == "found" for b in it.get("basis") or []):
+            continue
+        text = f"{it.get('title', '')}：{it.get('explanation', '')}"
+        for name in it.get("not_in_list") or []:
+            text = text.replace(str(name), "")
+        lines.append(f"- {'高風險' if it['level'] == 'high' else '補強建議'}｜{text}")
+    if not lines:
+        return ""
+    return "【健檢提醒】（僅供參考，不得作為事實或引用來源）\n" + "\n".join(lines)
 
 
 def _pages_text(pages: list[SourcePage]) -> str:
