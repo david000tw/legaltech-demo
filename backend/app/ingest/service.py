@@ -8,6 +8,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app import db
+from app.db import CASE_LOCK
 from app.ingest.extract import extract_pages, file_ext
 from app.models import Case, Document, Exhibit, Page, PageText
 from app.storage import LocalStorage
@@ -17,7 +18,7 @@ EXHIBIT_PREFIX = {"plaintiff": "原證", "defendant": "被證"}
 
 def ingest_document(s: Session, firm_id: UUID, case_id: UUID, kind: str, filename: str, data: bytes,
                     round_id: UUID | None = None, *, storage: LocalStorage | None = None) -> Document:
-    case = s.get(Case, case_id, with_for_update=True)  # 鎖住案件列，避免同時上傳時原證撞號
+    case = s.get(Case, case_id, with_for_update=CASE_LOCK)  # 鎖住案件列，避免同時上傳時原證撞號
     if case is None:
         raise LookupError("找不到案件")
     pages = extract_pages(data, filename)  # 不支援的格式在寫入任何東西前就丟出

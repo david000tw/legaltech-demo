@@ -253,7 +253,7 @@ def test_confirm_takes_case_lock_before_round_lock(api):
     locks: list[str] = []
 
     def listener(conn, cur, stmt, params, ctx, many):
-        if "FOR UPDATE" in stmt:
+        if "FOR UPDATE" in stmt or "FOR NO KEY UPDATE" in stmt:
             locks.append("cases" if "FROM cases" in stmt else "rounds" if "FROM rounds" in stmt else stmt[:40])
     event.listen(eng, "before_cursor_execute", listener)
     try:

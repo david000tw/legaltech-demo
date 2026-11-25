@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.auth import CurrentMember, current_member
-from app.db import tenant_session
+from app.db import CASE_LOCK, tenant_session
 from app.models import AIJob, Case, Document, Page
 from app.ocr.job import (
     confirm_message, document_ocr_status, ocr_progress, pending_without_job, queue_ocr, queued_pages, retry_failed,
@@ -57,7 +57,7 @@ def start_document_ocr(document_id: UUID, request: Request, background: Backgrou
         doc = s.get(Document, document_id)
         if doc is None:
             raise HTTPException(404, "找不到文件")
-        s.get(Case, doc.case_id, with_for_update=True)  # 上鎖順序：案件列優先
+        s.get(Case, doc.case_id, with_for_update=CASE_LOCK)  # 上鎖順序：案件列優先
         if body.retry_failed:
             retry_failed(s, document_id)
         job = _queue(s, document_id, m.id, confirm=body.confirm)
@@ -81,7 +81,7 @@ def start_case_ocr(case_id: UUID, request: Request, background: BackgroundTasks,
     """「開始辨識（N 頁）」：本案沒有進行中工作、而且有待辨識頁的所有文件。"""
     body = body or CaseOcrBody()
     with tenant_session(m.firm_id) as s:
-        if s.get(Case, case_id, with_for_update=True) is None:
+        if s.get(Case, case_id, with_for_update=CASE_LOCK) is None:
             raise HTTPException(404, "找不到案件")
         targets = pending_without_job(s, case_id)
         total = sum(targets.values())

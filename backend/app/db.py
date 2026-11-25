@@ -61,6 +61,11 @@ def _session(url: str, firm_id: UUID | None = None) -> Iterator[Session]:
         s.close()
 
 
+# 案件列一律鎖成 FOR NO KEY UPDATE：案件鎖之間照樣互斥，但不擋「新增參照案件的列」的外鍵檢查（KEY SHARE）。
+# 用 FOR UPDATE 時，段落鎖住後新增支持度檢查列（外鍵指向案件）會和「先鎖案件、再鎖段落」的辨識修正互等而死結。
+CASE_LOCK = {"key_share": True}
+
+
 def tenant_session(firm_id: UUID) -> Iterator[Session]:
     return _session(settings().database_url, firm_id)
 

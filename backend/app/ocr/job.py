@@ -20,6 +20,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app import db
+from app.db import CASE_LOCK
 from app.ai.provider import AIError, AIProvider
 from app.ingest.extract import file_ext
 from app.ingest.service import current_page_text
@@ -96,7 +97,7 @@ def queue_ocr(s: Session, document_id: UUID, member_id: UUID | None, *, confirm:
     """排入辨識。呼叫端只對 running 的工作排背景執行；waiting 要等律師確認。"""
     from app.pipeline.jobs import BUSY, TAKEN_OVER, JobBusy, JobRule, _stale, start_job
     doc = s.get(Document, document_id)
-    s.get(Case, doc.case_id, with_for_update=True)  # 同時按兩次只會排一筆
+    s.get(Case, doc.case_id, with_for_update=CASE_LOCK)  # 同時按兩次只會排一筆
     n = work_pages(s, document_id)
     if n == 0:
         return None

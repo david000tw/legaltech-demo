@@ -20,7 +20,7 @@ from app.ai.provider import (
 )
 from app.ai.usage import call_ai
 from app.config import Settings
-from app.db import tenant_session
+from app.db import CASE_LOCK, tenant_session
 from app.models import AIJob, Case, Firm
 from app.ocr.state import OCR_STALE_AFTER
 
@@ -108,7 +108,7 @@ def _body_for(step: str) -> Callable[[AIJob, AIProvider, "JobContext"], None]:
 def start_job(s: Session, case_id: UUID, round_id: UUID | None, step: str, member_id: UUID | None,
               document_id: UUID | None = None, status: str = "running") -> AIJob:
     """辨識（ocr）依文件判斷是否已有一筆在跑；等待確認（waiting）不算在跑。"""
-    case = s.get(Case, case_id, with_for_update=True)  # 鎖住案件列：同時按兩次只會有一個開始
+    case = s.get(Case, case_id, with_for_update=CASE_LOCK)  # 鎖住案件列：同時按兩次只會有一個開始
     last = latest_job(s, case_id, round_id, step, document_id)
     if last is not None and last.status == "running":
         if not _stale(last):
@@ -164,14 +164,14 @@ class JobContext:
 
     def write(self, fn: Callable[[Session], None]) -> None:
         with tenant_session(self.firm_id) as s:
-            s.get(Case, self.case_id, with_for_update=True)
+            s.get(Case, self.case_id, with_for_update=CASE_LOCK)
             self._running(s)
             fn(s)
 
 
 def _fail(firm_id: UUID, job_id: UUID, error: str) -> None:
     with tenant_session(firm_id) as s:
-        s.get(Case, s.get(AIJob, job_id).case_id, with_for_update=True)
+        s.get(Case, s.get(AIJob, job_id).case_id, with_for_update=CASE_LOCK)
         job = s.get(AIJob, job_id, populate_existing=True)
         if job.status != "running":
             return  # 已被接手：接手的那一次負責狀態

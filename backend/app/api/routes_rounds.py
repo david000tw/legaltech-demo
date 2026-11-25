@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 
 from app.ai.provider import AIError, ProviderNotAllowed, ProviderNotEnabled
 from app.auth import CurrentMember, current_member, require_lawyer
-from app.db import tenant_session
+from app.db import CASE_LOCK, tenant_session
 from app.models import RUNNING_STATUSES, Case, Claim, Draft, Firm, Page, Paragraph, Round
 from app.pipeline.copy_round import copy_round
 from app.pipeline.drafting import ParagraphChanged, rewrite_paragraph
@@ -141,7 +141,7 @@ def _editable_claim(s, claim_id: UUID, kind: str | None = None, *, lock_case: bo
         raise HTTPException(422, "只有起訴狀的請求項目可以這樣操作")
     if lock_case:
         s.get(Case, s.scalar(select(Round.case_id).where(Round.id == claim.round_id)),
-              with_for_update=True, populate_existing=True)
+              with_for_update=CASE_LOCK, populate_existing=True)
     if s.get(Round, claim.round_id, with_for_update=True, populate_existing=True).status != "extracted":
         raise HTTPException(409, "這一輪已不在待確認狀態，不能再修改")
     if lock_case:

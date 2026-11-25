@@ -11,6 +11,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.db import CASE_LOCK
 from app.ingest.service import current_page_text
 from app.models import Case, Claim, Document, Draft, Page, PageText, Round
 from app.pipeline.run import RoundRule
@@ -67,7 +68,7 @@ def copy_round(s: Session, round_id: UUID) -> Round:
                 .where(Document.round_id == source.id, Document.kind == "opponent_brief",
                        Page.ocr_state.in_(("pending", "read"))).limit(1)) is not None:
         raise RoundRule("ocr_pending", OCR_BUSY)
-    s.get(Case, source.case_id, with_for_update=True)  # 鎖住案件列，避免同時建輪次撞號
+    s.get(Case, source.case_id, with_for_update=CASE_LOCK)  # 鎖住案件列，避免同時建輪次撞號
     seq = (s.scalar(select(func.max(Round.seq)).where(Round.case_id == source.case_id)) or 0) + 1
     target = Round(firm_id=source.firm_id, case_id=source.case_id, seq=seq, status="extracted",
                    copied_from_round_id=source.id, statement_text=_latest_statement_text(s, source),

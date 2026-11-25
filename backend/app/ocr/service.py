@@ -11,6 +11,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.db import CASE_LOCK
 from app.auth import CurrentMember
 from app.ingest.extract import file_ext
 from app.ingest.service import current_page_text
@@ -51,7 +52,7 @@ def lock_page(s: Session, page_id: UUID) -> Page:
     if page is None:
         raise LookupError("找不到頁面")
     doc = s.get(Document, page.document_id)
-    s.get(Case, doc.case_id, with_for_update=True)
+    s.get(Case, doc.case_id, with_for_update=CASE_LOCK)
     return s.get(Page, page_id, with_for_update=True, populate_existing=True)
 
 
@@ -138,7 +139,7 @@ def reocr_document(s: Session, document_id: UUID, member: CurrentMember | None =
         raise LookupError("找不到文件")
     if file_ext(doc.filename) != ".pdf":
         raise OcrRuleError(422, PDF_ONLY)
-    s.get(Case, doc.case_id, with_for_update=True)
+    s.get(Case, doc.case_id, with_for_update=CASE_LOCK)
     pages = list(s.scalars(select(Page).where(Page.document_id == document_id, Page.ocr_state == "none")
                           .with_for_update()))
     for p in pages:

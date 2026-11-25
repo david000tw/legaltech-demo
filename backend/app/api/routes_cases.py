@@ -14,7 +14,7 @@ from app.case_types import (
     ALIGNMENT_LABEL, ALIGNMENTS, CASE_TYPES, DEFAULT_CASE_TYPE, PARTY_ROLES, brief_title, case_type_of, default_addressee,
     procedure_for, procedure_warning,
 )
-from app.db import tenant_session
+from app.db import CASE_LOCK, tenant_session
 from app.ingest.extract import UnreadableFile, UnsupportedFile, file_ext
 from app.ingest.service import current_page_text, ingest_document
 from app.models import Case, CaseParty, Document, Exhibit, Member, Page, Round
@@ -145,7 +145,7 @@ def put_parties(case_id: UUID, body: Annotated[list[PartyBody], Field(max_length
     if len(ids) != len(set(ids)):
         raise HTTPException(422, "同一位當事人出現兩次")
     with tenant_session(m.firm_id) as s:
-        if s.get(Case, case_id, with_for_update=True) is None:  # 鎖住案件列：兩個分頁同時儲存不會重複新增
+        if s.get(Case, case_id, with_for_update=CASE_LOCK) is None:  # 鎖住案件列：兩個分頁同時儲存不會重複新增
             raise HTTPException(404, "找不到案件")
         existing = {p.id: p for p in case_parties(s, case_id)}
         unknown = [str(b.id) for b in body if b.id is not None and b.id not in existing]
@@ -245,7 +245,7 @@ _WRONG_KIND = {"plaintiff": "我方是原告時不能寫答辯狀", "defendant":
 @router.post("/cases/{case_id}/rounds")
 def create_round(case_id: UUID, body: RoundBody | None = None, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
-        case = s.get(Case, case_id, with_for_update=True)  # 鎖住案件列，避免同時建輪次撞號
+        case = s.get(Case, case_id, with_for_update=CASE_LOCK)  # 鎖住案件列，避免同時建輪次撞號
         if case is None:
             raise HTTPException(404, "找不到案件")
         seq = (s.scalar(select(func.max(Round.seq)).where(Round.case_id == case_id)) or 0) + 1
