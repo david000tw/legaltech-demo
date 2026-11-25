@@ -423,7 +423,7 @@ def _amount_sources(s: Session, rnd: Round) -> tuple[set[int], dict[int, str]]:
         if op.text is not None:
             add(op.text.text, op.page.id, op.text)
     from app.opponent_exhibits import opponent_exhibit_pages
-    for pt in opponent_exhibit_pages(s, rnd.case_id):  # 前幾輪的對方證物也可能被引用（對方證物計畫）
+    for pt in opponent_exhibit_pages(s, rnd.case_id, rnd.id):  # 前幾輪的對方證物也可能被引用（對方證物計畫）
         if pt.page_id not in listed:
             add(pt.text, pt.page_id, pt)
     # 原文摘錄只算「確實在原文找到」的（設計 5.1）：畫面標紅「未找到原文」的摘錄可能是 AI 編的，不能拿來放行金額

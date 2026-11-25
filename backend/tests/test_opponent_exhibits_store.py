@@ -143,3 +143,16 @@ def test_case_view_lists_opponent_exhibits(env):
     brief = next(d for d in docs if d["kind"] == "opponent_brief")
     assert brief["opponent_exhibits"] == [{"label": "原證1", "first_page": 3, "last_page": 3}]
     assert all("opponent_exhibits" not in d for d in docs if d["kind"] == "evidence")
+
+
+def test_refresh_error_does_not_stop_the_upload_flow(env, monkeypatch):
+    """審查 #5：找證物出錯（例如鎖等待逾時）只記錄，不能讓上傳後的自動流程整個停下。"""
+    import app.opponent_exhibits as oe
+
+    def boom(s, document_id):
+        raise RuntimeError("lock timeout")
+    monkeypatch.setattr(oe, "refresh_opponent_exhibits", boom)
+    r = env["client"].post(f"/api/cases/{env['case_id']}/documents",
+                           data={"kind": "opponent_brief", "round_id": str(env["round_id"])},
+                           files={"file": ("起訴狀.txt", BRIEF.encode("utf-8"), "text/plain")})
+    assert r.status_code == 200, r.text

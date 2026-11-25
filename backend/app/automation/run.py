@@ -141,10 +141,13 @@ def _apply_header(firm_id: UUID, document_ids: list[UUID]) -> None:
 def _refresh_exhibits(firm_id: UUID, document_ids: list[UUID]) -> None:
     """重找對方書狀附的證物（對方證物計畫）。不花 AI 額度，不分自動化模式都做；不放進 _apply_header，
     因為測試會把 _apply_header 換成空函式。"""
-    from app.opponent_exhibits import refresh_opponent_exhibits
-    with tenant_session(firm_id) as s:
-        for doc_id in sorted(document_ids):
-            refresh_opponent_exhibits(s, doc_id)
+    import app.opponent_exhibits as opponent_exhibits
+    for doc_id in sorted(document_ids):
+        try:
+            with tenant_session(firm_id) as s:
+                opponent_exhibits.refresh_opponent_exhibits(s, doc_id)
+        except Exception:  # noqa: BLE001  找證物失敗不影響後面的自動流程；起草前還會再找一次
+            log.exception("finding the opponent's exhibits in document %s failed", doc_id)
 
 
 def after_upload(firm_id: UUID, case_id: UUID, round_id: UUID | None, kind: str, member_id: UUID | None,

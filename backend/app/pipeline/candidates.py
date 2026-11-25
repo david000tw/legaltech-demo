@@ -76,13 +76,20 @@ def build_candidates(s: Session, round_id: UUID) -> list[Candidate]:
     # 對方證物頁（對方證物計畫）：我方頁優先，放得下剩下的預算就全收，否則依主張搜尋
     from app.opponent_exhibits import opponent_exhibit_pages, refresh_case_opponent_exhibits
     refresh_case_opponent_exhibits(s, rnd.case_id)
-    theirs = opponent_exhibit_pages(s, rnd.case_id)
-    left = EVIDENCE_TOKEN_BUDGET - ours
-    if left >= 0 and sum(estimate_tokens(pt.text) for pt in theirs) <= left:
+    theirs = opponent_exhibit_pages(s, rnd.case_id, rnd.id)
+    left = EVIDENCE_TOKEN_BUDGET - sum(estimate_tokens(pt.text) for pt in evidence)
+    if sum(estimate_tokens(pt.text) for pt in theirs) <= left:
         evidence = evidence + theirs
-    else:
-        hit_ids = {pt.id for q in queries for pt in search_page_texts(theirs, q, PAGES_PER_CLAIM)}
-        evidence = evidence + [pt for pt in theirs if pt.id in hit_ids]
+    else:  # 依主張搜尋，依命中順序加入，加到剩下的預算用完為止
+        chosen: set = set()
+        used = 0
+        for q in queries:
+            for pt in search_page_texts(theirs, q, PAGES_PER_CLAIM):
+                n = estimate_tokens(pt.text)
+                if pt.id not in chosen and used + n <= left:
+                    chosen.add(pt.id)
+                    used += n
+        evidence = evidence + [pt for pt in theirs if pt.id in chosen]
     case_type = s.get(Case, rnd.case_id).case_type  # 同類型加權、不排除（設計 5.3）
     # 律師釘選的段落排最前面，一定拿到最前面的 J 代碼（設計 5.9）
     pinned = pinned_passages(s, rnd.case_id)

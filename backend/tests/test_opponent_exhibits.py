@@ -75,3 +75,31 @@ def test_unreadable_labels_end_the_range():
 
 def test_sentence_mentioning_label_is_not_a_start():
     assert find_exhibits([(1, SIGN), (2, "此有原證3收據可證，被告應給付。")]) == []
+
+
+# ---- 最後審查的修正 ----
+
+@pytest.mark.parametrize("odd", ["證2\n收據", "原證(二)\n收據", "原証(2)\n收據", "委任狀\n委任人：王建宏\n受任人：某律師",
+                                 "刑事告訴狀第二頁\n此致\n臺灣臺中地方檢察署　公鑒"])
+def test_odd_pages_do_not_merge_into_previous_exhibit(odd):
+    """審查 #1：讀不懂的標示、委任狀、另一份書狀的結尾頁，都不能被當成前一件證物的續頁。"""
+    pages = [(1, SIGN), (2, RECEIPT), (3, odd), (4, "沒有標示的續頁")]
+    assert find_exhibits(pages) == [FoundExhibit("原證", 1, 2, 2)], odd
+
+
+def test_variant_character_label_is_read():
+    pages = [(1, SIGN), (2, RECEIPT), (3, "原証2\n照片")]
+    assert find_exhibits(pages) == [FoundExhibit("原證", 1, 2, 2), FoundExhibit("原證", 2, 3, 3)]
+
+
+def test_label_used_twice_in_one_document_is_dropped():
+    """審查 #2：同一份書狀兩段都叫原證1（例如辨識把 7 讀成 1）：兩段都不編號。"""
+    pages = [(1, SIGN), (2, RECEIPT), (3, "原證2\n照片"), (4, "原證1\n照片二")]
+    assert find_exhibits(pages) == [FoundExhibit("原證", 2, 3, 3)]
+
+
+def test_signature_spill_recognised_by_date_line():
+    """審查 #11：簽名區塊跨頁、下一頁沒有「具狀人」但有「中華民國…年…月…日」。"""
+    pages = [(1, "此致\n臺灣臺中地方法院　公鑒"), (2, "原證1：收據影本一件\n原告　林大明\n中華民國114年1月2日"),
+             (3, RECEIPT)]
+    assert find_exhibits(pages) == [FoundExhibit("原證", 1, 3, 3)]

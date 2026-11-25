@@ -23,8 +23,13 @@ _CN_DIGITS = "一二三四五六七八九十"
 _LABEL = re.compile(rf"^({'|'.join(PREFIXES)})([0-9]+|[{_CN_DIGITS}]+)號?(?:[:(].*)?$")
 # 「像標示」：寬鬆版，用來判斷「這頁有標示但讀不懂」（例如原證2-1、【原證1】、附件1、甲證3）
 _LIKE = re.compile(rf"^[【\[(]?(?:{'|'.join(PREFIXES)}|告證|甲證|乙證|丙證|證物|附件|附表)[0-9{_CN_DIGITS}]")
+# 前 3 行裡的短行若含「證／附件／附表」緊接數字（「證2」「原證(二)」），也算看不準的標示
+_SHORT_ODD = re.compile(rf"(?:證|附件|附表)[(]?[0-9{_CN_DIGITS}]")
 _SEAL = ("公鑒", "公鑑")  # 「鑑」是常見的異體寫法，NFKC 不會合併
 _SIGNER = ("具狀人", "撰狀人")
+_DATE = re.compile(r"中華民國[0-9]+年[0-9]+月[0-9]+日")  # 書狀簽名區塊的日期行
+# 續頁裡出現這些字：是另一份書狀的結尾或委任狀，不是前一件證物的續頁
+_NOT_CONTINUATION = ("公鑒", "公鑑", "委任狀")
 _CN = {c: i for i, c in enumerate("一二三四五六七八九", start=1)}
 
 
@@ -37,7 +42,14 @@ class FoundExhibit:
 
 
 def _compact(text: str) -> str:
-    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text))
+    """NFKC、去空白；「証」是「證」常見的異體寫法，NFKC 不會合併，這裡一起換掉。"""
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text)).replace("証", "證")
+
+
+def _signed(text: str) -> bool:
+    """這頁有簽名區塊的記號（具狀人、撰狀人或「中華民國…年…月…日」）。"""
+    compact = _compact(text)
+    return any(k in compact for k in _SIGNER) or bool(_DATE.search(compact))
 
 
 def _number(raw: str) -> int | None:
@@ -84,10 +96,10 @@ def find_exhibits(pages: list[tuple[int, str | None]]) -> list[FoundExhibit]:
     if idx is None:
         return []
     text = pages[idx][1] or ""
-    if not any(k in _compact(text) for k in _SIGNER) and idx + 1 < len(pages):
+    if not _signed(text) and idx + 1 < len(pages):
         nxt = pages[idx + 1][1]
-        if nxt is not None and any(k in _compact(nxt) for k in _SIGNER):
-            idx += 1  # 簽名區塊跨頁：證物清單尾巴與具狀人在下一頁
+        if nxt is not None and _signed(nxt):
+            idx += 1  # 簽名區塊跨頁：證物清單尾巴、具狀人或日期在下一頁
     out: list[FoundExhibit] = []
     cur: list | None = None  # [前綴, 號碼, 起始頁, 結束頁]
 
@@ -104,6 +116,8 @@ def find_exhibits(pages: list[tuple[int, str | None]]) -> list[FoundExhibit]:
         lines = [ln for ln in text.splitlines() if ln.strip()]
         head = {lab for lab in (parse_label(ln) for ln in lines[:3]) if lab is not None}
         others = [ln for ln in lines if looks_like_label(ln) and parse_label(ln) not in head]
+        others += [ln for ln in lines[:3] if len(_compact(ln)) <= 20 and _SHORT_ODD.search(_compact(ln))
+                   and parse_label(ln) not in head]
         if len(head) == 1 and not others:
             prefix, number = next(iter(head))
             if cur is not None and (cur[0], cur[1]) == (prefix, number):
@@ -111,12 +125,16 @@ def find_exhibits(pages: list[tuple[int, str | None]]) -> list[FoundExhibit]:
             else:
                 close()
                 cur = [prefix, number, no, no]
-        elif head or others:
-            close()  # 有標示但看不準：這頁不屬於任何證物
+        elif head or others or any(k in _compact(text) for k in _NOT_CONTINUATION):
+            close()  # 有標示但看不準，或是另一份書狀的結尾、委任狀：這頁不屬於任何證物
         elif cur is not None:
             cur[3] = no
     close()
-    return out
+    # 同一份書狀裡同一個編號出現在兩段（例如辨識把 7 讀成 1）：分不出哪段才對，兩段都不編號
+    seen: dict[tuple[str, int], int] = {}
+    for f in out:
+        seen[(f.prefix, f.number)] = seen.get((f.prefix, f.number), 0) + 1
+    return [f for f in out if seen[(f.prefix, f.number)] == 1]
 
 
 # ---- 存起來、適時重找（Task 2） ----
@@ -186,12 +204,20 @@ def opponent_label(s: Session, ex: OpponentExhibit, n: int) -> str:
     return f"{who}所提{ex.prefix}{ex.number}{tail}第{n}頁"
 
 
-def opponent_exhibit_pages(s: Session, case_id: UUID) -> list[PageText]:
-    """本案對方證物頁的目前文字版本（同一份檔案只算一次，依上傳順序、頁碼）；沒有文字的頁不列。"""
+def opponent_exhibit_pages(s: Session, case_id: UUID, round_id: UUID | None = None) -> list[PageText]:
+    """本案對方證物頁的目前文字版本（同一份檔案只算一次，依上傳順序、頁碼）；沒有文字的頁不列。
+    同一份檔案出現在好幾輪（複製輪次）時，優先用 round_id 這一輪自己的那份：律師在新一輪改的遞狀人、
+    辨識修正才會反映在標籤上。"""
     from app.ingest.service import document_page_texts
-    from app.sources import opponent_docs
+    docs = s.scalars(select(Document).where(Document.case_id == case_id, Document.kind == "opponent_brief")
+                     .order_by(Document.created_at, Document.filename, Document.id)).all()
+    chosen: dict[str, Document] = {}
+    for d in docs:
+        if d.sha256 not in chosen or (round_id is not None and d.round_id == round_id
+                                      and chosen[d.sha256].round_id != round_id):
+            chosen[d.sha256] = d
     out: list[PageText] = []
-    for _, doc in opponent_docs(s, case_id):
+    for doc in chosen.values():
         rows = s.scalars(select(OpponentExhibit).where(OpponentExhibit.document_id == doc.id)).all()
         if not rows:
             continue

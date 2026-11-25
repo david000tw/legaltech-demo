@@ -266,3 +266,39 @@ def test_filer_change_resets_review(ctx, db):
     r = clients(ctx, db)["lawyer"].patch(f"/api/documents/{ctx['brief']}", json={"filed_by_party_id": str(party_id)})
     assert r.status_code == 200, r.text
     assert _state(ctx, pid) == ("unreviewed", "對方證物編號已變更")
+
+
+# ---- 最後審查的修正 ----
+
+def test_opponent_search_respects_remaining_budget(db, monkeypatch):
+    """審查 #3：對方證物頁放不下時依主張搜尋，但加入的頁數仍不能超過剩下的預算。"""
+    from app.ai.tokens import estimate_tokens
+    from app.models import Claim
+    firm = create_firm("甲事務所")
+    case_id, rid = make_round(firm, our_side="defendant", evidence={"01_研判表.txt": EVIDENCE_TEXT})
+    second = "原證2\n收據\n茲收到林大明交付修車費用新臺幣五萬元整，另付拖車費用。"
+    _brief(firm, case_id, rid, "\f".join([BODY, SIGN, RECEIPT, second]))
+    with tenant_session(firm) as s:
+        s.add(Claim(firm_id=firm, round_id=rid, seq=1, summary="原告請求修車費用", quote="交付修車費用收據", selected=True))
+    monkeypatch.setattr(cand_mod, "EVIDENCE_TOKEN_BUDGET", estimate_tokens(EVIDENCE_TEXT) + estimate_tokens(RECEIPT) + 1)
+    got = _candidates(firm, rid)
+    assert [g[1] for g in got].count("opponent_brief") == 1
+
+
+def test_copied_round_uses_its_own_copy(db):
+    """審查 #4：複製輪次後，律師在新一輪改遞狀人，新一輪的標籤要跟著變。"""
+    from app.pipeline.copy_round import copy_round
+    firm = create_firm("甲事務所")
+    case_id, rid = make_round(firm, our_side="defendant", evidence={"01_研判表.txt": EVIDENCE_TEXT})
+    _brief(firm, case_id, rid)
+    with tenant_session(firm) as s:
+        s.get(Round, rid).status = "drafted"
+    with tenant_session(firm) as s:
+        target = copy_round(s, rid).id
+        party = CaseParty(firm_id=firm, case_id=case_id, seq=9, name="林大明", role="上訴人", alignment="opposing")
+        s.add(party)
+        s.flush()
+        copy_doc = s.scalars(select(Document).where(Document.round_id == target, Document.filename == "起訴狀.txt")).one()
+        copy_doc.filed_by_party_id = party.id
+    opp = [g for g in _candidates(firm, target) if g[1] == "opponent_brief"]
+    assert opp and opp[0][3].startswith("上訴人所提原證1第1頁")
