@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import http.client
 import io
 import re
 import urllib.error
@@ -111,7 +112,7 @@ def fetch_pdf(url: str) -> bytes:
             if resp.status != 200:
                 raise ImportRejected(FETCH_FAILED)
             data = resp.read(MAX_PDF_BYTES + 1)
-    except (urllib.error.URLError, OSError, ValueError):
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException):  # 後者：傳輸中斷、狀態列壞掉
         raise ImportRejected(FETCH_FAILED)
     if len(data) > MAX_PDF_BYTES or not data.startswith(b"%PDF"):
         raise ImportRejected(FETCH_FAILED)
