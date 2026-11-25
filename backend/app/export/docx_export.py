@@ -18,7 +18,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import CurrentMember
 from app.case_types import SIDE_LABEL, brief_title, default_addressee, procedure_for
-from app.models import Case, CaseParty, Citation, Document, Draft, Exhibit, ExportRecord, Page, PageText, Paragraph, Round
+from app.models import (
+    Case, CaseParty, Citation, Document, Draft, Exhibit, ExportRecord, Page, PageText, Paragraph, ReviewEvent, Round,
+)
 from app.numbering import display_heading
 from app.render import render_text
 from app.statements import BODY_LABEL, STATEMENT_LABEL, claim_value, statement_of
@@ -156,6 +158,31 @@ def record_export(s: Session, draft_id: UUID, member: CurrentMember, data: bytes
     s.flush()
 
 
+def _unreview_changed_since_review(s: Session, member: CurrentMember, statement: Paragraph | None,
+                                   paragraphs: list[Paragraph], rendered: dict) -> list[Blocker]:
+    """要匯出的內容必須是律師審核時看到的那一版（標記已審時記在 after_text）。顯示內容在審核後變了
+    （例如系統調整引用格式）就退回未審並擋下匯出；舊紀錄沒有 after_text 的不比。
+    呼叫端（匯出路由）攔下 ExportBlocked 後仍會提交，所以退回未審會留下來。"""
+    from app.pipeline.drafting import reset_review
+    out: list[Blocker] = []
+    items = ([(statement, 0, "statement")] if statement is not None else []) +         [(p, n, "paragraph") for n, p in enumerate(paragraphs, start=1)]
+    for p, n, scope in items:
+        if p.status != "reviewed":
+            continue
+        reviewed = s.scalars(select(ReviewEvent.after_text).where(
+            ReviewEvent.paragraph_id == p.id, ReviewEvent.action == "mark_reviewed")
+            .order_by(ReviewEvent.created_at.desc()).limit(1)).first()
+        if reviewed is None or reviewed == rendered[p.id]:
+            continue
+        reset_review(p)
+        s.add(ReviewEvent(firm_id=p.firm_id, paragraph_id=p.id, member_id=member.id, action="revert",
+                          before_text=reviewed, after_text=rendered[p.id]))
+        out.append(Blocker(p.seq if scope == "paragraph" else 0, "reviewed_text_changed", n, scope))
+    if out:
+        s.flush()
+    return out
+
+
 def render_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date | None = None) -> bytes:
     """鎖段落、檢查阻擋、產生 Word（不寫紀錄）。狀頭內容與順序照設計 5.6；today 預設為台灣時區的今天。"""
     # 先鎖草稿列：同一份草稿的匯出一個一個來（兩個匯出各持段落共享鎖、又都要寫驗證結果會互等而死結）
@@ -168,6 +195,10 @@ def render_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date 
         raise ExportBlocked(blockers)
     paragraphs = body_paragraphs(s, draft_id)  # 聲明另外處理，不佔段落編號
     statement = statement_of(s, draft_id)
+    rendered = {p.id: render_text(s, p) for p in ([statement] if statement is not None else []) + paragraphs}
+    drifted = _unreview_changed_since_review(s, member, statement, paragraphs, rendered)
+    if drifted:
+        raise ExportBlocked(drifted)
     rnd = s.get(Round, s.get(Draft, draft_id).round_id)
     kind = rnd.brief_kind
 
@@ -191,13 +222,13 @@ def render_draft(s: Session, draft_id: UUID, member: CurrentMember, today: date 
     d.add_paragraph(f"為{_clean(case.cause) or '　　'}事件，{OPENING[kind]}")
     if statement is not None:  # 訴之聲明、答辯聲明（設計 5.1）
         d.add_paragraph(STATEMENT_LABEL[kind])
-        for line in render_text(s, statement).split("\n"):
+        for line in rendered[statement.id].split("\n"):
             d.add_paragraph(line)
     if kind in BODY_LABEL:
         d.add_paragraph(BODY_LABEL[kind])
     for n, p in enumerate(paragraphs, start=1):
         d.add_paragraph(display_heading(n, p.heading))  # 編號依未刪除段落的順序重排，與畫面一致
-        for line in render_text(s, p).split("\n"):
+        for line in rendered[p.id].split("\n"):
             d.add_paragraph(line)
     d.add_paragraph("謹狀")
     addressee = _clean(case.addressee) or _clean(default_addressee(case.court, procedure))

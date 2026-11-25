@@ -12,6 +12,7 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
   quote_marker_without_quote: (a) => `要求帶入引文，但 ${a} 沒有引文`,
   citation_quote_conflict: (a) => `同一引用的引文不一致：${a} 在同一段出現了兩段不同的引文，系統只保留第一段，請改寫或拆開`,
   quote_conflict: () => '同一代碼出現了不同的引文',
+  reviewed_text_changed: () => '審核後顯示內容有變更（例如系統調整引用格式），已退回未審，請重新檢視後標記已審',
   inline_quote_unverified: (a) => `自行加引號的文字「${a}…」不是逐字出自對造書狀`,
   citation_failed: (a) => `引用 ${a} 驗證失敗`,
   judgment_unconfirmed: (a) => `判決引用尚未確認（${a}）`,

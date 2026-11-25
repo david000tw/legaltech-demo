@@ -390,3 +390,27 @@ def test_draft_page_reload_locks_paragraphs_before_writing_citations(db):
         event.remove(eng, "before_cursor_execute", record)
     assert "update_citations" in seen  # 確實有寫回（否則這個測試沒有意義）
     assert seen.index("lock_paragraphs") < seen.index("update_citations")
+
+
+def test_export_unreviews_paragraphs_whose_text_changed_after_review(db):
+    """審核後顯示內容變了（例如系統調整引用格式），匯出的會是律師沒看過的版本：擋下匯出、退回未審，
+    重新審核後才能匯出（反目標：未經律師審核的內容不能被匯出）。"""
+    from app.models import ReviewEvent
+    ctx, cs = ready(db)
+    pid = review_all(ctx, cs["lawyer"])
+    with tenant_session(ctx["firm"]) as s:  # 律師當時看到的是另一版
+        ev = s.scalars(select(ReviewEvent).where(ReviewEvent.paragraph_id == pid,
+                                                 ReviewEvent.action == "mark_reviewed")).one()
+        ev.after_text = "律師審核時看到的舊版本"
+    r = cs["lawyer"].post(f"/api/drafts/{ctx['draft_id']}/export")
+    assert r.status_code == 409, r.text
+    assert {"paragraph_seq": 1, "paragraph_no": 1, "reason": "reviewed_text_changed",
+            "scope": "paragraph"} in r.json()["blockers"]
+    with tenant_session(ctx["firm"]) as s:
+        assert s.get(Paragraph, pid).status == "unreviewed"
+        assert s.scalars(select(ReviewEvent.action).where(ReviewEvent.paragraph_id == pid)
+                         .order_by(ReviewEvent.created_at.desc())).first() == "revert"
+    body = cs["lawyer"].get(f"/api/drafts/{ctx['draft_id']}").json()
+    version = next(p["version"] for p in body["paragraphs"] if p["id"] == str(pid))
+    assert cs["lawyer"].post(f"/api/paragraphs/{pid}/review", json={"version": version}).status_code == 200
+    assert cs["lawyer"].post(f"/api/drafts/{ctx['draft_id']}/export").status_code == 200
