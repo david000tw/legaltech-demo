@@ -468,6 +468,23 @@ class ReviewEvent(Base):
     created_at: Mapped[datetime] = _created()
 
 
+class JudgmentView(Base):
+    """律師在這份草稿裡打開過哪個判決段落的原文（設計 5.1）：按「已審」一併確認判決引用的前提。
+    以判決段落為單位：原文畫面只顯示被引用的那一段，看過 A 段不代表看過 B 段。"""
+    __tablename__ = "judgment_views"
+    __table_args__ = (
+        UniqueConstraint("draft_id", "member_id", "judgment_passage_id", name="uq_judgment_view"),
+        _tfk("draft_id", "drafts", "CASCADE"),
+        _tfk("member_id", "members", "CASCADE"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    firm_id: Mapped[uuid.UUID] = _firm()
+    draft_id: Mapped[uuid.UUID] = _ref()
+    member_id: Mapped[uuid.UUID] = _ref()
+    judgment_passage_id: Mapped[uuid.UUID] = _public_fk("judgment_passages.id", nullable=False, ondelete="CASCADE")
+    opened_at: Mapped[datetime] = _created()
+
+
 class UsageRecord(Base):
     __tablename__ = "usage_records"
     __table_args__ = (

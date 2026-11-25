@@ -24,6 +24,7 @@ from app.review.service import (
     renumber_exhibit,
 )
 from app.review.insert import InsertRejected, insert_pin
+from app.review.views import record_judgment_view
 from app.text_norm import find_quote
 from app.statements import BODY_LABEL, STATEMENT_LABEL, claim_value, statement_of
 from app.storage import LocalStorage
@@ -127,6 +128,7 @@ def get_draft(draft_id: UUID, request: Request, background: BackgroundTasks,
 def citation_source(citation_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
         c = _get_or_404(s, Citation, citation_id, "引用")
+        record_judgment_view(s, c, m.id)  # 按「已審」一併確認判決的前提（設計 5.1）
         image = {}
         if c.kind == "evidence" and c.page_text_id:
             pt = s.get(PageText, c.page_text_id)
