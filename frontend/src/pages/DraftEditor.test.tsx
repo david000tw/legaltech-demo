@@ -143,9 +143,37 @@ describe('DraftEditor', () => {
     const box = screen.getByRole('textbox', { name: '段落內文' })
     await userEvent.clear(box)
     await userEvent.type(box, '新內文{{{{cite:J1}}')
-    await userEvent.click(screen.getByRole('button', { name: '儲存' }))
+    await userEvent.click(screen.getByRole('button', { name: '只儲存' }))
     expect(api.patchParagraph).toHaveBeenCalledWith('p1', '新內文{{cite:J1}}',
       [{ code: 'J1', quote: '未在適當位置暫停禮讓幹線道之系爭車輛' }], '關於路權')  // 表單是去號後的標題
+  })
+
+  it('save-and-review saves first, then asks the server to review the saved version', async () => {
+    vi.mocked(api.patchParagraph).mockResolvedValue({ ...draft.paragraphs[0], version: 'v2' })
+    vi.mocked(api.reviewParagraph).mockResolvedValue({ ...draft.paragraphs[0], version: 'v2', review_requested: true })
+    renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: '修改' }))
+    await userEvent.click(screen.getByRole('button', { name: '儲存並標記已審' }))
+    expect(api.patchParagraph).toHaveBeenCalled()
+    expect(api.reviewParagraph).toHaveBeenCalledWith('p1', 'v2', { defer: true })
+  })
+
+  it('assistants only get a plain save while editing', async () => {
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft, can_review: false })
+    renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: '修改' }))
+    expect(screen.getByRole('button', { name: '儲存' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '儲存並標記已審' })).not.toBeInTheDocument()
+  })
+
+  it('shows a pending automatic review and a cancelled one', async () => {
+    const p = draft.paragraphs[0]
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft, paragraphs: [
+      { ...p, review_requested: true },
+      { ...p, id: 'p2', seq: 2, review_note: '支持度有新的結果，請看過後再按「已審」' }] })
+    renderEditor()
+    expect(await screen.findByText('支持度檢查中，查完全部是「支持」會自動標記已審')).toBeInTheDocument()
+    expect(screen.getByText('支持度有新的結果，請看過後再按「已審」')).toBeInTheDocument()
   })
 
   it('export button lists blockers', async () => {
@@ -231,7 +259,7 @@ describe('DraftEditor manual repair', () => {
     const box = screen.getByRole('textbox', { name: '段落內文' })
     await userEvent.clear(box)
     await userEvent.type(box, '被告有過失。')
-    await userEvent.click(screen.getByRole('button', { name: '儲存' }))
+    await userEvent.click(screen.getByRole('button', { name: '只儲存' }))
     expect(api.patchParagraph).toHaveBeenCalledWith('p1', '被告有過失。', [], '㈠關於被告過失')
   })
 

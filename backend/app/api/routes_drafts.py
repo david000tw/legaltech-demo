@@ -21,7 +21,7 @@ from app.numbering import display_heading, strip_heading_number
 from app.render import citation_label, paragraph_version, render_text
 from app.review.service import (
     CitationInput, ReviewBlocked, ReviewRuleError, confirm_amount, confirm_citation, confirm_court_reasoning, edit_paragraph, mark_reviewed,
-    renumber_exhibit,
+    renumber_exhibit, request_review,
 )
 from app.review.insert import InsertRejected, insert_pin
 from app.review.views import has_opened, record_judgment_view
@@ -87,6 +87,7 @@ def paragraph_json(s, p: Paragraph, n: int | None = None, member_id: UUID | None
             "rendered_text": rendered, "version": paragraph_version(s, p, rendered),
             "status": p.status, "verify_reasons": p.verify_reasons,
             "source_notice": p.source_notice,  # 例：「依據頁已修正」
+            "review_requested": p.review_request_by is not None, "review_note": p.review_note,
             "reviewed_bar_number": p.reviewed_bar_number,
             "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
             "citations": [citation_json(s, c, p, cache, member_id) for c in paragraph_citations(s, p.id)]}
@@ -244,6 +245,7 @@ def confirm_paragraph_amount(paragraph_id: UUID, body: AmountBody, m: CurrentMem
 
 class ReviewBody(BaseModel):
     version: str
+    defer: bool = False  # 「儲存並標記已審」：只差支持度還在檢查時，先記下、查完自動完成（設計 5.2）
 
 
 @router.post("/paragraphs/{paragraph_id}/review")
@@ -257,7 +259,10 @@ def review(paragraph_id: UUID, request: Request, background: BackgroundTasks, bo
         if body is None:  # 404、403 先判斷，再要求版本
             raise HTTPException(422, "缺少段落版本（version）")
         try:
-            p = mark_reviewed(s, paragraph_id, m, body.version)
+            if body.defer and request_review(s, paragraph_id, m, body.version) == "deferred":
+                return JSONResponse(status_code=202,
+                                    content=paragraph_json(s, s.get(Paragraph, paragraph_id), member_id=m.id))
+            p = s.get(Paragraph, paragraph_id) if body.defer else mark_reviewed(s, paragraph_id, m, body.version)
         except ReviewRuleError as e:
             # 用 return 而不是 raise：raise 會丟掉剛排入的背景檢查；回應內容與 HTTPException 相同
             detail = ({"code": "review_blocked", "message": str(e), "reasons": e.reasons}

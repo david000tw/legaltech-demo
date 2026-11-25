@@ -47,12 +47,14 @@ function ParagraphCard({ p, draftId, canReview, onShowSource, onChanged, onError
     }
   }
 
-  const save = () => act(async () => {
+  const save = (andReview = false) => act(async () => {
     // 內文已拿掉標記的引用就不再送出，律師可以自己移除驗證失敗的引用
     const used = new Set([...text.matchAll(/\{\{(?:cite|quote):([A-Z]\d+)\}\}/g)].map((m) => m[1]))
     const kept = p.citations.filter((c) => used.has(c.code)).map((c) => ({ code: c.code, quote: c.quote }))
-    await api.patchParagraph(p.id, text, kept, heading)
+    const saved = await api.patchParagraph(p.id, text, kept, heading)
     setEditing(false)
+    // 「儲存並標記已審」：用存完後的版本標記；被擋下時修改已經存好，畫面顯示原因
+    if (andReview) await api.reviewParagraph(p.id, saved.version, { defer: true })
   })
 
   // 標題與內文都清空＝刪除本段（後端保留修改紀錄）
@@ -87,7 +89,15 @@ function ParagraphCard({ p, draftId, canReview, onShowSource, onChanged, onError
           </label>
           <p className="text-xs text-slate-500">引用請保留 {'{{cite:代碼}}'}／{'{{quote:代碼}}'} 標記，不要直接寫字號、條號或原證號。</p>
           <div className="flex gap-2">
-            <button type="button" onClick={save} disabled={busy} className={BTN_SECONDARY}>儲存</button>
+            {canReview ? (
+              <>
+                <button type="button" onClick={() => save(true)} disabled={busy}
+                  className="rounded bg-emerald-600 px-3 py-1 text-sm text-white disabled:opacity-50">儲存並標記已審</button>
+                <button type="button" onClick={() => save()} disabled={busy} className={BTN_SECONDARY}>只儲存</button>
+              </>
+            ) : (
+              <button type="button" onClick={() => save()} disabled={busy} className={BTN_SECONDARY}>儲存</button>
+            )}
             <button type="button" onClick={() => { setEditing(false); setText(p.text); setHeading(p.heading_text) }}
               className="rounded border px-3 py-1 text-sm">取消</button>
           </div>
@@ -95,6 +105,10 @@ function ParagraphCard({ p, draftId, canReview, onShowSource, onChanged, onError
       ) : (
         <p className="font-kai whitespace-pre-wrap leading-7 text-slate-800">{p.rendered_text}</p>
       )}
+      {p.review_requested && (
+        <p className="text-xs text-slate-600">支持度檢查中，查完全部是「支持」會自動標記已審</p>
+      )}
+      {p.review_note && <p className="text-xs text-amber-700">{p.review_note}</p>}
       {p.verify_reasons.length > 0 && (
         <ul className="text-sm text-red-700">{p.verify_reasons.map((r) => <li key={r}>{reasonLabel(r)}</li>)}</ul>
       )}

@@ -404,6 +404,7 @@ class Paragraph(Base):
         _tenant_key("paragraphs"),
         _tfk("draft_id", "drafts", "CASCADE"),
         _tfk("reviewed_by", "members"),
+        _tfk("review_request_by", "members"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
@@ -419,6 +420,10 @@ class Paragraph(Base):
     kind: Mapped[str] = mapped_column(String(20), default="body", server_default="body")  # statement＝訴之聲明、答辯聲明
     amounts_confirmed: Mapped[list] = _tags()  # 律師按「已核對金額」放行的金額（欄位名 text 遮蔽了 sqlalchemy.text，借用 _tags）
     source_notice: Mapped[str | None] = mapped_column(Text)  # 例：「依據頁已修正」（計畫 2A）
+    # 「儲存並標記已審」遇到支持度重新檢查（設計 5.2）：誰在哪一版按的；檢查完全部「支持」就自動完成審核
+    review_request_by: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    review_request_version: Mapped[str | None] = mapped_column(String(64))
+    review_note: Mapped[str | None] = mapped_column(Text)  # 自動完成被取消時給律師看的原因
 
 
 class Citation(Base):

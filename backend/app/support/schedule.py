@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import BackgroundTasks, Request
 
 from app.db import tenant_session
-from app.models import Draft, Paragraph
+from app.models import Draft, Paragraph, Round
 from app.support import job
 from app.support import service as support
 
@@ -33,4 +33,9 @@ def request_and_schedule(request: Request, background: BackgroundTasks, firm_id:
         if draft_id is None or s.get(Draft, draft_id) is None:
             return
         ids = support.request_checks(s, draft_id, paragraph_ids)
+        case_id = s.get(Round, s.get(Draft, draft_id).round_id).case_id
+    # 另開短交易：排入時可能把卡住的列改成「尚未檢查」，有「審核待完成」的段落要跟著取消（設計 5.2）
+    from app.review.service import apply_deferred_reviews  # 函式內 import，避免循環
+    with tenant_session(firm_id) as s:
+        apply_deferred_reviews(s, case_id)
     schedule_support(request, background, firm_id, ids, member_id)

@@ -154,6 +154,26 @@ def run_support_checks(firm_id: UUID, check_ids: list[UUID], settings: Settings,
                        provider: AIProvider | None = None, provider_factory=get_provider) -> None:
     if not check_ids:
         return
+    try:
+        _run_checks(firm_id, check_ids, settings, member_id, provider, provider_factory)
+    finally:  # 不論成功、失敗或中途結束：有結果了就完成或取消「審核待完成」（設計 5.2）
+        _apply_deferred(firm_id, check_ids)
+
+
+def _apply_deferred(firm_id: UUID, check_ids: list[UUID]) -> None:
+    from app.review.service import apply_deferred_reviews  # 函式內 import，避免循環
+    try:
+        with tenant_session(firm_id) as s:
+            case_ids = sorted(set(s.scalars(select(SupportCheck.case_id).where(SupportCheck.id.in_(check_ids)))))
+        for case_id in case_ids:
+            with tenant_session(firm_id) as s:
+                apply_deferred_reviews(s, case_id)
+    except Exception:  # noqa: BLE001  自動完成審核失敗不影響檢查結果；律師仍可自己按「已審」
+        log.exception("applying deferred reviews failed")
+
+
+def _run_checks(firm_id: UUID, check_ids: list[UUID], settings: Settings, member_id: UUID | None,
+                provider: AIProvider | None, provider_factory) -> None:
     token = uuid.uuid4()
     items = sorted(_claim(firm_id, check_ids, token), key=_order)
     if not items:

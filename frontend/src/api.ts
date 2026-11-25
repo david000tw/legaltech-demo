@@ -146,7 +146,9 @@ export type ParagraphView = { id: string; seq: number; kind?: 'body' | 'statemen
   text: string; rendered_text: string;
   version: string; status: 'unreviewed' | 'reviewed'; verify_reasons: string[]; reviewed_bar_number: string | null;
   reviewed_at: string | null; citations: CitationView[]
-  source_notice?: string | null }  // 例：「依據頁已修正」
+  source_notice?: string | null  // 例：「依據頁已修正」
+  review_requested?: boolean  // 「儲存並標記已審」後等支持度檢查完成（設計 5.2）
+  review_note?: string | null }  // 自動完成審核被取消的原因
 // brief_title：依程序的書狀名稱（民事／家事準備書狀）；procedure_warning：案號與案型程序不一致時的提醒（不阻擋匯出）
 export type DraftView = { id: string; round_id: string; case_id: string; case_title: string; can_review: boolean
   brief_title: string
@@ -323,8 +325,9 @@ export const releaseSupport = (citationId: string, reason: string, version: stri
 export const retrySupport = (draftId: string) =>
   req<{ queued: number }>(`/drafts/${draftId}/support/retry`, json('POST'))
 // version：律師畫面上那一版的指紋；後端發現內容已變就回 409，不會把沒看過的版本記成已審
-export const reviewParagraph = (id: string, version: string) =>
-  req<ParagraphView>(`/paragraphs/${id}/review`, json('POST', { version }))
+// defer：「儲存並標記已審」——只差支持度還在檢查時先記下，查完全部「支持」自動完成（設計 5.2）
+export const reviewParagraph = (id: string, version: string, opts: { defer?: boolean } = {}) =>
+  req<ParagraphView>(`/paragraphs/${id}/review`, json('POST', opts.defer ? { version, defer: true } : { version }))
 export const renumberExhibit = (id: string, number: number) =>
   req<{ id: string; label: string; number: number }>(`/exhibits/${id}`, json('PATCH', { number }))
 

@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import CurrentMember
 from app.models import (
-    Citation, Draft, Exhibit, Judgment, JudgmentPassage, Page, PageText, Paragraph, ReviewEvent, Round, SupportCheck,
+    Citation, Draft, Exhibit, Judgment, JudgmentPassage, Member, Page, PageText, Paragraph, ReviewEvent, Round,
+    SupportCheck,
 )
 from app.pipeline.drafting import replace_paragraph, reset_review
 from app.numbering import strip_heading_number
@@ -21,6 +22,9 @@ from app.sources import PASSAGE_LABEL
 from app.verify.citations import paragraph_blockers, paragraph_citations, verify_citation
 
 ACCEPT_REASON = "段落審核時一併接受"
+AUTO_REVIEW_NOTE = "支持度檢查完成後自動完成審核"
+SUPPORT_CHANGED_NOTE = "支持度有新的結果，請看過後再按「已審」"
+REVIEW_AGAIN_NOTE = "請重新檢視後再按「已審」"
 
 
 class ReviewRuleError(Exception):
@@ -141,7 +145,7 @@ def _absorb(s: Session, p: Paragraph, member: CurrentMember, absorb_partial: boo
 
 
 def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version: str, *,
-                  absorb_partial: bool = True) -> Paragraph:
+                  absorb_partial: bool = True, note: str | None = None) -> Paragraph:
     """version 是律師畫面上那一版的指紋；內容已變（別人改過、改了原證號）就不能記成已審。
     打開過原文的判決引用與「部分支持」在同一交易裡一併確認（設計 5.1）；任何一項不成立就整個不寫。"""
     _require_lawyer(member)
@@ -173,9 +177,76 @@ def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version
     p.status, p.reviewed_by, p.reviewed_bar_number = "reviewed", member.id, member.bar_number
     p.reviewed_at = datetime.now(timezone.utc)
     p.source_notice = None  # 律師重新審過「依據頁已修正」的段落
-    _event(s, p, member, "mark_reviewed", after=rendered)  # 留下律師審過、也會匯出的那一版
+    p.review_request_by, p.review_request_version, p.review_note = None, None, None
+    _event(s, p, member, "mark_reviewed", before=note, after=rendered)  # 留下律師審過、也會匯出的那一版
     s.flush()
     return p
+
+
+def request_review(s: Session, paragraph_id: UUID, member: CurrentMember, version: str) -> str:
+    """「儲存並標記已審」（設計 5.2）：能審就審；只差支持度還在檢查，就記下「審核待完成」回 "deferred"。
+    律師按下去的那一刻還沒看過新的支持度說明，所以「部分支持」不一併接受（absorb_partial=False）。"""
+    try:
+        mark_reviewed(s, paragraph_id, member, version, absorb_partial=False)
+        return "reviewed"
+    except ReviewBlocked as e:
+        if not e.reasons or not all(r.startswith("support_pending:") for r in e.reasons):
+            raise
+    p = lock_paragraph(s, paragraph_id)
+    p.review_request_by, p.review_request_version, p.review_note = member.id, version, None
+    s.flush()
+    return "deferred"
+
+
+def _all_supports(s: Session, p: Paragraph) -> bool:
+    """每個需要檢查的引用都已檢查完、結果是「支持」（看判定本身：放行過的部分支持不算）。"""
+    from app.support import service as support
+    cache: dict = {}
+    for c in paragraph_citations(s, p.id):
+        inp, row = support.check_for(s, p, c, cache)
+        if inp is not None and (row is None or row.status != "done" or row.verdict != "supports"):
+            return False
+    return True
+
+
+def _cancel_request(p: Paragraph, note: str | None) -> None:
+    p.review_request_by, p.review_request_version, p.review_note = None, None, note
+
+
+def apply_deferred_reviews(s: Session, case_id: UUID) -> list[UUID]:
+    """支持度檢查有結果之後呼叫：完成或取消案件內的「審核待完成」。回傳自動完成審核的段落 id。
+    段落依 id 排序上鎖（與其他多段落寫入者一致）；自動完成時判決的一併確認照「已審」的規則。"""
+    pids = s.scalars(select(Paragraph.id).join(Draft, Draft.id == Paragraph.draft_id)
+                     .join(Round, Round.id == Draft.round_id)
+                     .where(Round.case_id == case_id, Paragraph.review_request_by.is_not(None))
+                     .order_by(Paragraph.id)).all()
+    done: list[UUID] = []
+    for pid in pids:
+        p = lock_paragraph(s, pid)
+        if p is None or p.review_request_by is None:
+            continue
+        if paragraph_version(s, p, render_text(s, p)) != p.review_request_version:
+            _cancel_request(p, None)  # 等待期間內容變了：不能把沒看過的版本記成已審
+            continue
+        if any(r.startswith("support_pending:") for r in paragraph_blockers(s, p)):
+            continue
+        m = s.get(Member, p.review_request_by)
+        if m is None or m.role != "lawyer" or not m.bar_verified:
+            _cancel_request(p, REVIEW_AGAIN_NOTE)
+            continue
+        if not _all_supports(s, p):
+            _cancel_request(p, SUPPORT_CHANGED_NOTE)
+            continue
+        member = CurrentMember(id=m.id, firm_id=m.firm_id, role=m.role, bar_number=m.bar_number,
+                               bar_verified=m.bar_verified)
+        try:
+            mark_reviewed(s, pid, member, p.review_request_version, absorb_partial=False, note=AUTO_REVIEW_NOTE)
+        except ReviewRuleError:
+            _cancel_request(p, REVIEW_AGAIN_NOTE)
+            continue
+        done.append(pid)
+    s.flush()
+    return done
 
 
 def edit_paragraph(s: Session, paragraph_id: UUID, text: str, citations: list[CitationInput],

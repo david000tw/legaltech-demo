@@ -101,6 +101,10 @@ def reset_review(p: Paragraph) -> None:
     p.reviewed_by = None
     p.reviewed_bar_number = None
     p.reviewed_at = None
+    # 內容或來源變了：「審核待完成」作廢（律師沒看過新的版本，設計 5.2）
+    p.review_request_by = None
+    p.review_request_version = None
+    p.review_note = None
 
 
 def replace_paragraph(s: Session, p: Paragraph, text: str, items: list[tuple[str, str]]) -> None:
