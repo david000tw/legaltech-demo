@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from app.automation import run as automation
 from app.auth import CurrentMember, current_member
 from app.db import CASE_LOCK, tenant_session
 from app.models import AIJob, Case, Document, Page
@@ -37,6 +38,10 @@ def schedule(request: Request, background: BackgroundTasks, firm_id: UUID, jobs:
         background.add_task(run_job, firm_id, ids[0], settings, provider_factory=factory)
     elif ids:
         background.add_task(run_ocr_queue, firm_id, ids, settings, factory)
+    if ids:  # 辨識結束後：卷證說明、拆解接著自動跑（設計 6.2）；用量記在排入辨識的人身上
+        docs = [job.document_id for job in jobs if job is not None and job.status == "running"]
+        member = next((job.member_id for job in jobs if job is not None and job.member_id), None)
+        background.add_task(automation.after_pages_changed, firm_id, docs, member, settings, factory)
 
 
 def _queue(s, document_id: UUID, member_id: UUID, *, confirm: bool) -> AIJob | None:
@@ -150,11 +155,14 @@ def get_page_ocr(page_id: UUID, m: CurrentMember = Depends(current_member)) -> d
 
 
 @router.put("/pages/{page_id}/text")
-def put_page_text(page_id: UUID, body: TextBody, request: Request, m: CurrentMember = Depends(current_member)) -> dict:
+def put_page_text(page_id: UUID, body: TextBody, request: Request, background: BackgroundTasks,
+                  m: CurrentMember = Depends(current_member)) -> dict:
     """修正辨識文字或手動輸入；律師可以同時標為已對照原圖。"""
     proofread = request.app.state.settings.ocr_proofread
-    return _page_action(m, page_id, lambda s: save_page_text(s, page_id, body.text, m, base_version=body.base_version,
-                                                             verify=body.verify, proofread=proofread))
+    out = _page_action(m, page_id, lambda s: save_page_text(s, page_id, body.text, m, base_version=body.base_version,
+                                                            verify=body.verify, proofread=proofread))
+    _after_page(request, background, m, page_id)
+    return out
 
 
 @router.post("/pages/{page_id}/verify")
@@ -163,8 +171,19 @@ def post_page_verify(page_id: UUID, body: VerifyBody, m: CurrentMember = Depends
 
 
 @router.post("/pages/{page_id}/blank-confirm")
-def post_blank_confirm(page_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
-    return _page_action(m, page_id, lambda s: confirm_blank(s, page_id, m))
+def post_blank_confirm(page_id: UUID, request: Request, background: BackgroundTasks,
+                       m: CurrentMember = Depends(current_member)) -> dict:
+    out = _page_action(m, page_id, lambda s: confirm_blank(s, page_id, m))
+    _after_page(request, background, m, page_id)
+    return out
+
+
+def _after_page(request: Request, background: BackgroundTasks, m: CurrentMember, page_id: UUID) -> None:
+    """手動輸入或確認空白頁之後：等著這一頁的自動流程接著跑（設計 6.2）。"""
+    with tenant_session(m.firm_id) as s:
+        doc_id = s.get(Page, page_id).document_id
+    background.add_task(automation.after_pages_changed, m.firm_id, [doc_id], m.id, request.app.state.settings,
+                        request.app.state.provider_factory)
 
 
 @router.post("/documents/{document_id}/reocr")

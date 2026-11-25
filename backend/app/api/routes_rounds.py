@@ -19,6 +19,9 @@ from app.sources import page_label
 from app.statements import AMOUNT_MARKER, round_total, statement_template
 from app.support import schedule as support_schedule
 from app.support import service as support
+from app.automation import decide
+from app.automation import run as automation
+from app.automation.fingerprints import opponent_fingerprint
 from app.pipeline.run import (STALE_AFTER, RoundBusy, RoundRule, reset_round, run_draft, run_extract,
                               settings_editable, start_stage, strategy_editable)
 
@@ -39,9 +42,9 @@ def _start(round_id: UUID, stage: str, request: Request, background: BackgroundT
             raise HTTPException(409, str(e))
         except RoundRule as e:
             raise _rule(e)
-    runner = run_extract if stage == "extract" else run_draft
-    background.add_task(runner, m.firm_id, round_id, m.id, request.app.state.settings,
-                        provider_factory=request.app.state.provider_factory)
+    # 跑完這一段後看自動流程要不要接著往下（例如 auto 模式按「重試」成功後接著起草，設計 6.2）
+    background.add_task(automation.run_round_stage, stage, m.firm_id, round_id, m.id, request.app.state.settings,
+                        request.app.state.provider_factory)
     return {"status": "extracting" if stage == "extract" else "drafting"}
 
 
@@ -51,10 +54,33 @@ def extract(round_id: UUID, request: Request, background: BackgroundTasks,
     return _start(round_id, "extract", request, background, m)
 
 
+class DraftBody(BaseModel):
+    force: bool = False  # 「先起草（不含還沒辨識的頁）」：不等證據處理完
+    ignore_new_briefs: bool = False  # 「不納入，直接起草」：後來上傳的對方書狀這一輪不拆
+
+
 @router.post("/rounds/{round_id}/draft", status_code=202)
-def draft(round_id: UUID, request: Request, background: BackgroundTasks,
+def draft(round_id: UUID, request: Request, background: BackgroundTasks, body: DraftBody | None = None,
           m: CurrentMember = Depends(current_member)) -> dict:
-    return _start(round_id, "draft", request, background, m)
+    """「開始起草」：自動模式下先排定、照自動流程的規則等證據處理完再開始（設計 6.2）；
+    每步自己按、律師選擇不等、或重試失敗的起草時直接開始。"""
+    body = body or DraftBody()
+    with tenant_session(m.firm_id) as s:
+        rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)
+        if rnd is None:
+            raise HTTPException(404, "找不到輪次")
+        if body.ignore_new_briefs:
+            rnd.extract_fingerprint = opponent_fingerprint(s, round_id)
+        automatic = (decide.mode_of(s, s.get(Case, rnd.case_id)) != "manual" and rnd.status == "extracted"
+                     and not body.force and not body.ignore_new_briefs)
+        if automatic:
+            automation.arm_round(s, rnd, "draft", m.id)
+    if not automatic:
+        return _start(round_id, "draft", request, background, m)
+    background.add_task(automation.kick_round, m.firm_id, round_id, request.app.state.settings,
+                        request.app.state.provider_factory, m.id)
+    with tenant_session(m.firm_id) as s:
+        return {"status": s.get(Round, round_id).status, "automation": decide.automation_view(s, round_id)}
 
 
 class ResetBody(BaseModel):
@@ -259,11 +285,15 @@ def _statement_preview(s, rnd: Round) -> str | None:
 
 
 @router.get("/rounds/{round_id}")
-def get_round(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+def get_round(round_id: UUID, request: Request, background: BackgroundTasks,
+              m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
         rnd = s.get(Round, round_id)
         if rnd is None:
             raise HTTPException(404, "找不到輪次")
+        if round_id in automation.catch_up(s, rnd.case_id):  # 打開頁面時補做（設計 6.2）
+            background.add_task(automation.kick_round, m.firm_id, round_id, request.app.state.settings,
+                                request.app.state.provider_factory)
         claims = s.scalars(select(Claim).where(Claim.round_id == round_id).order_by(Claim.seq)).all()
         draft = s.scalars(select(Draft).where(Draft.round_id == round_id).order_by(Draft.created_at.desc())).first()
         stale = rnd.status in RUNNING_STATUSES and rnd.started_at is not None and (
@@ -273,6 +303,7 @@ def get_round(round_id: UUID, m: CurrentMember = Depends(current_member)) -> dic
             "brief_kind": rnd.brief_kind, "failed_stage": rnd.failed_stage,
             "draft_id": str(draft.id) if draft else None,
             "health_job": job_json(latest_job(s, rnd.case_id, rnd.id, "health")),  # 書狀健檢（設計 5.8）
+            "automation": decide.automation_view(s, round_id),  # 自動跑到哪、在等什麼（設計 6.2）
             "can_review": m.role == "lawyer" and m.bar_verified,  # 只有律師能確認請求項目與金額
             "claims": [claim_json(s, c) for c in claims],
             # 起訴狀：案情說明、設定、確認金額的加總、訴之聲明預覽、沒送給 AI 的掃描頁

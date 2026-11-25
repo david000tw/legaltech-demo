@@ -17,7 +17,11 @@ from app.case_types import (
 from app.db import CASE_LOCK, tenant_session
 from app.ingest.extract import UnreadableFile, UnsupportedFile, file_ext
 from app.ingest.service import current_page_text, ingest_document
-from app.automation.placement import PlacementRule, opponent_target, place_opponent_upload
+from app.automation import decide
+from app.automation import run as automation
+from app.automation.placement import (
+    PlacementRule, opponent_target, place_opponent_upload, round_accepts_upload,
+)
 from app.models import (
     AUTOMATION_MODES, AIJob, Case, CaseParty, Document, Exhibit, HealthReport, Member, Page, Round,
 )
@@ -193,9 +197,14 @@ def list_cases(m: CurrentMember = Depends(current_member)) -> list[dict]:
 
 
 @router.get("/cases/{case_id}")
-def get_case(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+def get_case(case_id: UUID, request: Request, background: BackgroundTasks,
+             m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
         case = _case_or_404(s, case_id)
+        # 打開頁面時補做（伺服器重啟後接續）：只補已排定的步驟；用量記在排定的人身上（設計 6.2）
+        for rid in automation.catch_up(s, case_id):
+            background.add_task(automation.kick_round, m.firm_id, rid, request.app.state.settings,
+                                request.app.state.provider_factory)
         docs = s.scalars(select(Document).where(Document.case_id == case_id)
                          .order_by(Document.created_at, Document.filename)).all()
         pages = s.scalars(select(Page).where(Page.document_id.in_([d.id for d in docs]))
@@ -350,6 +359,7 @@ def upload_document(case_id: UUID, request: Request, background: BackgroundTasks
                     filed_by_party_id: UUID | None = Form(None),
                     brief_kind: str | None = Form(None),  # 對方書狀建新輪次時的書狀種類（設計 6.2）
                     strategy: str | None = Form(None, max_length=2000),  # 答辯策略，可在上傳時就填（設計 6.4）
+                    batch_last: bool = Form(True),  # 一次選多份時，最後一份才觸發自動流程（設計 6.2）
                     m: CurrentMember = Depends(current_member)) -> dict:
     # 一般 def：FastAPI 會放到執行緒池，抽字、合成照片時不會卡住其他請求。
     uploads = ([file] if file is not None else []) + list(files or [])
@@ -384,7 +394,14 @@ def upload_document(case_id: UUID, request: Request, background: BackgroundTasks
                                  for name, data in prep.photos]
         job, ocr = ocr_upload_summary(s, doc.id, m.id)  # 掃描頁、照片自動排入辨識
         out = {"id": str(doc.id), "page_count": doc.page_count, "ocr": ocr}
+        if kind == "opponent_brief":  # 排定自動拆解：只排「還能收書狀」的輪次（設計 6.2）
+            rnd = s.get(Round, round_id)
+            if decide.mode_of(s, s.get(Case, case_id)) != "manual" and round_accepts_upload(s, rnd):
+                automation.arm_round(s, rnd, "extract", m.id)
     schedule(request, background, m.firm_id, [job])
+    if batch_last:  # 排在辨識之後：有文字的檔案立刻接著跑；掃描檔由辨識結束時再觸發
+        background.add_task(automation.after_upload, m.firm_id, case_id, round_id, kind, m.id,
+                            request.app.state.settings, request.app.state.provider_factory)
     return out
 
 

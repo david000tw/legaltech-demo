@@ -7,6 +7,8 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, StringConstraints
 
+from app.automation import run as automation
+from app.automation.fingerprints import notes_input_fingerprint
 from app.auth import CurrentMember, current_member
 from app.dates import PartialDate, parse_dates, parse_iso
 from app.db import tenant_session
@@ -31,9 +33,14 @@ def start_ai_job(request: Request, background: BackgroundTasks, m: CurrentMember
             raise HTTPException(409, {"code": "busy", "message": BUSY})
         except JobRule as e:
             raise HTTPException(409, {"code": e.code, "message": e.message})
+        if step == "evidence_notes":  # 手動產生也記下輸入：失敗後自動流程不會立刻再跑一次（設計 6.2）
+            s.get(Case, case_id).notes_auto_fingerprint = notes_input_fingerprint(s, case_id)
         job_id, out = job.id, job_json(job)
     background.add_task(run_job, m.firm_id, job_id, request.app.state.settings,
                         provider_factory=request.app.state.provider_factory)
+    if step == "evidence_notes":  # 做完後：漏掉的新證據補做說明、等證據的輪次接著起草
+        background.add_task(automation.kick_case, m.firm_id, case_id, request.app.state.settings,
+                            request.app.state.provider_factory, m.id)
     return {"job": out}
 
 
