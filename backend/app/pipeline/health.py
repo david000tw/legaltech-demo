@@ -21,7 +21,7 @@ from app.ai.provider import AIProvider
 from app.ai.schemas import HEALTH_LEVELS, health_schema
 from app.ai.tokens import estimate_tokens
 from app.amounts import parse_amounts
-from app.case_types import SIDE_LABEL
+from app.case_types import SIDE_LABEL, case_number_key
 from app.corpus.search import article_display
 from app.dates import parse_dates, parse_month_days
 from app.db import tenant_session
@@ -39,7 +39,7 @@ from app.pipeline.jobs import JobContext, JobRule
 from app.sources import SourcePage, check_source, code_key, pending_ocr, soften, source_pages, source_view
 from app.statements import confirmed_requests
 from app.text_norm import normalize_text
-from app.verify.citations import scan_case_numbers
+from app.verify.citations import scan_case_numbers_with_context
 
 REF_KINDS = ("judgment", "statute")
 
@@ -116,13 +116,16 @@ def _references(s: Session, item: dict, cands: dict[str, Candidate]) -> tuple[li
 
 
 def _check_written_case_numbers(s: Session, text: str, cands: dict[str, Candidate], refs: list[str],
-                                not_in_list: list[str]) -> None:
+                                not_in_list: list[str], own: tuple | None = None, sources: str = "") -> None:
     """標題與說明裡直接寫的判決字號（與起草的「自行寫字號」同一套掃描）：對得回本輪候選判決的補進參考
     （判決在候選裡但有好幾個段落時，字號本身沒有錯，不補也不列），對不回的列「不在清單」。
-    已經列在 not_in_list 裡的不重複列。"""
+    已經列在 not_in_list 裡的不重複列。本案自己的案號（own）、卷證與書狀裡本來就寫著的案號（sources，
+    例如先前的拋棄繼承事件）是事實，不是引用判決，略過。對回候選時帶上字號前面的法院名稱，別的法院同字號不算。"""
     seen = [normalize_text(t) for t in not_in_list]
-    for hit in scan_case_numbers(text):
-        r = resolve_reference(s, hit, cands)
+    for hit, context in scan_case_numbers_with_context(text):
+        if (own is not None and case_number_key(hit) == own) or (sources and normalize_text(hit) in sources):
+            continue
+        r = resolve_reference(s, context, cands)
         if r["status"] == "mapped" and cands[r["code"]].kind in REF_KINDS:
             if r["code"] not in refs:
                 refs.append(r["code"])
@@ -134,6 +137,8 @@ def _check_written_case_numbers(s: Session, text: str, cands: dict[str, Candidat
 def _save(s: Session, job: AIJob, data: dict, pages: dict[tuple[str, int], SourcePage], complaint: bool,
           fingerprint: str) -> None:
     cands = round_candidates(s, job.round_id)
+    own = case_number_key(s.get(Case, job.case_id).case_number)
+    sources = "\n".join(normalize_text(p.text) for p in pages.values() if p.text)
     items = []
     for it in data.get("items", []) or []:
         title = soften(str(it.get("title", "")).strip())
@@ -141,7 +146,7 @@ def _save(s: Session, job: AIJob, data: dict, pages: dict[tuple[str, int], Sourc
             continue
         explanation = soften(str(it.get("explanation", "")).strip())
         refs, not_in_list = _references(s, it, cands)
-        _check_written_case_numbers(s, f"{title}\n{explanation}", cands, refs, not_in_list)
+        _check_written_case_numbers(s, f"{title}\n{explanation}", cands, refs, not_in_list, own, sources)
         items.append({"level": it["level"], "title": title, "explanation": explanation,
                       "claim_seqs": [x for x in it.get("claim_seqs", []) or [] if isinstance(x, int)],
                       "absence": bool(it.get("absence")),

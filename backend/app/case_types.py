@@ -79,6 +79,15 @@ def _word(case_number: str | None) -> str | None:
     return rest if _looks_like_word(rest) else None
 
 
+def case_number_key(case_number: str | None) -> tuple[int, str, int] | None:
+    """案號的（年度, 字別, 號次），完整格式與短格式都認（「113年度訴字第123號」「臺灣臺北地方法院113訴123」）；讀不出來回 None。"""
+    word = _word(case_number)
+    if word is None:
+        return None
+    nums = re.findall(r"\d+", _COURT_PREFIX.sub("", normalize_text(case_number or ""), count=1))
+    return (int(nums[0]), word, int(nums[-1])) if len(nums) >= 2 else None
+
+
 def procedure_for(case_type: str | None, case_number: str | None) -> str:
     """案號有填（且看得出字別）時以字別判定：含「家」就是家事；否則用案型的預設程序。"""
     word = _word(case_number)

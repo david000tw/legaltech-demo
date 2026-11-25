@@ -284,3 +284,34 @@ def test_health_forbidden_wording_softened(db):
     text = repr(report)
     assert "已證實" not in text and "已驗證" not in text
     assert report["items"][0]["title"] == "過失可佐證"
+
+
+def test_health_own_case_number_is_not_flagged(db):
+    """本案自己的案號（短格式也算）不是引用判決，不能列「不在清單」。"""
+    from app.models import Case
+    ctx = drafted()
+    with tenant_session(ctx["firm"]) as s:
+        s.get(Case, ctx["case_id"]).case_number = "113訴123"
+    item = {**HIGH, "explanation": "本件113年度訴字第123號，對造主張原告未減速。"}
+    report, _, _ = run(ctx, report_data(items=[item]), db)
+    assert report["items"][0]["not_in_list"] == []
+
+
+def test_health_case_number_found_in_the_sources_is_not_flagged(db):
+    """卷證或書狀裡本來就寫著的案號（例如先前的拋棄繼承事件）是事實，不是 AI 憑空引用的判決。"""
+    from app.models import PageText
+    ctx = drafted()
+    with tenant_session(ctx["firm"]) as s:
+        pt = s.scalars(select(PageText).order_by(PageText.created_at)).first()
+        pt.text = pt.text + "\n被告前經本院112年度司繼字第45號准予拋棄繼承在案。"
+    item = {**HIGH, "explanation": "被告已於112年度司繼字第45號拋棄繼承，對造主張原告未減速。"}
+    report, _, _ = run(ctx, report_data(items=[item]), db)
+    assert report["items"][0]["not_in_list"] == []
+
+
+def test_health_case_number_of_another_court_is_flagged(db):
+    """字號相同但法院不同的判決，不能當成候選判決（J1、J2 是臺中地院的那一則）。"""
+    ctx = drafted()
+    item = {**HIGH, "explanation": "可參臺灣臺北地方法院113年度中簡字第3946號判決。"}
+    report, _, _ = run(ctx, report_data(items=[item]), db)
+    assert report["items"][0]["not_in_list"] == ["113年度中簡字第3946號"]

@@ -114,11 +114,22 @@ def scan_unbound_references(text: str) -> list[str]:
     return out
 
 
-def scan_case_numbers(text: str) -> list[str]:
-    """文字裡直接寫的判決字號、大法官解釋、決議（不含條號、證物號、頁碼），依出現順序、不重複。"""
+_CLAUSE_BREAK = set("，。；：、（）()「」『』,;:\n 　")
+
+
+def scan_case_numbers_with_context(text: str, reach: int = 20) -> list[tuple[str, str]]:
+    """文字裡直接寫的判決字號、大法官解釋、決議（不含條號、證物號、頁碼），依出現順序、不重複，
+    各附字號前面同一個子句裡的文字（最多 reach 字）：
+    「可參臺灣臺北地方法院113年度…」→（「113年度…」,「可參臺灣臺北地方法院113年度…」），對回候選時才查得到法院。"""
     t = _scan_form(text)
     hits = sorted((m.start(), m.group(0)) for pat in _CASE_NUMBER_PATTERNS for m in pat.finditer(t))
-    return list(dict.fromkeys(h for _, h in hits))
+    out: dict[str, str] = {}
+    for start, hit in hits:
+        i = start
+        while i > max(0, start - reach) and t[i - 1] not in _CLAUSE_BREAK:
+            i -= 1
+        out.setdefault(hit, t[i:start] + hit)
+    return list(out.items())
 
 
 def _outer_quotes(t: str) -> list[tuple[int, int, int]]:
