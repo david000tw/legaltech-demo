@@ -356,3 +356,32 @@ def test_draft_page_reload_waits_for_a_running_export(db):
         assert not done.wait(1.5), "匯出進行中，草稿頁讀取應該排隊等候"
     t.join(30)
     assert result["status"] == 200
+
+
+def test_draft_page_reload_locks_paragraphs_before_writing_citations(db):
+    """草稿頁讀取重新驗證時要先依段落 id 鎖住全部段落，再寫引用：
+    其他寫入者（標記已審、修正、確認引用）都是先鎖段落再碰引用；反過來就會互等而死結。"""
+    from sqlalchemy import event
+
+    from app import db as dbmod
+    ctx, cs = ready(db)
+    with tenant_session(ctx["firm"]) as s:  # 讓先前存的驗證結果過期：讀取時一定要寫回
+        s.execute(update(Citation).values(verify_reasons=["stale_reason"]))
+        s.execute(update(Paragraph).values(verify_reasons=["stale_reason"]))
+    seen: list[str] = []
+
+    def record(conn, cursor, statement, params, context, executemany):
+        st = " ".join(statement.split())
+        if "FROM paragraphs" in st and "FOR UPDATE" in st:
+            seen.append("lock_paragraphs")
+        elif st.startswith("UPDATE citations"):
+            seen.append("update_citations")
+
+    eng = dbmod.engine_for(dbmod.settings().database_url)
+    event.listen(eng, "before_cursor_execute", record)
+    try:
+        assert cs["lawyer"].get(f"/api/drafts/{ctx['draft_id']}").status_code == 200
+    finally:
+        event.remove(eng, "before_cursor_execute", record)
+    assert "update_citations" in seen  # 確實有寫回（否則這個測試沒有意義）
+    assert seen.index("lock_paragraphs") < seen.index("update_citations")
