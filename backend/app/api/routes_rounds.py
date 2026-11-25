@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from app.ai.provider import AIError, ProviderNotAllowed, ProviderNotEnabled
 from app.auth import CurrentMember, current_member, require_lawyer
 from app.db import tenant_session
-from app.models import RUNNING_STATUSES, Claim, Draft, Firm, Page, Paragraph, Round
+from app.models import RUNNING_STATUSES, Case, Claim, Draft, Firm, Page, Paragraph, Round
 from app.pipeline.copy_round import copy_round
 from app.pipeline.drafting import ParagraphChanged, rewrite_paragraph
 from app.pipeline.jobs import job_json, latest_job
@@ -131,14 +131,23 @@ class ClaimBody(BaseModel):
     basis_text: str | None = Field(default=None, max_length=500)
 
 
-def _editable_claim(s, claim_id: UUID, kind: str | None = None) -> Claim:
+def _editable_claim(s, claim_id: UUID, kind: str | None = None, *, lock_case: bool = False) -> Claim:
+    """lock_case：先鎖案件列，與辨識修正（ocr.service.lock_page：案件列 → 頁列 → …）同一個上鎖順序，
+    才不會和修正視窗同時讀寫依據；鎖到手之後重讀請求項目（等鎖期間修正可能已改了依據）。"""
     claim = s.get(Claim, claim_id)
     if claim is None:
         raise HTTPException(404, "找不到主張或請求項目")
     if kind is not None and claim.kind != kind:
         raise HTTPException(422, "只有起訴狀的請求項目可以這樣操作")
+    if lock_case:
+        s.get(Case, s.scalar(select(Round.case_id).where(Round.id == claim.round_id)),
+              with_for_update=True, populate_existing=True)
     if s.get(Round, claim.round_id, with_for_update=True, populate_existing=True).status != "extracted":
         raise HTTPException(409, "這一輪已不在待確認狀態，不能再修改")
+    if lock_case:
+        claim = s.get(Claim, claim_id, populate_existing=True)
+        if claim is None:
+            raise HTTPException(404, "找不到主張或請求項目")
     return claim
 
 
@@ -172,7 +181,7 @@ def patch_claim(claim_id: UUID, body: ClaimBody, m: CurrentMember = Depends(curr
 def confirm_claim(claim_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
     """只有律師能確認請求項目與金額；訴之聲明的金額來自這裡（設計 5.2）。"""
     with tenant_session(m.firm_id) as s:
-        claim = _editable_claim(s, claim_id, kind="request")
+        claim = _editable_claim(s, claim_id, kind="request", lock_case=True)  # 確認要等辨識修正提交，再依新文字判斷
         require_lawyer(m)
         if claim.request_type == "monetary" and claim.amount is None:
             raise HTTPException(422, "請先填寫金額")
