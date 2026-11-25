@@ -299,6 +299,22 @@ class Exhibit(Base):
     number: Mapped[int] = mapped_column(Integer)
 
 
+class OpponentExhibit(Base):
+    """對方書狀附的證物（對方證物計畫）：規則找出的編號與起訖頁（文件內頁碼）；頁文字變了就整份重算。"""
+    __tablename__ = "opponent_exhibits"
+    __table_args__ = (
+        UniqueConstraint("document_id", "first_page_no", name="uq_opponent_exhibit_start"),
+        _tfk("document_id", "documents", "CASCADE"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    firm_id: Mapped[uuid.UUID] = _firm()
+    document_id: Mapped[uuid.UUID] = _ref()
+    prefix: Mapped[str] = mapped_column(String(10))
+    number: Mapped[int] = mapped_column(Integer)
+    first_page_no: Mapped[int] = mapped_column(Integer)
+    last_page_no: Mapped[int] = mapped_column(Integer)
+
+
 class Claim(Base):
     """對造主張（kind=opponent_claim），或起訴狀的我方請求項目（kind=request）。"""
     __tablename__ = "claims"

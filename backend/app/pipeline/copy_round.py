@@ -76,6 +76,10 @@ def copy_round(s: Session, round_id: UUID) -> Round:
     s.add(target)
     s.flush()
     page_map = _copy_briefs(s, source, target)
+    from app.opponent_exhibits import refresh_opponent_exhibits
+    for doc_id in s.scalars(select(Document.id).where(Document.round_id == target.id,
+                                                      Document.kind == "opponent_brief")).all():
+        refresh_opponent_exhibits(s, doc_id)  # 複製的對方書狀也要有自己的證物列
     from app.ocr.service import _texts, recheck_claim
     text_of = _texts(s)
     for c in s.scalars(select(Claim).where(Claim.round_id == source.id).order_by(Claim.seq)):

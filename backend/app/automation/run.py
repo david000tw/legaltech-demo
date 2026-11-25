@@ -138,12 +138,22 @@ def _apply_header(firm_id: UUID, document_ids: list[UUID]) -> None:
             log.exception("reading the header of document %s failed", doc_id)
 
 
+def _refresh_exhibits(firm_id: UUID, document_ids: list[UUID]) -> None:
+    """重找對方書狀附的證物（對方證物計畫）。不花 AI 額度，不分自動化模式都做；不放進 _apply_header，
+    因為測試會把 _apply_header 換成空函式。"""
+    from app.opponent_exhibits import refresh_opponent_exhibits
+    with tenant_session(firm_id) as s:
+        for doc_id in sorted(document_ids):
+            refresh_opponent_exhibits(s, doc_id)
+
+
 def after_upload(firm_id: UUID, case_id: UUID, round_id: UUID | None, kind: str, member_id: UUID | None,
                  settings, provider_factory) -> None:
     if kind == "opponent_brief" and round_id is not None:
         with tenant_session(firm_id) as s:
             docs = s.scalars(select(Document.id).where(Document.round_id == round_id,
                                                        Document.kind == "opponent_brief")).all()
+        _refresh_exhibits(firm_id, list(docs))
         _apply_header(firm_id, list(docs))
         kick_round(firm_id, round_id, settings, provider_factory, member_id)
     else:
@@ -159,6 +169,7 @@ def after_pages_changed(firm_id: UUID, document_ids: list[UUID], member_id: UUID
         rounds = sorted({d.round_id for d in docs if d.kind == "opponent_brief" and d.round_id})
         opponent_docs = [d.id for d in docs if d.kind == "opponent_brief"]
     if opponent_docs:
+        _refresh_exhibits(firm_id, opponent_docs)
         _apply_header(firm_id, opponent_docs)
     for case_id in cases:
         kick_case(firm_id, case_id, settings, provider_factory, member_id)

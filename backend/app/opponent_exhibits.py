@@ -10,6 +10,12 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from uuid import UUID
+
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
+
+from app.models import Document, OpponentExhibit, Page
 
 # 依長度由長到短：「被上證」要先於「上證」、「原告證」要先於「原證」比對
 PREFIXES = ("被上證", "原告證", "被告證", "原證", "被證", "上證", "聲證", "相證")
@@ -111,3 +117,39 @@ def find_exhibits(pages: list[tuple[int, str | None]]) -> list[FoundExhibit]:
             cur[3] = no
     close()
     return out
+
+
+# ---- 存起來、適時重找（Task 2） ----
+
+def refresh_opponent_exhibits(s: Session, document_id: UUID) -> list[OpponentExhibit]:
+    """依目前頁文字整份重算。先鎖文件列：背景重找與起草前重找同時跑時，不會寫出重複的列。"""
+    from app.ingest.service import document_page_texts
+    doc = s.get(Document, document_id, with_for_update=True)
+    if doc is None or doc.kind != "opponent_brief":
+        return []
+    pages = [(page.page_no, pt.text if pt is not None else None) for page, pt in document_page_texts(s, document_id)]
+    found = find_exhibits(pages)
+    s.execute(delete(OpponentExhibit).where(OpponentExhibit.document_id == document_id))
+    rows = [OpponentExhibit(firm_id=doc.firm_id, document_id=doc.id, prefix=f.prefix, number=f.number,
+                            first_page_no=f.first_page, last_page_no=f.last_page) for f in found]
+    s.add_all(rows)
+    s.flush()
+    return rows
+
+
+def refresh_case_opponent_exhibits(s: Session, case_id: UUID) -> None:
+    """本案所有對方書狀（不依檔案內容去重：複製輪次的文件也要有自己的列）；依 id 順序上鎖。"""
+    for doc_id in s.scalars(select(Document.id).where(Document.case_id == case_id, Document.kind == "opponent_brief")
+                            .order_by(Document.id)).all():
+        refresh_opponent_exhibits(s, doc_id)
+
+
+def opponent_exhibit_for_page(s: Session, page_id: UUID) -> tuple[OpponentExhibit, int] | None:
+    """這一頁屬於哪一件對方證物，以及是該證物的第幾頁。"""
+    page = s.get(Page, page_id)
+    if page is None:
+        return None
+    ex = s.scalars(select(OpponentExhibit).where(OpponentExhibit.document_id == page.document_id,
+                                                 OpponentExhibit.first_page_no <= page.page_no,
+                                                 OpponentExhibit.last_page_no >= page.page_no)).first()
+    return (ex, page.page_no - ex.first_page_no + 1) if ex is not None else None
