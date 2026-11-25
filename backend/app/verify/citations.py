@@ -114,6 +114,13 @@ def scan_unbound_references(text: str) -> list[str]:
     return out
 
 
+def scan_case_numbers(text: str) -> list[str]:
+    """文字裡直接寫的判決字號、大法官解釋、決議（不含條號、證物號、頁碼），依出現順序、不重複。"""
+    t = _scan_form(text)
+    hits = sorted((m.start(), m.group(0)) for pat in _CASE_NUMBER_PATTERNS for m in pat.finditer(t))
+    return list(dict.fromkeys(h for _, h in hits))
+
+
 def _outer_quotes(t: str) -> list[tuple[int, int, int]]:
     """最外層的引號段：(內容起點, 內容終點, 該段結束位置)。內層引號算在外層裡；沒關上的引號延伸到句末。"""
     out = []
