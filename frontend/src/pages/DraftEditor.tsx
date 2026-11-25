@@ -6,6 +6,7 @@ import CitationTag from '../components/CitationTag'
 import EvidenceNotesSection from '../components/EvidenceNotesSection'
 import ExportButton, { errorMessage, reasonLabel } from '../components/ExportButton'
 import FilingPackageButton from '../components/FilingPackageButton'
+import KeyPointsList from '../components/KeyPointsList'
 import PinnedPanel from '../components/PinnedPanel'
 import SourcePane from '../components/SourcePane'
 import StatementBlock, { AmountButtons, ClaimValueField } from '../components/StatementBlock'
@@ -311,6 +312,10 @@ export default function DraftEditor({ pollMs = POLL_MS }: { pollMs?: number } = 
           )}
         </aside>
         <div className="space-y-4">
+          {draft.key_points && (
+            <KeyPointsList data={draft.key_points}
+              onJump={(seq) => jumpTo({ paragraph_seq: seq, reason: '', scope: 'paragraph' })} />
+          )}
           {draft.claim_value && (
             <ClaimValueField key={`cv-${draft.claim_value.value}`} draft={draft} onChanged={load} onError={setError} />
           )}

@@ -159,7 +159,11 @@ export type DraftView = { id: string; round_id: string; case_id: string; case_ti
   body_label?: string | null
   // 起訴狀狀頭的訴訟標的金額（有金錢請求，預設＝請求項目加總）或價額（只有非金錢請求，要律師填）；其他書狀為 null
   claim_value?: { label: string; value: number | null } | null
-  unverified_ocr_pages?: string[] }  // 本輪資料來源中還沒對照原圖的辨識頁
+  unverified_ocr_pages?: string[]  // 本輪資料來源中還沒對照原圖的辨識頁
+  key_points?: KeyPoints }  // 這份草稿回應了對方哪幾點（設計 6.5）
+export type KeyPointParagraph = { seq: number; no: number; heading: string }
+export type KeyPoints = { legacy: boolean; complaint?: boolean
+  items: { seq: number; summary: string; selected: boolean; uncovered: boolean; paragraphs: KeyPointParagraph[] }[] }
 export type CitationSource = { kind: string; title: string; text: string; span: [number, number] | null
   annotation?: string | null
   // 卷證引用（計畫 2A）：原文卡片並排原圖；needs_check＝辨識文字、律師要對照後才能標記已審

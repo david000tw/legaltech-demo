@@ -530,3 +530,18 @@ describe('DraftEditor side tabs', () => {
     expect(vi.mocked(api.getDraft).mock.calls.length).toBe(calls)
   })
 })
+
+describe('DraftEditor key points', () => {
+  beforeEach(() => { vi.resetAllMocks() })
+
+  it('shows the key points list above the paragraphs and jumps to the answering paragraph', async () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    vi.mocked(api.getDraft).mockResolvedValue({ ...draft, key_points: { legacy: false, items: [
+      { seq: 1, summary: '被告未讓幹道車先行', selected: true, uncovered: false,
+        paragraphs: [{ seq: 1, no: 1, heading: '關於路權' }] }] } })
+    renderEditor()
+    await userEvent.click(await screen.findByRole('button', { name: '第一段：關於路權' }))
+    expect((scroll.mock.contexts[0] as HTMLElement).id).toBe('paragraph-1')
+  })
+})

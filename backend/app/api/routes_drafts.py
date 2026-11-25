@@ -24,6 +24,7 @@ from app.review.service import (
     renumber_exhibit, request_review,
 )
 from app.review.insert import InsertRejected, insert_pin
+from app.key_points import key_points
 from app.review.views import has_opened, record_judgment_view
 from app.sources import PASSAGE_LABEL
 from app.text_norm import find_quote
@@ -126,7 +127,9 @@ def get_draft(draft_id: UUID, request: Request, background: BackgroundTasks,
                                for n, p in enumerate(body_paragraphs(s, draft_id), start=1)],
                 "blockers": [blocker_json(b) for b in blockers],
                 # 本輪資料來源中還沒對照原圖的辨識頁（草稿頁上方提醒；計畫 2A Ruling：不逐段標）
-                "unverified_ocr_pages": unverified_ocr_pages(s, rnd)}
+                "unverified_ocr_pages": unverified_ocr_pages(s, rnd),
+                # 這份草稿回應了對方哪幾點、寫在第幾段（設計 6.5）
+                "key_points": key_points(s, draft_id)}
 
 
 @router.get("/citations/{citation_id}/source")
