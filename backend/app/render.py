@@ -26,8 +26,23 @@ def citation_label(s: Session, c: Citation) -> str | None:
     return None
 
 
+# 引用前面是這些字＝當成句子的一部分（依民法…、此有原證1…可稽、（…參照）），照原樣
+_LEAD_IN = ("依", "按", "據", "照", "見", "如", "及", "與", "和", "或", "、", "，", ",", "有", "（", "(", "「", "同", "參",
+            "於", "之")
+# 引用後面是這些（或段落結束）＝接在句尾當出處
+_SENTENCE_END = "。，；：、）)」』！？\n"
+
+
+def _is_trailing_reference(before: str, after: str) -> bool:
+    """接在句尾當出處的引用（「…為肇事次因{{cite:E1}}。」）：前面是內容、後面是標點或段落結束。"""
+    head = before.rstrip()
+    return bool(head) and not head.endswith(_LEAD_IN) and (not after or after[0] in _SENTENCE_END)
+
+
 def render_text(s: Session, p: Paragraph) -> str:
-    """先重新驗證，再只把驗證通過的引用展開；失敗的引用顯示【未驗證：代碼】。"""
+    """先重新驗證，再只把驗證通過的引用展開；失敗的引用顯示【未驗證：代碼】。
+    接在句尾當出處的引用加括號：卷證「（原證1第1頁）」、判決「（…判決意旨參照）」、法條「（民法第217條參照）」，
+    相鄰的幾個合成一組括號。"""
     verify_paragraph(s, p)
     cites = {c.code: c for c in paragraph_citations(s, p.id)}
 
@@ -42,7 +57,33 @@ def render_text(s: Session, p: Paragraph) -> str:
             return f"「{c.quote}」" if c.quote.strip() else f"【引用錯誤：{code}】"
         return citation_label(s, c) or f"【引用錯誤：{code}】"
 
-    out = MARKER_RE.sub(sub, p.text or "")
+    def reference(group: list) -> str:
+        found = [cites.get(m.group(2)) for m in group]
+        if any(c is None or c.verify_status not in ("ok", "warn") or not citation_label(s, c) for c in found):
+            return "".join(sub(m) for m in group)  # 有錯的引用照原樣顯示錯誤，不包括號
+        evidence = [citation_label(s, c) for c in found if c.kind == "evidence"]
+        legal = [citation_label(s, c) + ("意旨" if c.kind == "judgment" else "") for c in found if c.kind != "evidence"]
+        parts = (["、".join(evidence)] if evidence else []) + (["、".join(legal) + "參照"] if legal else [])
+        return "（" + "；".join(parts) + "）"
+
+    text = p.text or ""
+    matches = list(MARKER_RE.finditer(text))
+    pieces, pos, k = [], 0, 0
+    while k < len(matches):
+        m = matches[k]
+        pieces.append(text[pos:m.start()])
+        group = [m]
+        while (m.group(1) == "cite" and k + len(group) < len(matches) and matches[k + len(group)].group(1) == "cite"
+               and matches[k + len(group)].start() == group[-1].end()):
+            group.append(matches[k + len(group)])
+        end = group[-1].end()
+        if m.group(1) == "cite" and _is_trailing_reference(text[:m.start()], text[end:]):
+            pieces.append(reference(group))
+        else:
+            pieces.append("".join(sub(g) for g in group))
+        pos, k = end, k + len(group)
+    pieces.append(text[pos:])
+    out = "".join(pieces)
     if AMOUNT_MARKER in out:  # 訴之聲明的金額：系統依律師確認的請求項目加總（設計 5.2）
         amount = f"{round_total(s, round_of(s, p).id):,}" if amount_marker_allowed(s, p) else "【金額標記位置錯誤】"
         out = out.replace(AMOUNT_MARKER, amount)
