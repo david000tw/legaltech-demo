@@ -166,3 +166,15 @@ def test_case_view_shows_auto_filled_values(ctx):
     _apply(ctx["firm"], ctx["case_id"], doc)
     body = ctx["clients"]["lawyer"].get(f"/api/cases/{ctx['case_id']}").json()
     assert body["header_auto"]["case_number"]["value"] == "114年度訴字第123號"
+
+
+def test_renamed_auto_party_is_not_added_again(ctx):
+    """修正後複審：律師把讀錯的名字改正後，下一份書狀不能再把讀錯的名字加回來。"""
+    doc = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], COMPLAINT)
+    _apply(ctx["firm"], ctx["case_id"], doc)
+    lawyer = ctx["clients"]["lawyer"]
+    parties = lawyer.get(f"/api/cases/{ctx['case_id']}").json()["parties"]
+    fixed = [{**p, "name": "林大銘"} if p["name"] == "林大明" else p for p in parties]
+    assert lawyer.put(f"/api/cases/{ctx['case_id']}/parties", json=fixed).status_code == 200
+    later = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], COMPLAINT, name="起訴狀副本.txt")
+    assert "林大明" not in _apply(ctx["firm"], ctx["case_id"], later)

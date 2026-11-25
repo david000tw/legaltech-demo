@@ -17,7 +17,8 @@ export default function HeaderAutoNotice({ caseId, auto, parties, missing = [], 
 }) {
   const fields = Object.entries(auto)
   const autoParties = parties.filter((p) => p.auto)
-  if (fields.length === 0 && autoParties.length === 0 && missing.length === 0) return null
+  const notWritten = missing.filter((name) => !(name in auto))  // 自動帶入過、後來清掉的欄位不算「沒寫」
+  if (fields.length === 0 && autoParties.length === 0 && notWritten.length === 0) return null
 
   async function verify() {
     onError(null)
@@ -40,7 +41,7 @@ export default function HeaderAutoNotice({ caseId, auto, parties, missing = [], 
             </button>
           </li>
         ))}
-        {missing.map((name) => <li key={`missing-${name}`}>{`${FIELD_LABEL[name] ?? name}：對方書狀沒寫，請自行填寫`}</li>)}
+        {notWritten.map((name) => <li key={`missing-${name}`}>{`${FIELD_LABEL[name] ?? name}：對方書狀沒寫，請自行填寫`}</li>)}
         {autoParties.map((p) => (
           <li key={p.id}>{`${p.name}（${p.role}）：從對方書狀自動加入${p.auto_verified ? '（已核對）' : '，請核對'}`}</li>
         ))}

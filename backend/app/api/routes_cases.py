@@ -209,6 +209,8 @@ def put_parties(case_id: UUID, body: Annotated[list[PartyBody], Field(max_length
             if p is None:
                 p = CaseParty(firm_id=m.firm_id, case_id=case_id)
                 s.add(p)
+            if p.auto_document_id is not None and p.name and p.name != b.name:
+                dismiss_auto_party(case, p.name)  # 改正讀錯的名字：之後的書狀不再把舊名字加回來
             if (p.auto_document_id is not None and (p.name != b.name or p.role != b.role)
                     and m.role == "lawyer" and m.bar_verified):
                 p.auto_verified = True  # 律師改過自動帶入的對造：視為已核對（設計 6.6）

@@ -1,4 +1,6 @@
 """從對方書狀開頭用規則讀出狀頭（設計 6.6）：讀不出來就留空，不能讀錯。"""
+import pytest
+
 from app.header_extract import header_block, read_header
 
 PREPARATORY = """民事準備書狀
@@ -92,3 +94,35 @@ def test_read_header_inline_heading_stops_reading():
 
 def test_read_header_verbs_are_not_names():
     assert read_header("被　　告　否認\n原　　告　主張\n").defendants == []
+
+
+@pytest.mark.parametrize("text", [
+    "民事答辯狀\n被　　告　王小華\n答　辯　聲　明\n一、原告之訴駁回。\n事　實　及　理　由\n"
+    "一、按最高法院112年度台上字第123號判決意旨，被告並無過失。\n",
+    "民事答辯狀\n被　　告　王小華\n壹、答辯理由\n一、按最高法院112年度台上字第123號判決意旨。\n",
+    "民事上訴狀\n被　　告　王小華\n上訴理由\n按最高法院112年度台上字第123號判決意旨。\n",
+    "民事答辯狀\n被　　告　王小華\n事實與理由\n按最高法院112年度台上字第123號判決意旨。\n",
+])
+def test_read_header_spaced_and_other_headings_stop_reading(text):
+    """修正後複審：字中間有全形空白的標題、「答辯理由」「上訴理由」「事實與理由」也要停。"""
+    g = read_header(text)
+    assert g.court is None and g.case_number is None and g.defendants == ["王小華"]
+
+
+def test_read_header_stops_after_the_opening_sentence():
+    """沒有標題的準備書狀：讀到「…提出準備書狀事：」那一行為止；內文第一點引用的法院不能當成本案法院。"""
+    text = ("民事準備書狀\n原　　告　林大明\n被　　告　王小華\n為請求損害賠償事件，依法提出準備書狀事：\n"
+            "一、按臺灣高等法院112年度上字第45號判決意旨，原告請求無理由。\n此致\n臺灣臺中地方法院　公鑒\n")
+    g = read_header(text)
+    assert g.court == "臺灣臺中地方法院" and g.case_number is None and g.cause == "請求損害賠償"
+
+
+def test_read_header_numbered_line_ends_header():
+    g = read_header("民事答辯狀\n被　　告　王小華\n一、按臺灣高等法院112年度上字第45號判決意旨。\n")
+    assert g.court is None and g.case_number is None
+
+
+@pytest.mark.parametrize("line", ["被　　告　則以", "原　　告　起訴主張", "被　　告　另稱", "被　　告　亦未"])
+def test_read_header_more_verbs_are_not_names(line):
+    g = read_header(line + "\n")
+    assert g.plaintiffs == [] and g.defendants == []

@@ -55,4 +55,13 @@ describe('HeaderAutoNotice missing fields', () => {
     expect(screen.getByText('案號：對方書狀沒寫，請自行填寫')).toBeInTheDocument()
     expect(screen.getByText('股別：對方書狀沒寫，請自行填寫')).toBeInTheDocument()
   })
+
+  it('does not call a cleared auto-filled field missing (修正後複審)', () => {
+    const cleared = { division: { document_id: 'd1', filename: '準備書狀.pdf', page_no: 1, verified: true, value: null } }
+    render(<HeaderAutoNotice caseId="c1" auto={cleared} parties={[]} missing={['division', 'cause']} unverified={false}
+      canVerify onVerified={vi.fn()} onError={vi.fn()} onOpenDocument={vi.fn()} />)
+    expect(screen.getByText('股別（已清空）：從對方書狀「準備書狀.pdf」第 1 頁帶入（已核對）')).toBeInTheDocument()
+    expect(screen.queryByText('股別：對方書狀沒寫，請自行填寫')).not.toBeInTheDocument()
+    expect(screen.getByText('案由：對方書狀沒寫，請自行填寫')).toBeInTheDocument()
+  })
 })
