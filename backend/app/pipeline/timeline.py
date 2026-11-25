@@ -18,7 +18,7 @@ from app.ai.schemas import TIMELINE_SCHEMA
 from app.amounts import parse_amounts
 from app.dates import PartialDate, parse_dates, parse_iso, parse_month_days, roc_label
 from app.db import tenant_session
-from app.models import AIJob, Case, TimelineEvent
+from app.models import AIJob, Case, Document, Page, PageText, TimelineEvent
 from app.pipeline.case_context import case_context
 from app.pipeline.jobs import JobContext, JobRule
 from app.ingest.service import current_page_text
@@ -153,6 +153,20 @@ def event_json(s: Session, e: TimelineEvent) -> dict:
     return {"id": str(e.id), "date": _iso(e), "date_label": _label(e), "description": e.description,
             "amount": e.amount, "source_kind": e.source_kind, "origin": e.origin,
             "source": source_view(s, e.page_id, e.quote, status, reasons) if has_source else None}
+
+
+def timeline_outdated(s: Session, case_id: UUID) -> bool:
+    """最近一次整理完成之後，本案有新上傳的文件、或某頁出現新的文字版本（辨識完成、律師校正）＝建議重新整理。
+    沒整理過就沒有基準，回 False。用工作開始時間比較（保守：整理途中的變動也算）。"""
+    job = s.scalars(select(AIJob).where(AIJob.case_id == case_id, AIJob.step == "timeline", AIJob.status == "done")
+                    .order_by(AIJob.started_at.desc()).limit(1)).first()
+    if job is None:
+        return False
+    new_doc = select(Document.id).where(Document.case_id == case_id, Document.created_at > job.started_at)
+    new_text = (select(PageText.id).join(Page, Page.id == PageText.page_id)
+                .join(Document, Document.id == Page.document_id)
+                .where(Document.case_id == case_id, PageText.created_at > job.started_at))
+    return s.scalar(select(new_doc.exists() | new_text.exists())) is True
 
 
 def timeline_view(s: Session, case_id: UUID) -> list[dict]:

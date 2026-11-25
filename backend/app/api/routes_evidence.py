@@ -13,7 +13,7 @@ from app.db import tenant_session
 from app.models import Case, Document, EvidenceNote, Page, TimelineEvent
 from app.pipeline.evidence_notes import note_json, notes_view
 from app.pipeline.jobs import BUSY, JobBusy, JobRule, job_json, latest_job, run_job, start_job
-from app.pipeline.timeline import event_json, lawyer_event, set_date, timeline_view
+from app.pipeline.timeline import event_json, lawyer_event, set_date, timeline_outdated, timeline_view
 from app.sources import MAX_AMOUNT, pending_ocr, source_pages
 
 router = APIRouter(prefix="/api")
@@ -99,6 +99,7 @@ def get_timeline(case_id: UUID, m: CurrentMember = Depends(current_member)) -> d
     with tenant_session(m.firm_id) as s:
         _case_or_404(s, case_id)
         return {"events": timeline_view(s, case_id), "pending_ocr": pending_ocr(source_pages(s, case_id).values()),
+                "outdated": timeline_outdated(s, case_id),  # 整理之後卷證有變：前端提示建議重新整理
                 "job": job_json(latest_job(s, case_id, None, "timeline"))}
 
 

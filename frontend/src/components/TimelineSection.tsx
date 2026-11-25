@@ -105,6 +105,7 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
   const [events, setEvents] = useState<api.TimelineEventView[] | null>(null)
   const [pending, setPending] = useState<string[]>([])
   const [job, setJob] = useState<api.JobView | null>(null)
+  const [outdated, setOutdated] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [date, setDate] = useState('')
   const [description, setDescription] = useState('')
@@ -115,6 +116,7 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
       const body = await api.getTimeline(caseId)
       setEvents(body.events)
       setPending(body.pending_ocr)
+      setOutdated(!!body.outdated)
       setJob(body.job)
     } catch (e) {
       setMessage((e as Error).message)
@@ -163,6 +165,9 @@ export default function TimelineSection({ caseId, pollMs = POLL_MS, compact = fa
       </div>
       {job?.status === 'failed' && job.error && <p className="text-sm text-red-700">{job.error}</p>}
       {message && <p className="text-sm text-red-700">{message}</p>}
+      {!compact && outdated && !running && (
+        <p className="rounded bg-yellow-50 p-2 text-sm text-yellow-800">卷證或對造書狀已有變更，建議重新整理大事記</p>
+      )}
       {pending.map((p) => <p key={p} className="text-xs text-amber-700">{p}待辨識，未處理</p>)}
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="w-full text-sm">

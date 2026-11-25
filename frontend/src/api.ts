@@ -329,7 +329,8 @@ export const deleteEvidenceNote = (id: string) =>
 // 大事記（設計 5.7）：重新整理只取代 AI 的事件，律師新增或修改的保留
 export const generateTimeline = (caseId: string) => req<{ job: JobView }>(`/cases/${caseId}/timeline`, json('POST'))
 export const getTimeline = (caseId: string) =>
-  req<{ events: TimelineEventView[]; pending_ocr: string[]; job: JobView | null }>(`/cases/${caseId}/timeline`)
+  req<{ events: TimelineEventView[]; pending_ocr: string[]; outdated?: boolean; job: JobView | null }>(
+    `/cases/${caseId}/timeline`)  // outdated＝整理之後卷證有新增或變更
 export const addTimelineEvent = (caseId: string, body: TimelineEventInput) =>
   req<TimelineEventView>(`/cases/${caseId}/timeline/events`, json('POST', body))
 export const patchTimelineEvent = (id: string, body: TimelineEventInput) =>

@@ -277,7 +277,7 @@ def test_timeline_get_lists_pending_ocr(lawyer_client):
     with tenant_session(firm) as s:
         ingest_document(s, firm, case_id, "opponent_brief", "答辯狀.pdf", blank_pdf(), rid)
     body = client.get(f"/api/cases/{case_id}/timeline").json()
-    assert body == {"events": [], "pending_ocr": ["對造書狀A 第1頁"], "job": None}
+    assert body == {"events": [], "pending_ocr": ["對造書狀A 第1頁"], "outdated": False, "job": None}
 
 
 def test_prompt_rules():
@@ -345,3 +345,29 @@ def test_lawyer_event_date_rejects_ambiguous_or_invalid(lawyer_client, db, typed
     r = client.post(f"/api/cases/{case_id}/timeline/events", json={"date": typed, "description": "原告寄發存證信函"})
     assert r.status_code == 422, r.text
     assert "民國" in r.json()["detail"]  # 提示也要說民國寫法可以
+
+
+# ---- 小問題批次（C6）：整理過大事記之後卷證有變，提示建議重新整理 ----
+def test_timeline_outdated_flag_follows_sources(lawyer_client, db):
+    """沒整理過＝沒有基準，不提示；整理完成後新上傳卷證、或某頁文字有新版本（辨識完成、校正）→ outdated；重新整理後歸零。"""
+    from app.models import Page, PageText
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm, opponent_pages=BRIEF, evidence=EVIDENCE)
+    client.app.state.provider_factory = lambda settings, f: FakeProvider({"timeline": {"events": [PAID]}})
+
+    def outdated():
+        return client.get(f"/api/cases/{case_id}/timeline").json()["outdated"]
+
+    assert outdated() is False  # 從沒整理過
+    assert client.post(f"/api/cases/{case_id}/timeline").status_code == 202
+    assert outdated() is False
+    r = client.post(f"/api/cases/{case_id}/documents", data={"kind": "evidence"},
+                    files={"file": ("03_診斷證明.txt", "診斷證明書 民國114年3月20日 右腕骨折".encode(), "text/plain")})
+    assert r.status_code == 200, r.text
+    assert outdated() is True
+    assert client.post(f"/api/cases/{case_id}/timeline").status_code == 202
+    assert outdated() is False
+    with tenant_session(firm) as s:  # 某頁出現新的文字版本（例如辨識完成或律師校正）
+        page = s.scalars(select(Page).order_by(Page.id)).first()
+        s.add(PageText(firm_id=firm, page_id=page.id, version=2, source="manual", text="校正後的文字內容"))
+    assert outdated() is True

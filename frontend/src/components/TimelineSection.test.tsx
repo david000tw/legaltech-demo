@@ -58,6 +58,24 @@ describe('TimelineSection', () => {
     expect(screen.getByLabelText('事件日期')).toHaveAttribute('placeholder', expect.stringContaining('114年3月9日'))
   })
 
+  it('suggests refreshing when the sources changed after the last run', async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], outdated: true, job: null })
+    const { unmount } = render(<TimelineSection caseId="c1" />)
+    expect(await screen.findByText('卷證或對造書狀已有變更，建議重新整理大事記')).toBeInTheDocument()
+    unmount()
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], outdated: false, job: null })
+    render(<TimelineSection caseId="c1" />)
+    await screen.findByText('原告支付醫療費用')
+    expect(screen.queryByText(/建議重新整理大事記/)).toBeNull()
+  })
+
+  it('does not show the refresh hint in the read-only compact view', async () => {
+    vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], outdated: true, job: null })
+    render(<TimelineSection caseId="c1" compact />)
+    await screen.findByText('原告支付醫療費用')
+    expect(screen.queryByText(/建議重新整理大事記/)).toBeNull()
+  })
+
   it('adds, edits and deletes events', async () => {
     vi.mocked(api.getTimeline).mockResolvedValue({ events: [ev({})], pending_ocr: [], job: null })
     vi.mocked(api.addTimelineEvent).mockResolvedValue(ev({ id: 'e3', origin: 'lawyer' }))
