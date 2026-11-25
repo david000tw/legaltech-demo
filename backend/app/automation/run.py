@@ -117,7 +117,16 @@ def kick_case(firm_id: UUID, case_id: UUID, settings, provider_factory, member_i
 
 
 def _apply_header(firm_id: UUID, document_ids: list[UUID]) -> None:
-    """對方書狀有文字之後，用規則讀狀頭與對造姓名（Task 16 實作；測試預設換成 no-op）。"""
+    """對方書狀有文字之後，用規則讀狀頭與對造姓名（設計 6.6；不用 AI，三種模式都做）。測試預設換成 no-op。"""
+    from app.header_extract import apply_header_guess
+    for doc_id in document_ids:
+        try:
+            with tenant_session(firm_id) as s:
+                doc = s.get(Document, doc_id)
+                if doc is not None:
+                    apply_header_guess(s, doc.case_id, doc_id)
+        except Exception:  # noqa: BLE001  讀狀頭失敗不影響後面的自動流程；律師仍可自己填
+            log.exception("reading the header of document %s failed", doc_id)
 
 
 def after_upload(firm_id: UUID, case_id: UUID, round_id: UUID | None, kind: str, member_id: UUID | None,

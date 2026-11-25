@@ -535,6 +535,10 @@ def body_paragraphs(s: Session, draft_id: UUID) -> list[Paragraph]:
 def export_blockers(s: Session, draft_id: UUID) -> list[Blocker]:
     """匯出前一律重新驗證，不信任先前存的結果。"""
     out: list[Blocker] = [Blocker(0, r, 0, "draft") for r in draft_reasons(s, draft_id)]
+    from app.header_extract import header_unverified  # 函式內 import，避免循環
+    case_id = s.get(Round, s.get(Draft, draft_id).round_id).case_id
+    if header_unverified(s, case_id):  # 從對方書狀自動帶入的狀頭還沒核對（設計 6.6）
+        out.append(Blocker(0, "header_unverified", 0, "draft"))
     cache: dict = {}  # 可用金額同一輪只查一次
     statement = statement_of(s, draft_id)
     if statement is not None and (statement.text or "").strip():

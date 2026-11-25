@@ -11,6 +11,7 @@ import EvidenceNotesSection from '../components/EvidenceNotesSection'
 import HealthTab from '../components/HealthTab'
 import JudgmentSearchTab from '../components/JudgmentSearchTab'
 import OcrStatus from '../components/OcrStatus'
+import HeaderAutoNotice from '../components/HeaderAutoNotice'
 import OpponentUploadBox from '../components/OpponentUploadBox'
 import RoundAutomationStatus from '../components/RoundAutomationStatus'
 import PageCheckPanel from '../components/PageCheckPanel'
@@ -746,6 +747,14 @@ export default function CaseDetail() {
         <div role="tabpanel" aria-label={label} className="space-y-6">
           {tab === 'info' && (
             <>
+              <HeaderAutoNotice caseId={caseId} auto={data.header_auto ?? {}} parties={data.parties}
+                missing={data.documents.some((d) => d.kind === 'opponent_brief')
+                  ? (['court', 'case_number', 'division', 'cause'] as const).filter((f) => !data.header[f]) : []}
+                unverified={!!data.header_unverified} canVerify={canReview} onVerified={load} onError={setError}
+                onOpenDocument={(id) => {
+                  const first = data.documents.find((d) => d.id === id)?.pages[0]
+                  if (first) setCheckPage(first.id)
+                }} />
               <HeaderSection data={data} options={options} draft={headerDraft} setDraft={setHeaderDraft}
                 onSaved={saved} onError={setError} />
               <PartiesSection data={data} options={options} draft={partyDraft} setDraft={setPartyDraft}

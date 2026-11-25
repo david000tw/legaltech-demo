@@ -17,6 +17,7 @@ export const REASON_LABELS: Record<string, (arg: string) => string> = {
   citation_failed: (a) => `引用 ${a} 驗證失敗`,
   judgment_unconfirmed: (a) => `${a}：打開原文後，按該段「已審」一併確認`,
   judgment_not_opened: (a) => `還要先看原文（${a}）`,
+  header_unverified: () => '從對方書狀自動帶入的狀頭還沒核對：請到案件資料分頁按「狀頭核對無誤」',
   unknown_code: () => '代碼不在本輪候選清單',
   quote_not_found: () => '引文不是逐字出自來源',
   quote_too_short: () => '引文少於 15 字',

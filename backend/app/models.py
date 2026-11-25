@@ -132,6 +132,8 @@ class Case(Base):
     created_at: Mapped[datetime] = _created()
     automation: Mapped[str] = mapped_column(String(10), default="auto", server_default="auto")  # 設計 6.1
     notes_auto_fingerprint: Mapped[str | None] = mapped_column(String(64))  # 卷證說明最後一次自動（或手動）開始時的輸入
+    # 從對方書狀自動帶入的狀頭欄位（設計 6.6）：{欄位: {document_id, page_no, verified_by, verified_bar, verified_at}}
+    header_auto: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
 
 
 class CaseParty(Base):
@@ -142,6 +144,10 @@ class CaseParty(Base):
         _enum("alignment", ALIGNMENTS, "ck_party_alignment"),
         _tenant_key("case_parties"),
         _tfk("case_id", "cases", "CASCADE"),
+        # 與 documents.filed_by_party_id 互相指向：這一條延後建立，表的排序才不會成環（設計 6.6）
+        ForeignKeyConstraint(["firm_id", "auto_document_id"], ["documents.firm_id", "documents.id"],
+                             ondelete="SET NULL (auto_document_id)", use_alter=True,
+                             name="case_parties_firm_id_auto_document_id_fkey"),
     )
     id: Mapped[uuid.UUID] = _pk()
     firm_id: Mapped[uuid.UUID] = _firm()
@@ -152,6 +158,9 @@ class CaseParty(Base):
     alignment: Mapped[str] = mapped_column(String(20))
     legal_rep: Mapped[str | None] = mapped_column(String(200))  # 法定代理人
     position_note: Mapped[str | None] = mapped_column(Text)  # 立場說明，例如「同意分割，但爭執遺產範圍」
+    # 從對方書狀自動帶入的對造（設計 6.6）：來源文件與是否已由律師核對
+    auto_document_id: Mapped[uuid.UUID | None] = _ref(nullable=True)
+    auto_verified: Mapped[bool] = _flag()
 
 
 class Round(Base):

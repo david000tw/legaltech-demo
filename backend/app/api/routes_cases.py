@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 from sqlalchemy import func, select
 
-from app.auth import CurrentMember, current_member
+from app.auth import CurrentMember, current_member, require_lawyer
 from app.case_types import (
     BRIEF_KINDS, allowed_brief_kinds, default_brief_kind,
     ALIGNMENT_LABEL, ALIGNMENTS, CASE_TYPES, DEFAULT_CASE_TYPE, PARTY_ROLES, brief_title, case_type_of, default_addressee,
@@ -18,6 +18,7 @@ from app.db import CASE_LOCK, tenant_session
 from app.ingest.extract import UnreadableFile, UnsupportedFile, file_ext
 from app.ingest.service import current_page_text, ingest_document
 from app.automation import decide
+from app.header_extract import header_unverified, verify_header
 from app.automation import run as automation
 from app.automation.placement import (
     PlacementRule, opponent_target, place_opponent_upload, round_accepts_upload,
@@ -108,7 +109,18 @@ def _target_json(t) -> dict:
 
 def _party_json(p: CaseParty) -> dict:
     return {"id": str(p.id), "seq": p.seq, "name": p.name, "role": p.role, "alignment": p.alignment,
-            "legal_rep": p.legal_rep, "position_note": p.position_note}
+            "legal_rep": p.legal_rep, "position_note": p.position_note,
+            "auto": p.auto_document_id is not None, "auto_verified": p.auto_verified}
+
+
+def _header_auto_json(s, case: Case) -> dict:
+    """自動帶入的欄位：來源（檔名、頁碼）與是否已核對（設計 6.6）。"""
+    out = {}
+    for name, entry in (case.header_auto or {}).items():
+        doc = s.get(Document, UUID(entry["document_id"])) if entry.get("document_id") else None
+        out[name] = {"document_id": entry.get("document_id"), "filename": doc.filename if doc else None,
+                     "page_no": entry.get("page_no"), "verified": entry.get("verified_by") is not None}
+    return out
 
 
 def case_parties(s, case_id) -> list[CaseParty]:
@@ -141,12 +153,31 @@ def create_case(body: CaseBody, m: CurrentMember = Depends(current_member)) -> d
 def patch_case(case_id: UUID, body: CasePatch, m: CurrentMember = Depends(current_member)) -> dict:
     with tenant_session(m.firm_id) as s:
         case = _case_or_404(s, case_id)
+        changed = []
         for key, value in body.model_dump(exclude_unset=True).items():
             if key in ("title", "our_side", "case_type", "automation") and value is None:
                 continue  # 必填欄位不能清空
-            setattr(case, key, [] if key == "attorneys" and value is None else value)
+            new = [] if key == "attorneys" and value is None else value
+            if getattr(case, key) != new:
+                changed.append(key)
+            setattr(case, key, new)
+        # 律師親手改過的自動帶入欄位視為已核對（值真的變了才算；助理的修改不算，設計 6.6）
+        auto_changed = tuple(k for k in changed if k in (case.header_auto or {}))
+        if auto_changed and m.role == "lawyer" and m.bar_verified:
+            verify_header(s, case_id, m.id, m.bar_number, auto_changed)
         s.flush()
         return _case_summary(case)
+
+
+@router.post("/cases/{case_id}/header-verify")
+def header_verify(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    """「狀頭核對無誤」：確認目前所有自動帶入、還沒核對的狀頭欄位與對造當事人（設計 6.6）。"""
+    require_lawyer(m)
+    with tenant_session(m.firm_id) as s:
+        _case_or_404(s, case_id)
+        verify_header(s, case_id, m.id, m.bar_number)
+        s.flush()
+        return {"header_unverified": header_unverified(s, case_id)}
 
 
 @router.put("/cases/{case_id}/parties")
@@ -174,6 +205,9 @@ def put_parties(case_id: UUID, body: Annotated[list[PartyBody], Field(max_length
             if p is None:
                 p = CaseParty(firm_id=m.firm_id, case_id=case_id)
                 s.add(p)
+            if (p.auto_document_id is not None and (p.name != b.name or p.role != b.role)
+                    and m.role == "lawyer" and m.bar_verified):
+                p.auto_verified = True  # 律師改過自動帶入的對造：視為已核對（設計 6.6）
             p.seq, p.name, p.role, p.alignment = seq, b.name, b.role, b.alignment
             p.legal_rep, p.position_note = b.legal_rep, b.position_note
             out.append(p)
@@ -255,6 +289,8 @@ def get_case(case_id: UUID, request: Request, background: BackgroundTasks,
             # 卷證說明、大事記的 AI 工作狀態（前端據此輪詢；設計 5.6、5.7）
             "jobs": {step: job_json(latest_job(s, case_id, None, step)) for step in ("evidence_notes", "timeline")},
             "automation": case.automation,
+            "header_auto": _header_auto_json(s, case),
+            "header_unverified": header_unverified(s, case_id),
             "opponent_target": _target_json(opponent_target(s, case)),
         }
 

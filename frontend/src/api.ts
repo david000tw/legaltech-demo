@@ -62,7 +62,9 @@ export type CaseHeader = { court: string | null; case_number: string | null; div
 // 歸屬：我方、對造、立場與我方相同（AI 不得反駁立場相同者）
 export type Alignment = 'ours' | 'opposing' | 'aligned'
 export type Party = { id: string; seq: number; name: string; role: string; alignment: Alignment; legal_rep: string | null
-  position_note: string | null }
+  position_note: string | null
+  auto?: boolean; auto_verified?: boolean }  // 從對方書狀自動加入的對造、是否已核對（設計 6.6）
+export type HeaderAutoField = { document_id: string | null; filename: string | null; page_no: number | null; verified: boolean }
 export type PartyInput = { id?: string; name: string; role: string; alignment: Alignment; legal_rep: string | null
   position_note: string | null }
 export type Procedure = 'civil' | 'family'
@@ -80,7 +82,9 @@ export type CaseDetail = CaseSummary & { header: CaseHeader; parties: Party[]; p
   // 沒有進行中辨識工作的待辨識頁數（「開始辨識（N 頁）」）
   pending_ocr_pages?: number
   automation?: AutomationMode  // 案件的自動化程度（設計 6.1）
-  opponent_target?: OpponentTarget }  // 上傳對方書狀會放進哪一輪（設計 6.2）
+  opponent_target?: OpponentTarget  // 上傳對方書狀會放進哪一輪（設計 6.2）
+  header_auto?: Record<string, HeaderAutoField>  // 從對方書狀自動帶入的狀頭欄位（設計 6.6）
+  header_unverified?: boolean }
 export type AutomationMode = 'auto' | 'pause' | 'manual'
 export type OpponentTarget = { round_id: string | null; seq: number; new: boolean; brief_kind: BriefKind }
 // 新步驟（卷證說明、大事記、健檢）的原文出處（設計 5.1）：label 讀取時才算（證物可以改號）
@@ -221,6 +225,9 @@ export const getCaseOptions = () => req<CaseOptions>('/case-options')
 export const createCase = (body: CaseInput) => req<CaseSummary>('/cases', json('POST', body))
 export const patchCase = (id: string, body: Partial<CaseInput> & { automation?: AutomationMode }) =>
   req<CaseSummary>(`/cases/${id}`, json('PATCH', body))
+// 「狀頭核對無誤」：確認所有自動帶入、還沒核對的狀頭欄位與對造（限律師，設計 6.6）
+export const verifyHeader = (caseId: string) =>
+  req<{ header_unverified: boolean }>(`/cases/${caseId}/header-verify`, json('POST'))
 // 依序整批替換：帶 id 的保留原列，沒列到的刪除（其遞狀人變空白）
 export const putParties = (id: string, parties: PartyInput[]) => req<Party[]>(`/cases/${id}/parties`, json('PUT', parties))
 export const getCase = (id: string) => req<CaseDetail>(`/cases/${id}`)

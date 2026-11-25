@@ -47,7 +47,9 @@ def _automation_off(request, monkeypatch):
     if request.node.get_closest_marker("automation_real"):
         return
     from app.automation import decide
+    from app.automation import run as automation
     monkeypatch.setattr(decide, "mode_of", lambda s, case: "manual")
+    monkeypatch.setattr(automation, "_apply_header", lambda firm_id, document_ids: None)  # 讀狀頭（設計 6.6）也不做
 
 
 @pytest.fixture(autouse=True)
