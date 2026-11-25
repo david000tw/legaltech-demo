@@ -20,6 +20,10 @@ from app.models import Document, Exhibit, Page
 from app.ocr.state import needs_check
 from app.text_norm import normalize_text, source_found
 
+# 判決段落類型的中文名稱（原文畫面標題、審核紀錄共用）
+PASSAGE_LABEL = {"court_reasoning": "法院判斷段", "party_claim": "當事人主張段", "main_text": "主文",
+                 "other": "其他段落"}
+
 REASON_LABEL = {
     "quote_not_found": "未找到原文",
     "date_not_in_quote": "日期不在原文摘錄裡",

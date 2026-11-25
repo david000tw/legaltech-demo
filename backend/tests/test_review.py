@@ -99,9 +99,10 @@ def test_cannot_review_with_failed_citation(env):
 
 
 def test_cannot_review_with_unconfirmed_judgment(env):
+    """沒打開過判決原文：「已審」擋下，代碼改成 judgment_not_opened（設計 5.1，原本是 judgment_unconfirmed）。"""
     c = env["client_for"]("lawyer@a.test")
     r = post_review(env, c, env["good"])
-    assert r.status_code == 409 and "judgment_unconfirmed:J1" in r.text
+    assert r.status_code == 409 and "judgment_not_opened:J1" in r.text
 
 
 def test_review_refusal_returns_structured_reasons(env):

@@ -25,6 +25,7 @@ from app.review.service import (
 )
 from app.review.insert import InsertRejected, insert_pin
 from app.review.views import record_judgment_view
+from app.sources import PASSAGE_LABEL
 from app.text_norm import find_quote
 from app.statements import BODY_LABEL, STATEMENT_LABEL, claim_value, statement_of
 from app.storage import LocalStorage
@@ -37,8 +38,6 @@ from app.ocr.state import needs_check
 from app.verify.citations import body_paragraphs, export_blockers, is_removed, paragraph_citations
 
 router = APIRouter(prefix="/api")
-PASSAGE_LABEL = {"court_reasoning": "法院判斷段", "party_claim": "當事人主張段", "main_text": "主文",
-                 "other": "其他段落"}
 
 
 def _get_or_404(s, model, obj_id, what: str):

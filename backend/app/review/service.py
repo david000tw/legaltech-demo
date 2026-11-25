@@ -10,11 +10,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import CurrentMember
-from app.models import Citation, Draft, Exhibit, Page, PageText, Paragraph, ReviewEvent, Round
+from app.models import (
+    Citation, Draft, Exhibit, Judgment, JudgmentPassage, Page, PageText, Paragraph, ReviewEvent, Round, SupportCheck,
+)
 from app.pipeline.drafting import replace_paragraph, reset_review
 from app.numbering import strip_heading_number
 from app.render import paragraph_version, render_text
-from app.verify.citations import paragraph_blockers, verify_citation
+from app.review.views import has_opened
+from app.sources import PASSAGE_LABEL
+from app.verify.citations import paragraph_blockers, paragraph_citations, verify_citation
+
+ACCEPT_REASON = "段落審核時一併接受"
 
 
 class ReviewRuleError(Exception):
@@ -102,8 +108,42 @@ def confirm_amount(s: Session, paragraph_id: UUID, amount: int, member: CurrentM
     return p
 
 
-def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version: str) -> Paragraph:
-    """version 是律師畫面上那一版的指紋；內容已變（別人改過、改了原證號）就不能記成已審。"""
+def _absorb(s: Session, p: Paragraph, member: CurrentMember, absorb_partial: bool
+            ) -> tuple[list[Citation], list[tuple[Citation, SupportCheck]], list[str]]:
+    """把「已審」可以一併處理的阻擋分出來（設計 5.1）：
+    判決引用＝本人在本草稿打開過被引用的那一段；部分支持＝說明已顯示在段落下方。其餘照舊阻擋。"""
+    from app.support import service as support  # 函式內 import，避免循環
+    remaining: list[str] = []
+    judgments: dict[str, Citation] = {}
+    partial_codes: set[str] = set()
+    cites = {c.code: c for c in paragraph_citations(s, p.id)}
+    for reason in paragraph_blockers(s, p):
+        if reason == "unreviewed":
+            continue
+        kind, _, code = reason.partition(":")
+        c = cites.get(code)
+        if kind == "judgment_unconfirmed" and c is not None:
+            if c.judgment_passage_id and has_opened(s, p.draft_id, member.id, c.judgment_passage_id):
+                judgments[code] = c
+            else:
+                remaining.append(f"judgment_not_opened:{code}")
+        elif kind == "support_partial" and absorb_partial and c is not None:
+            partial_codes.add(code)
+        else:
+            remaining.append(reason)
+    partials: list[tuple[Citation, SupportCheck]] = []
+    cache: dict = {}
+    for code in sorted(partial_codes):
+        _, row = support.check_for(s, p, cites[code], cache)
+        if row is not None:
+            partials.append((cites[code], row))
+    return list(judgments.values()), partials, remaining
+
+
+def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version: str, *,
+                  absorb_partial: bool = True) -> Paragraph:
+    """version 是律師畫面上那一版的指紋；內容已變（別人改過、改了原證號）就不能記成已審。
+    打開過原文的判決引用與「部分支持」在同一交易裡一併確認（設計 5.1）；任何一項不成立就整個不寫。"""
     _require_lawyer(member)
     p = lock_paragraph(s, paragraph_id)
     if p is None:
@@ -111,9 +151,25 @@ def mark_reviewed(s: Session, paragraph_id: UUID, member: CurrentMember, version
     rendered = render_text(s, p)
     if paragraph_version(s, p, rendered) != version:
         raise ReviewRuleError("段落內容已變更，請重新載入後再審核")
-    blockers = [b for b in paragraph_blockers(s, p) if b != "unreviewed"]
+    judgments, partials, blockers = _absorb(s, p, member, absorb_partial)
     if blockers:
         raise ReviewBlocked(blockers)
+    bar = member.bar_number or ""
+    rows = {row.id: row for _, row in partials}
+    if rows:  # 段落已鎖；檢查列依 id 排序上鎖，與放行、支持度工作的順序一致
+        list(s.scalars(select(SupportCheck).where(SupportCheck.id.in_(sorted(rows)))
+                       .order_by(SupportCheck.id).with_for_update().execution_options(populate_existing=True)))
+    for c in judgments:
+        c.lawyer_confirmed, c.confirmed_by = True, member.id
+        passage = s.get(JudgmentPassage, c.judgment_passage_id)
+        title = f"{s.get(Judgment, passage.judgment_id).citation}（{PASSAGE_LABEL[passage.passage_type]}）"
+        _event(s, p, member, "confirm_citation", after=f"{c.code}｜{title}｜律師證號 {bar}")
+    now = datetime.now(timezone.utc)
+    for c, row in partials:
+        if row.released_at is None:
+            row.released_by, row.released_bar_number, row.released_at = member.id, member.bar_number, now
+            row.release_reason = ACCEPT_REASON
+        _event(s, p, member, "release_support", after=f"{c.code}｜{ACCEPT_REASON}｜律師證號 {bar}")
     p.status, p.reviewed_by, p.reviewed_bar_number = "reviewed", member.id, member.bar_number
     p.reviewed_at = datetime.now(timezone.utc)
     p.source_notice = None  # 律師重新審過「依據頁已修正」的段落
