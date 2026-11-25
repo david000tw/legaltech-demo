@@ -22,7 +22,8 @@ NEW_BRIEF = "有新上傳的書狀"
 
 @dataclass(frozen=True)
 class Wait:
-    """自動流程停下來在等什麼；code 給畫面選出口按鈕，hint 只用在證據辨識（confirm_ocr／resume_ocr／retry_failed）。"""
+    """自動流程停下來在等什麼；code 給畫面選出口按鈕。hint：證據辨識用 confirm_ocr／resume_ocr／retry_failed；
+    卷證說明該跑卻沒人啟動時是 start_notes（kick_round 會先去啟動它，不會一直空等）。"""
     code: Literal["opponent_ocr", "evidence_ocr", "evidence_notes_running", "new_brief", "blocked"]
     message: str
     document_id: UUID | None = None
@@ -127,8 +128,10 @@ def next_round_action(s: Session, round_id: UUID) -> RoundAction | Wait | None:
     wait = evidence_wait(s, rnd.case_id)
     if wait is not None:
         return wait
-    if _job_running(s, rnd.case_id, "evidence_notes") or next_case_action(s, rnd.case_id) == "evidence_notes":
+    if _job_running(s, rnd.case_id, "evidence_notes"):
         return Wait("evidence_notes_running", NOTES_WAIT)
+    if next_case_action(s, rnd.case_id) == "evidence_notes":  # 該跑卻還沒人啟動（例如證據是手動模式時上傳的）
+        return Wait("evidence_notes_running", NOTES_WAIT, hint="start_notes")
     return "draft"
 
 

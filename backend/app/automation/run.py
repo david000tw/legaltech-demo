@@ -60,10 +60,19 @@ def _run_stage(stage: str, firm_id: UUID, round_id: UUID, member_id: UUID | None
         on_stage_end(s, round_id, stage, token)
 
 
-def kick_round(firm_id: UUID, round_id: UUID, settings, provider_factory, member_id: UUID | None = None) -> None:
-    """依判斷一路往下跑，直到要等或沒有事；開始時被別人搶先（RoundBusy）就安靜結束。"""
+def kick_round(firm_id: UUID, round_id: UUID, settings, provider_factory, member_id: UUID | None = None, *,
+               _via_case: bool = False) -> None:
+    """依判斷一路往下跑，直到要等或沒有事；開始時被別人搶先（RoundBusy）就安靜結束。
+    等的是「該跑卻沒人啟動」的卷證說明：先去啟動它（跑完 kick_case 會再叫回這一輪）。"""
     from app.pipeline.run import RoundBusy, RoundRule, reset_round, start_stage
     for _ in range(MAX_ACTIONS):
+        with tenant_session(firm_id) as s:
+            action = decide.next_round_action(s, round_id)
+            rnd = s.get(Round, round_id)
+            case_id, who = rnd.case_id, member_id or rnd.auto_by
+        if isinstance(action, decide.Wait) and action.hint == "start_notes" and not _via_case:
+            kick_case(firm_id, case_id, settings, provider_factory, who)
+            return
         with tenant_session(firm_id) as s:
             action = decide.next_round_action(s, round_id)
             if action is None or isinstance(action, decide.Wait):
@@ -113,7 +122,7 @@ def kick_case(firm_id: UUID, case_id: UUID, settings, provider_factory, member_i
         waiting = s.scalars(select(Round.id).where(Round.case_id == case_id, Round.auto_next == "draft")
                             .order_by(Round.seq)).all()
     for rid in waiting:
-        kick_round(firm_id, rid, settings, provider_factory)
+        kick_round(firm_id, rid, settings, provider_factory, _via_case=True)
 
 
 def _apply_header(firm_id: UUID, document_ids: list[UUID]) -> None:
@@ -160,4 +169,9 @@ def after_pages_changed(firm_id: UUID, document_ids: list[UUID], member_id: UUID
 def catch_up(s: Session, case_id: UUID) -> list[UUID]:
     """打開頁面時的補做（伺服器重啟後接續）：只看已排定、而且現在該開始的輪次。不加鎖、不執行。"""
     rounds = s.scalars(select(Round.id).where(Round.case_id == case_id, Round.auto_next.is_not(None))).all()
-    return [rid for rid in rounds if isinstance(decide.next_round_action(s, rid), str)]
+    out = []
+    for rid in rounds:
+        action = decide.next_round_action(s, rid)
+        if isinstance(action, str) or (isinstance(action, decide.Wait) and action.hint == "start_notes"):
+            out.append(rid)
+    return out

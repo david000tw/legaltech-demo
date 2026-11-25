@@ -141,7 +141,7 @@ export type RoundDetail = { id: string; seq: number; status: RoundStatus; error:
   automation?: AutomationView }  // 自動跑到哪、在等什麼（設計 6.2）
 export type AutomationWait = { code: 'opponent_ocr' | 'evidence_ocr' | 'evidence_notes_running' | 'new_brief' | 'blocked'
   message: string; document_id: string | null; page_id: string | null
-  hint: 'confirm_ocr' | 'resume_ocr' | 'retry_failed' | null }
+  hint: 'confirm_ocr' | 'resume_ocr' | 'retry_failed' | 'start_notes' | null }
 export type AutomationView = { mode: AutomationMode; auto_next: 'extract' | 'draft' | null
   running: 'extract' | 'draft' | null; wait: AutomationWait | null; failed_stage: string | null }
 export type RoundSettings = { narrative?: string | null; joint_liability?: boolean; provisional_execution?: boolean

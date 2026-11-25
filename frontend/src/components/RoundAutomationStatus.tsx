@@ -26,10 +26,15 @@ export default function RoundAutomationStatus({ roundId, automation, onAction, o
       {wait.code === 'opponent_ocr' && wait.page_id && (
         <button type="button" className={BTN} onClick={() => onOpenPage(wait.page_id as string)}>看那一頁</button>
       )}
-      {wait.code === 'evidence_ocr' && docId && wait.hint && (
+      {wait.code === 'evidence_notes_running' && (
+        <button type="button" className={BTN} onClick={() => void onAction(() => api.draftRound(roundId, { force: true }))}>
+          先起草（不等卷證說明）
+        </button>
+      )}
+      {wait.code === 'evidence_ocr' && docId && wait.hint && wait.hint !== 'start_notes' && (
         <button type="button" className={BTN}
-          onClick={() => void onAction(() => api.startDocumentOcr(docId, OCR_EXIT[wait.hint!][1]))}>
-          {OCR_EXIT[wait.hint][0]}
+          onClick={() => void onAction(() => api.startDocumentOcr(docId, OCR_EXIT[wait.hint as keyof typeof OCR_EXIT][1]))}>
+          {OCR_EXIT[wait.hint as keyof typeof OCR_EXIT][0]}
         </button>
       )}
       {wait.code === 'evidence_ocr' && (

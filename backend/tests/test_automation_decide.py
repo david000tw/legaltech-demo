@@ -153,8 +153,9 @@ def test_draft_waits_for_running_notes(firm):
 
 
 def test_draft_waits_for_notes_that_are_due(firm):
+    """該跑還沒人啟動：hint start_notes，kick_round 會先去啟動卷證說明（審查 #1）。"""
     _, rid = _round(firm, auto_next="draft", status="extracted", evidence={"01_研判表.txt": "研判結果：被告未讓路。"})
-    assert _action(firm, rid) == Wait("evidence_notes_running", "等卷證說明完成")
+    assert _action(firm, rid) == Wait("evidence_notes_running", "等卷證說明完成", hint="start_notes")
 
 
 def test_draft_starts_when_evidence_ready(firm):

@@ -355,3 +355,28 @@ def test_ignore_new_briefs_drafts_without_reextract(env):
     r = env["c"]["lawyer"].post(f"/api/rounds/{rid}/draft", json={"ignore_new_briefs": True})
     assert r.status_code == 202
     assert _only_round(env).status == "drafted" and _steps(env).count("claims") == 1
+
+
+def test_notes_due_but_never_started_do_not_stall_the_draft(env):
+    """審查 #1：證據是在「每步自己按」時上傳的（沒有卷證說明），之後改成全自動：起草不能永遠等卷證說明。"""
+    _mode(env, "manual")
+    _evidence(env)
+    assert _steps(env) == []
+    _mode(env, "auto")
+    _brief(env)
+    rnd = _only_round(env)
+    assert rnd.status == "drafted", rnd.status
+    assert _steps(env)[:2] == ["claims", "evidence_notes"]
+
+
+def test_page_open_starts_notes_an_armed_round_waits_for(env):
+    _mode(env, "manual")
+    _evidence(env)
+    _brief(env)
+    rid = _only_round(env).id
+    assert env["c"]["lawyer"].post(f"/api/rounds/{rid}/extract").status_code == 202  # 律師自己拆解
+    with tenant_session(env["firm"]) as s:  # 之後改成全自動、排定起草（例如按了「開始起草」又關掉頁面）
+        s.get(Case, env["case_id"]).automation = "auto"
+        s.get(Round, rid).auto_next = "draft"
+    env["c"]["assistant"].get(f"/api/rounds/{rid}")
+    assert _only_round(env).status == "drafted"

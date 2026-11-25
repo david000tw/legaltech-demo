@@ -61,6 +61,12 @@ describe('RoundAutomationStatus', () => {
     expect(api.draftRound).toHaveBeenCalledWith('r1', { ignoreNewBriefs: true })
   })
 
+  it('lets the lawyer draft without waiting for evidence notes (審查 #1)', async () => {
+    show(view({ wait: wait('evidence_notes_running', { message: '等卷證說明完成', hint: 'start_notes' }) }))
+    await userEvent.click(screen.getByRole('button', { name: '先起草（不等卷證說明）' }))
+    expect(api.draftRound).toHaveBeenCalledWith('r1', { force: true })
+  })
+
   it('only explains a rule that stopped automation', () => {
     show(view({ auto_next: null, wait: wait('blocked', { message: '沒有勾選任何主張' }) }))
     expect(screen.getByText('等待中：沒有勾選任何主張')).toBeInTheDocument()
