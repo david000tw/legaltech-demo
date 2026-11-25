@@ -22,7 +22,7 @@ describe('ExportButton reason labels', () => {
   })
 
   it('labels the same-code different-quotes conflict', () => {
-    expect(reasonLabel('citation_quote_conflict:J1')).toBe('同一判決引文不一致：J1 在同一段出現了兩段不同的引文，系統只保留第一段，請改寫或拆開')
+    expect(reasonLabel('citation_quote_conflict:J1')).toBe('同一引用的引文不一致：J1 在同一段出現了兩段不同的引文，系統只保留第一段，請改寫或拆開')
     expect(reasonLabel('quote_conflict')).toBe('同一代碼出現了不同的引文')
   })
 })
