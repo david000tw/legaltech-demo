@@ -73,7 +73,7 @@ describe('DraftEditor', () => {
     vi.mocked(api.verifyPage).mockResolvedValue({ page_id: 'p2', document_id: 'd2', label: '原證2 第1頁',
       ocr_state: 'done', ocr_error: null, text: source.text, version: 1, source: 'ai_ocr', needs_check: false,
       verified: { by_name: '王律師', at: null }, alerts: [], has_image: true, can_edit: true, can_verify: false,
-      blank_unconfirmed: false })
+      can_save_verify: true, blank_unconfirmed: false })
     renderEditor()
     expect(await screen.findByText('第 1 段：E2 的頁尚未對照原圖')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /E2/ }))

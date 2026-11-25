@@ -16,7 +16,7 @@ const alert = (over: Partial<api.OcrAlert>): api.OcrAlert => ({ kind: 'mismatch'
 const PAGE: api.PageOcr = {
   page_id: 'p1', document_id: 'd1', label: '原證2 第1頁', ocr_state: 'done', ocr_error: null, text: TEXT, version: 2,
   source: 'ai_ocr', needs_check: true, verified: null, has_image: true, can_edit: true, can_verify: true,
-  blank_unconfirmed: false,
+  can_save_verify: true, blank_unconfirmed: false,
   alerts: [alert({}), alert({ kind: 'bad_date', start: 21, end: 31, message: '日期不存在：民國114年2月30日', box: null,
     color: 'red', proof_text: null })],
 }
@@ -99,18 +99,45 @@ describe('PageCheckPanel', () => {
     expect(screen.getByRole('button', { name: '儲存並標為已對照' })).toBeEnabled()
   })
 
-  it('unsaved edits on a page that cannot be verified yet point to 儲存', async () => {
+  it('failed page: typed text can be saved and marked verified in one step', async () => {
     vi.mocked(api.getPageOcr).mockResolvedValue({ ...PAGE, ocr_state: 'failed', ocr_error: 'refusal: 模型拒絕回答',
       text: null, version: null, needs_check: false, can_verify: false, alerts: [] })
+    vi.mocked(api.savePageText).mockResolvedValue({ ...PAGE, version: 1, needs_check: false })
     render(<PageCheckPanel pageId="p1" canReview onChanged={vi.fn()} />)
-    fireEvent.change(await screen.findByRole('textbox', { name: '辨識文字' }), { target: { value: '手動輸入的內容' } })
+    const box = await screen.findByRole('textbox', { name: '辨識文字' })
+    expect(screen.getByRole('button', { name: '儲存並標為已對照' })).toBeDisabled()  // 還沒輸入
+    expect(screen.getByRole('button', { name: '已對照原圖' })).toBeDisabled()  // 沒有版本可勾
+    fireEvent.change(box, { target: { value: '手動輸入的內容' } })
+    expect(screen.getByText('有未儲存的修改：請按「儲存並標為已對照」')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '儲存並標為已對照' }))
+    expect(api.savePageText).toHaveBeenCalledWith('p1', '手動輸入的內容', null, true)
+  })
+
+  it('already verified page: an edit can be saved and verified again in one step', async () => {
+    vi.mocked(api.getPageOcr).mockResolvedValue({ ...PAGE, needs_check: false, can_verify: false,
+      verified: { by_name: '王律師', at: '2026-11-24T10:00:00+00:00' } })
+    vi.mocked(api.savePageText).mockResolvedValue({ ...PAGE, version: 3, needs_check: false })
+    render(<PageCheckPanel pageId="p1" canReview onChanged={vi.fn()} />)
+    const box = await screen.findByRole('textbox', { name: '辨識文字' })
+    expect(screen.getByRole('button', { name: '已對照原圖' })).toBeDisabled()  // 已經對照過，不用再勾
+    fireEvent.change(box, { target: { value: TEXT + '整' } })
+    await userEvent.click(screen.getByRole('button', { name: '儲存並標為已對照' }))
+    expect(api.savePageText).toHaveBeenCalledWith('p1', TEXT + '整', 2, true)
+  })
+
+  it('save-and-verify stays disabled when the server says it is not allowed (proofreader still comparing)', async () => {
+    vi.mocked(api.getPageOcr).mockResolvedValue({ ...PAGE, ocr_state: 'read', can_verify: false,
+      can_save_verify: false })
+    render(<PageCheckPanel pageId="p1" canReview onChanged={vi.fn()} />)
+    fireEvent.change(await screen.findByRole('textbox', { name: '辨識文字' }), { target: { value: TEXT + '整' } })
+    expect(screen.getByRole('button', { name: '儲存並標為已對照' })).toBeDisabled()
     expect(screen.getByText('有未儲存的修改：請先按「儲存」，再對照原圖')).toBeInTheDocument()
-    expect(screen.queryByText('有未儲存的修改：請按「儲存並標為已對照」')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '儲存' })).toBeEnabled()
   })
 
   it('verify disabled when can_verify is false', async () => {
-    vi.mocked(api.getPageOcr).mockResolvedValue({ ...PAGE, ocr_state: 'read', can_verify: false })
+    vi.mocked(api.getPageOcr).mockResolvedValue({ ...PAGE, ocr_state: 'read', can_verify: false,
+      can_save_verify: false })
     render(<PageCheckPanel pageId="p1" canReview onChanged={vi.fn()} />)
     expect(await screen.findByRole('button', { name: '已對照原圖' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '儲存並標為已對照' })).toBeDisabled()

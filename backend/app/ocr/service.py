@@ -75,6 +75,9 @@ def page_ocr_json(s: Session, page: Page, member: CurrentMember) -> dict:
             "has_image": bool(page.image_key) or file_ext(doc.filename) == ".pdf",
             "can_edit": page.ocr_state != "none",
             "can_verify": _is_lawyer(member) and needs_check(pt) and not proofing,
+            # 「儲存並標為已對照」：存新版本並同時對照。不需要目前版本待對照——失敗頁手動輸入（還沒有版本）、
+            # 已對照的頁改字（新版本又要對照）都該能一步完成；檔案本身的文字不能改、校對員還在比對時不行
+            "can_save_verify": _is_lawyer(member) and page.ocr_state != "none" and not proofing,
             "blank_unconfirmed": page.blank_confirmed_at is None and any(a["kind"] == "blank" for a in alerts)}
 
 

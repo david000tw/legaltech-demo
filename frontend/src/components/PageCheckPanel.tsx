@@ -129,7 +129,8 @@ export default function PageCheckPanel({ pageId, canReview, onChanged }: {
             onClick={() => run(() => api.savePageText(pageId, text, data.version, false))}>儲存</button>
         )}
         {canReview && data.can_edit && (
-          <button type="button" disabled={busy || !data.can_verify || !dirty} className={BTN_SECONDARY}
+          // can_save_verify（不是 can_verify）：失敗頁手動輸入、已對照的頁改字，都能一步儲存並對照
+          <button type="button" disabled={busy || !data.can_save_verify || !dirty} className={BTN_SECONDARY}
             onClick={() => run(() => api.savePageText(pageId, text, data.version, true))}>儲存並標為已對照</button>
         )}
         {canReview && (
@@ -139,7 +140,7 @@ export default function PageCheckPanel({ pageId, canReview, onChanged }: {
             onClick={() => run(() => api.verifyPage(pageId, data.version as number))}>已對照原圖</button>
         )}
         {data.can_edit && dirty && (
-          <span className="text-xs text-amber-700">{canReview && data.can_verify
+          <span className="text-xs text-amber-700">{canReview && data.can_save_verify
             ? '有未儲存的修改：請按「儲存並標為已對照」' : '有未儲存的修改：請先按「儲存」，再對照原圖'}</span>
         )}
         {data.blank_unconfirmed && (

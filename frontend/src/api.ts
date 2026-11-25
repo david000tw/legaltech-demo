@@ -46,7 +46,7 @@ export type OcrAlert = { kind: string; start: number; end: number; message: stri
 export type PageOcr = { page_id: string; document_id: string; label: string | null; ocr_state: OcrState
   ocr_error: string | null; text: string | null; version: number | null; source: string | null; needs_check: boolean
   verified: { by_name: string | null; at: string | null } | null; alerts: OcrAlert[]; has_image: boolean
-  can_edit: boolean; can_verify: boolean; blank_unconfirmed: boolean }
+  can_edit: boolean; can_verify: boolean; can_save_verify: boolean; blank_unconfirmed: boolean }
 export type UploadResult = { id: string; page_count: number
   ocr?: { status: OcrJob['status']; pages: number; minutes: number } | null }
 export type Exhibit = { id: string; label: string; prefix: string; number: number; document_id: string;
