@@ -125,6 +125,12 @@ def start_stage(s: Session, round_id: UUID, stage: Stage) -> None:
     s.commit()
 
 
+def reset_needs_confirm(s: Session, round_id: UUID) -> bool:
+    """重新拆解會清掉律師的工作（取消的勾選、已確認的請求項目）：要先問律師。自動重拆也用這個條件（設計 6.2）。"""
+    claims = list(s.scalars(select(Claim).where(Claim.round_id == round_id)))
+    return any(c.confirmed_by is not None for c in claims) or any(not c.selected for c in claims)
+
+
 def reset_round(s: Session, round_id: UUID, confirm: bool) -> None:
     """重新拆解前回到「已建立」：清掉主張（含勾選）、候選與草稿。律師改過勾選或確認過請求項目時要先確認。"""
     rnd = s.get(Round, round_id, with_for_update=True, populate_existing=True)
@@ -132,8 +138,7 @@ def reset_round(s: Session, round_id: UUID, confirm: bool) -> None:
         raise RoundBusy("只有待確認或失敗的輪次可以重新拆解")
     claims = list(s.scalars(select(Claim).where(Claim.round_id == round_id)))
     confirmed = sum(1 for c in claims if c.confirmed_by is not None)
-    unticked = any(not c.selected for c in claims)
-    if not confirm and (confirmed or unticked):
+    if not confirm and reset_needs_confirm(s, round_id):
         what = f"會清除已確認的 {confirmed} 個請求項目" if confirmed else "會清除勾選"
         raise RoundRule("confirm_reset", f"{what}，確定要重新拆解嗎？")
     for model in (Draft, Candidate, Claim):
