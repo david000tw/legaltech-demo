@@ -165,18 +165,25 @@ def patch_case(case_id: UUID, body: CasePatch, m: CurrentMember = Depends(curren
         # 律師親手改過的自動帶入欄位視為已核對（值真的變了才算；助理的修改不算，設計 6.6）
         auto_changed = tuple(k for k in changed if k in auto_fields(case))
         if auto_changed and m.role == "lawyer" and m.bar_verified:
-            verify_header(s, case_id, m.id, m.bar_number, auto_changed)
+            verify_header(s, case_id, m.id, m.bar_number, {k: getattr(case, k) for k in auto_changed})
         s.flush()
         return _case_summary(case)
 
 
+class HeaderVerifyBody(BaseModel):
+    """律師畫面上看到的自動帶入值：欄位 → 值（清空的是 null）、當事人 id → 姓名。"""
+    fields: dict[str, str | None] = Field(default_factory=dict, max_length=20)
+    parties: dict[UUID, str] = Field(default_factory=dict, max_length=50)
+
+
 @router.post("/cases/{case_id}/header-verify")
-def header_verify(case_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
-    """「狀頭核對無誤」：確認目前所有自動帶入、還沒核對的狀頭欄位與對造當事人（設計 6.6）。"""
+def header_verify(case_id: UUID, body: HeaderVerifyBody, m: CurrentMember = Depends(current_member)) -> dict:
+    """「狀頭核對無誤」（設計 6.6）：只確認律師畫面上看到的那些值；頁面打開後才帶入或被改過的仍要再核對，
+    回應的 header_unverified 會是 true。"""
     require_lawyer(m)
     with tenant_session(m.firm_id) as s:
         _case_or_404(s, case_id)
-        verify_header(s, case_id, m.id, m.bar_number)
+        verify_header(s, case_id, m.id, m.bar_number, body.fields, body.parties)
         s.flush()
         return {"header_unverified": header_unverified(s, case_id)}
 

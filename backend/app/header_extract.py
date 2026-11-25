@@ -175,16 +175,17 @@ def header_unverified(s: Session, case_id: UUID) -> bool:
 
 
 def verify_header(s: Session, case_id: UUID, member_id: UUID, bar_number: str | None,
-                  fields: tuple[str, ...] | None = None) -> None:
-    """律師核對：fields 為 None 時確認目前全部未核對的欄位與自動帶入的當事人。"""
+                  fields: dict[str, str | None], parties: dict[UUID, str] | None = None) -> None:
+    """律師核對：只確認律師看到的值（fields：欄位 → 畫面上的值；parties：當事人 id → 畫面上的姓名）。
+    值已經變了、或頁面打開後才自動帶入的，不算看過，仍然未核對。"""
     case = s.get(Case, case_id, with_for_update=CASE_LOCK)
     now = datetime.now(timezone.utc).isoformat()
     auto = dict(case.header_auto or {})
     for name, entry in auto_fields(case).items():
-        if entry.get("verified_by") is None and (fields is None or name in fields):
+        if entry.get("verified_by") is None and name in fields and fields[name] == getattr(case, name):
             entry = {**entry, "verified_by": str(member_id), "verified_bar": bar_number, "verified_at": now}
         auto[name] = entry
     case.header_auto = auto
-    if fields is None:
-        for p in s.scalars(select(CaseParty).where(CaseParty.case_id == case_id, CaseParty.auto_document_id.is_not(None))):
+    for p in s.scalars(select(CaseParty).where(CaseParty.case_id == case_id, CaseParty.auto_document_id.is_not(None))):
+        if parties and parties.get(p.id) == p.name:
             p.auto_verified = True

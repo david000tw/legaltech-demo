@@ -74,6 +74,18 @@ def test_apply_is_idempotent(ctx):
     assert _apply(ctx["firm"], ctx["case_id"], doc) == []
 
 
+def _shown(ctx, client=None):
+    """律師畫面上看到的自動帶入值（跟前端一樣從案件資料組出來）。"""
+    body = (client or ctx["clients"]["lawyer"]).get(f"/api/cases/{ctx['case_id']}").json()
+    return {"fields": {name: f["value"] for name, f in body["header_auto"].items()},
+            "parties": {p["id"]: p["name"] for p in body["parties"] if p["auto"]}}
+
+
+def _verify(ctx, shown=None, client=None):
+    return (client or ctx["clients"]["lawyer"]).post(f"/api/cases/{ctx['case_id']}/header-verify",
+                                                     json=shown if shown is not None else _shown(ctx))
+
+
 def _blocked(ctx):
     with tenant_session(ctx["firm"]) as s:
         return any(b.reason == "header_unverified" and b.scope == "draft" for b in export_blockers(s, ctx["draft_id"]))
@@ -83,8 +95,8 @@ def test_export_blocked_until_header_verified(ctx):
     doc = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], PREPARATORY)
     _apply(ctx["firm"], ctx["case_id"], doc)
     assert _blocked(ctx)
-    assert ctx["clients"]["assistant"].post(f"/api/cases/{ctx['case_id']}/header-verify").status_code == 403
-    r = ctx["clients"]["lawyer"].post(f"/api/cases/{ctx['case_id']}/header-verify")
+    assert _verify(ctx, client=ctx["clients"]["assistant"]).status_code == 403
+    r = _verify(ctx)
     assert r.status_code == 200, r.text
     assert not _blocked(ctx)
     with tenant_session(ctx["firm"]) as s:
@@ -118,7 +130,7 @@ def test_assistant_edit_does_not_verify(ctx):
 def test_new_brief_fills_blank_field_needs_reverify(ctx):
     first = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], COMPLAINT)  # 起訴狀：還沒有案號
     _apply(ctx["firm"], ctx["case_id"], first)
-    assert ctx["clients"]["lawyer"].post(f"/api/cases/{ctx['case_id']}/header-verify").status_code == 200
+    assert _verify(ctx).status_code == 200
     assert not _blocked(ctx)
     later = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], PREPARATORY, name="準備書狀.txt")
     assert "case_number" in _apply(ctx["firm"], ctx["case_id"], later)
@@ -178,3 +190,53 @@ def test_renamed_auto_party_is_not_added_again(ctx):
     assert lawyer.put(f"/api/cases/{ctx['case_id']}/parties", json=fixed).status_code == 200
     later = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], COMPLAINT, name="起訴狀副本.txt")
     assert "林大明" not in _apply(ctx["firm"], ctx["case_id"], later)
+
+
+
+def _auto(ctx):
+    with tenant_session(ctx["firm"]) as s:
+        return s.get(Case, ctx["case_id"]).header_auto
+
+
+def test_verify_skips_field_filled_after_page_load(ctx):
+    """次要第 5 項（2026-11-26 修）：只確認律師畫面上看到的值；頁面打開後才自動帶入的欄位仍要核對。"""
+    first = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], COMPLAINT)  # 起訴狀：法院、案由，沒有案號
+    _apply(ctx["firm"], ctx["case_id"], first)
+    shown = _shown(ctx)
+    later = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], PREPARATORY, name="準備書狀.txt")
+    assert "case_number" in _apply(ctx["firm"], ctx["case_id"], later)
+    r = _verify(ctx, shown)
+    assert r.status_code == 200 and r.json()["header_unverified"] is True
+    auto = _auto(ctx)
+    assert auto["court"]["verified_by"] and auto["case_number"]["verified_by"] is None
+
+
+def test_verify_skips_value_changed_after_page_load(ctx):
+    doc = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], PREPARATORY)
+    _apply(ctx["firm"], ctx["case_id"], doc)
+    shown = _shown(ctx)
+    assistant = ctx["clients"]["assistant"]
+    assert assistant.patch(f"/api/cases/{ctx['case_id']}", json={"case_number": "114年度訴字第999號"}).status_code == 200
+    assert _verify(ctx, shown).json()["header_unverified"] is True
+    assert _auto(ctx)["case_number"]["verified_by"] is None and _auto(ctx)["division"]["verified_by"]
+
+
+def test_verify_skips_party_renamed_after_page_load(ctx):
+    doc = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], COMPLAINT)
+    _apply(ctx["firm"], ctx["case_id"], doc)
+    shown = _shown(ctx)
+    assistant = ctx["clients"]["assistant"]
+    parties = assistant.get(f"/api/cases/{ctx['case_id']}").json()["parties"]
+    renamed = [{**p, "name": "林大銘"} if p["name"] == "林大明" else p for p in parties]
+    assert assistant.put(f"/api/cases/{ctx['case_id']}/parties", json=renamed).status_code == 200
+    assert _verify(ctx, shown).json()["header_unverified"] is True
+    with tenant_session(ctx["firm"]) as s:
+        party = s.scalars(select(CaseParty).where(CaseParty.case_id == ctx["case_id"], CaseParty.name == "林大銘")).one()
+        assert party.auto_verified is False
+
+
+def test_verify_requires_what_the_lawyer_saw(ctx):
+    doc = _brief(ctx["firm"], ctx["case_id"], ctx["round_id"], PREPARATORY)
+    _apply(ctx["firm"], ctx["case_id"], doc)
+    assert ctx["clients"]["lawyer"].post(f"/api/cases/{ctx['case_id']}/header-verify").status_code == 422
+    assert _blocked(ctx)

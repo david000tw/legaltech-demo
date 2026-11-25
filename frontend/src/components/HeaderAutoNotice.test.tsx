@@ -31,8 +31,20 @@ describe('HeaderAutoNotice', () => {
     expect(screen.getByText('股別（已清空）：從對方書狀「準備書狀.pdf」第 1 頁帶入（已核對）')).toBeInTheDocument()
     expect(screen.getByText('林大明（原告）：從對方書狀自動加入，請核對')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '狀頭核對無誤' }))
-    expect(api.verifyHeader).toHaveBeenCalledWith('c1')
+    expect(api.verifyHeader).toHaveBeenCalledWith('c1', {
+      fields: { case_number: '114年度訴字第123號', court: '臺灣臺北地方法院', division: null },
+      parties: { p1: '林大明' },
+    })
     expect(onVerified).toHaveBeenCalled()
+    expect(screen.queryByText(/請看過後再按一次/)).not.toBeInTheDocument()
+  })
+
+  it('asks to look again when something new came in after the page opened (次要第 5 項)', async () => {
+    vi.mocked(api.verifyHeader).mockResolvedValue({ header_unverified: true })
+    render(<HeaderAutoNotice caseId="c1" auto={auto} parties={parties} unverified canVerify onVerified={vi.fn(async () => {})}
+      onError={vi.fn()} onOpenDocument={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: '狀頭核對無誤' }))
+    expect(await screen.findByText('有剛自動帶入或剛被修改的項目，請看過後再按一次「狀頭核對無誤」')).toBeInTheDocument()
   })
 
   it('assistants see the notice but not the button', () => {

@@ -229,8 +229,10 @@ export const createCase = (body: CaseInput) => req<CaseSummary>('/cases', json('
 export const patchCase = (id: string, body: Partial<CaseInput> & { automation?: AutomationMode }) =>
   req<CaseSummary>(`/cases/${id}`, json('PATCH', body))
 // 「狀頭核對無誤」：確認所有自動帶入、還沒核對的狀頭欄位與對造（限律師，設計 6.6）
-export const verifyHeader = (caseId: string) =>
-  req<{ header_unverified: boolean }>(`/cases/${caseId}/header-verify`, json('POST'))
+// 只確認畫面上看到的值（欄位 → 值、自動帶入的當事人 id → 姓名）；之後才帶入或被改過的，回應 header_unverified 仍是 true
+export type HeaderShown = { fields: Record<string, string | null>; parties: Record<string, string> }
+export const verifyHeader = (caseId: string, shown: HeaderShown) =>
+  req<{ header_unverified: boolean }>(`/cases/${caseId}/header-verify`, json('POST', shown))
 // 依序整批替換：帶 id 的保留原列，沒列到的刪除（其遞狀人變空白）
 export const putParties = (id: string, parties: PartyInput[]) => req<Party[]>(`/cases/${id}/parties`, json('PUT', parties))
 export const getCase = (id: string) => req<CaseDetail>(`/cases/${id}`)
