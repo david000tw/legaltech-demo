@@ -90,6 +90,10 @@ def test_exhibit_list_docx(db):
 @pytest.mark.parametrize("name,title", [
     ("01_交通事故初步分析研判表.txt", "交通事故初步分析研判表"), ("診斷證明.pdf", "診斷證明"), ("3-收據.jpg", "收據"),
     ("02 估價單.PDF", "估價單"), ("2023年報表.pdf", "2023年報表"), ("01.pdf", "01"), ("", ""),
+    # 開頭是日期或數字本身（審查員找到的）：不能當排序編號去掉
+    ("113.05.02存證信函.pdf", "113.05.02存證信函"), ("113-05-02 存證信函.pdf", "113-05-02 存證信函"),
+    ("2-1 收據.pdf", "2-1 收據"), ("7-11繳費收據.jpg", "7-11繳費收據"), ("10.5萬元估價單.pdf", "10.5萬元估價單"),
+    ("3.5噸貨車照片.jpg", "3.5噸貨車照片"),
 ])
 def test_exhibit_title_drops_order_prefix_and_extension(name, title):
     from app.export.docx_export import exhibit_title

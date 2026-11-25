@@ -79,7 +79,8 @@ def roc_date(d: date) -> str:
     return f"中華民國{d.year - 1911}年{d.month}月{d.day}日"
 
 
-_ORDER_PREFIX = re.compile(r"^\d{1,3}[_\-.、\s]+")
+# 排序編號後面必須接非數字：「113.05.02存證信函」「2-1 收據」「10.5萬元」開頭的數字是名稱本身
+_ORDER_PREFIX = re.compile(r"^\d{1,3}[_\-.、\s]+(?=\D)")
 _EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,5}$")
 
 
