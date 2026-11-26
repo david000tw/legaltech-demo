@@ -76,6 +76,7 @@ _CONCESSIVE = re.compile(r"(?:雖|固)(?:以|主張|稱|辯|抗辯|執|指)")
 _ADVERSATIVE = re.compile(r"然|惟|但")
 _QUOTED_END = re.compile(r"等語|云云")  # 反推只認這兩種；「等情」常是法院整理證據認定的事實（「…等情，有…可稽」）
 PARTY_SPAN_LIMIT = 400
+CONTINUATION_LIMIT = 80  # 轉述跨過句號延續到下一句時，等語／云云必須在引文後這麼多字內（真正的延續通常只有幾個字）
 _OPEN_Q = "「『“〝﹁‘\""
 _CLOSE_Q = "」』”〞﹂’\""
 _ANY_QUOTE = re.compile(f"[{_OPEN_Q}{_CLOSE_Q}]")
@@ -290,13 +291,16 @@ def _restated_in_sentence(norm: str, qs: int, qe: int) -> bool:
         return False
     if _QUOTED_END.search(norm, qs, s1):
         return True
-    if norm[qe - 1:qe] == "。":  # 轉述跨過句號、在下一句才以「等語」作結；下一句若是新的「原告主張…」，那個等語屬於它
+    ext = s1  # 引文以「。」結尾時，下一句也看：轉述可能跨過句號才以「等語」作結，讓步句的「惟／然」也在下一句
+    if norm[qe - 1:qe] == "。":
         nxt = norm.find("。", qe)
-        end = _QUOTED_END.search(norm, qe, len(norm) if nxt < 0 else nxt)
-        if end is not None and not _PARTY_START.search(norm, qe, end.start()):
+        ext = len(norm) if nxt < 0 else nxt
+        end = _QUOTED_END.search(norm, qe, min(ext, qe + CONTINUATION_LIMIT))
+        # 下一句在等語／云云之前又出現角色詞，那是另一段轉述（「至被告所辯…云云」），不算引文的
+        if end is not None and not _ROLE_RE.search(norm, qe, end.start()):
             return True
     concession = _CONCESSIVE.search(norm, role.end(), qs + 1)
-    return concession is not None and _ADVERSATIVE.search(norm, qe, s1) is not None
+    return concession is not None and _ADVERSATIVE.search(norm, qe, ext) is not None
 
 
 def _contains_case_number(quote: str) -> bool:

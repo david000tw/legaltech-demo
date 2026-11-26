@@ -47,10 +47,15 @@ _GENERIC = re.compile(r"([一-鿿]{1,12}(?:法|條例|規則|細則|辦法|通�
 # 沒寫法律名稱的條文與前一條之間只能有這些：項款目（含「第1、2項」）、前段後段但書本文、準用、至、連接字
 _FILLER = re.compile(r"(?:第\d+(?:[、,]\d+)*[項款目]|前段|後段|但書|本文|準用|至|[、及與或暨並,])*")
 _CJK = re.compile(r"[一-鿿]")
-# 「同法」前面、沒接條號的法律名稱（最終審查 I1）：清單名稱取最長的；清單外的只認後面接「之、關於、規定…」的寫法
-_NAME_RE = re.compile("|".join(map(re.escape, _NAMES)))
-_LOOSE_NAME = re.compile(r"([一-鿿]{2,12}(?:法|條例|規則|細則|通則))(?=之|關於|規定|及|與|、|,|;|:|\(|「|所|上|中|施行)")
-_SAME_LAW = ("同法", "本法", "該法")
+# 「同法」與前一個寫出名稱的條文之間，有沒有寫了別部法律（最終審查 I1、critic）：
+# 名稱後面接這些字的不是法律名稱（法院、法庭、法人、法律關係、法官、身分法益、經驗法則、法定代理人、憲法法庭…）
+_NOT_NAME_AFTER = "院庭人律官學理益則令定條務制案系源意法"
+_NAME_RE = re.compile("(?:" + "|".join(map(re.escape, _NAMES)) + f")(?![{_NOT_NAME_AFTER}])")
+_LOOSE_NAME = re.compile(rf"[一-鿿]{{1,15}}?(?:法|條例|規則|細則|通則)(?![{_NOT_NAME_AFTER}])")
+# 以這些字結尾的是一般用語，不是法律名稱
+_COMMON_FA = ("不法", "違法", "合法", "非法", "依法", "方法", "辦法", "司法", "立法", "看法", "說法", "做法", "作法",
+              "手法", "用法", "想法", "寫法", "守法", "執法", "犯法", "無法", "於法", "設法", "適法", "如法", "同法",
+              "本法", "該法", "前法", "後法", "新法", "舊法", "他法", "此法", "其法")
 _ENDS = "。;"
 
 
@@ -115,19 +120,18 @@ def _known_name(prefix: str) -> tuple[str, str] | None:
     return None
 
 
-def _name_between(norm: str, start: int, end: int) -> _Name | None:
-    """[start, end) 之間最後寫出、但後面沒接條號的法律名稱；沒有就回 None。"""
+def _other_law_between(norm: str, start: int, end: int, law: str | None) -> bool:
+    """[start, end) 之間有沒有寫出 law 以外的法律名稱（後面沒接條號的也算）。清單名稱前面不是邊界的
+    （「全民健康保險法」裡的「保險法」）、清單外的名稱，都當成別部法律。"""
     seg = norm[start:end]
-    known = list(_NAME_RE.finditer(seg))
-    loose = [m for m in _LOOSE_NAME.finditer(seg)
-             if len(name := _strip_boundary(m.group(1))) >= 3 and not name.endswith(_SAME_LAW) and name not in _NAMES]
-    last_known, last_loose = (known[-1] if known else None), (loose[-1] if loose else None)
-    if last_loose is not None and (last_known is None or last_loose.end() > last_known.end()):
-        return _Name(None, False, start + last_loose.end())  # 清單外的名稱：「同法」接不上
-    if last_known is None:
-        return None
-    formal = LAW_ALIASES.get(last_known.group(), last_known.group())
-    return _Name(formal, _boundary_ok(norm[:start + last_known.start()]), start + last_known.end())
+    for m in _NAME_RE.finditer(seg):
+        if LAW_ALIASES.get(m.group(), m.group()) != law or not _boundary_ok(norm[:start + m.start()]):
+            return True
+    for m in _LOOSE_NAME.finditer(seg):
+        name = m.group()
+        if not name.endswith(_COMMON_FA) and not name.endswith(tuple(_NAMES)):
+            return True
+    return False
 
 
 def _scan(text: str, log_unknown: bool) -> list[ArticleHit]:
@@ -140,10 +144,10 @@ def _scan(text: str, log_unknown: bool) -> list[ArticleHit]:
         prefix = norm[:m.start()]
         law: str | None = None
         if prefix.endswith("同法"):
-            nearer = _name_between(norm, last_name.end if last_name is not None else 0, m.start() - 2)
-            if nearer is not None:
-                last_name = nearer
-            law = last_name.law if last_name is not None and last_name.accepted else None
+            # 沿用前面最近寫出名稱的條文；中間又寫了別部法律就不知道指哪一部，寧可漏（不改接最近的名稱）
+            if last_name is not None and last_name.accepted and not _other_law_between(
+                    norm, last_name.end, m.start() - 2, last_name.law):
+                law = last_name.law
         elif (known := _known_name(prefix)) is not None:
             written, formal = known
             ok = _boundary_ok(prefix[:-len(written)])
@@ -181,7 +185,9 @@ def articles_in(text: str) -> set[ArticleRef]:
 
 # 條號後面可以接項款目與前段、後段、但書、本文（律師習慣連項一起打，最終審查 I2），查詢時忽略
 _QUERY = re.compile(r"^(?P<law>\D+?)第?(?P<no>\d+)條?(?:(?:之|-)(?P<sub>\d+))?條?"
-                    r"(?:第\d+(?:[、,]\d+)*[項款目])*(?:前段|後段|但書|本文)?$")
+                    r"(?:第?\d+(?:[、,]\d+)*[項款目])*(?:前段|後段|但書|本文)?$")
+# 「依法條」專屬提示只給看起來像法律名稱的字（全是中文、以法／條例／規則／細則／通則結尾、不是「同法」這類）
+_QUERY_LAW = re.compile(r"^[一-鿿]{1,30}(?:法|條例|規則|細則|通則)$")
 QUERY_LIMIT = 50
 
 
@@ -192,7 +198,9 @@ def unknown_law_in_query(q: str) -> str | None:
     if m is None:
         return None
     law = m.group("law")
-    return None if LAW_ALIASES.get(law, law) in LAW_NAMES else law
+    if LAW_ALIASES.get(law, law) in LAW_NAMES or not _QUERY_LAW.match(law) or law.startswith("第") or law in _COMMON_FA:
+        return None
+    return law
 
 
 def parse_article_query(q: str) -> ArticleRef | None:

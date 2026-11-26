@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from app.corpus.article_refs import sentence_at
 from app.text_norm import normalize_text
 
-SUPREME_WORDS = ("台上", "台抗", "台簡上", "台簡抗", "台再", "台聲", "台上大", "台抗大")
+SUPREME_WORDS = ("台上", "台抗", "台簡上", "台簡抗", "台再", "台聲", "台上大", "台抗大", "台附")
 AUTHORITY_TAILS = ("可資參照", "意旨參照", "參照", "意旨", "見解", "判例")
 FOLLOW_MARKERS = ("意旨", "闡述", "指出", "揭示", "揭櫫", "略以", "要旨", "參照")
 LEAD_MARKERS = ("另參", "參見", "參照", "參", "如:")
@@ -29,8 +29,9 @@ _COURT = re.compile(
     r"|(?:臺灣|台灣|福建)?[一-鿿]{2}少年及家事法院|(?:臺灣|台灣|福建)?[一-鿿]{2}地方法院)$")
 _SERIES_GAP = re.compile(r"[、及與]*")
 _EXCLUDED_WORD = re.compile(r"[偵他調]")
-# 字號後面接卷宗（「卷」「民事卷宗」「案卷」「全卷」「刑事全案卷宗」）：是卷宗，不是引用見解（最終審查 M6）
-_CASE_FILE = re.compile(r"(?:民事|刑事)?全?案?卷")
+# 字號後面幾個字內出現「卷」（「卷」「民事卷宗」「執行卷宗」「事件卷宗」「電子卷證」「影卷」）：是卷宗，不是引用見解
+# （最終審查 M6、critic）。中間有標點就不算，例如「…判決意旨參照，本院卷第5頁」
+_CASE_FILE = re.compile(r"[一-鿿]{0,6}?卷")
 _KEY = re.compile(r"^(\D+?)(\d+)年度?(\D+?)字第(\d+)號")
 
 
