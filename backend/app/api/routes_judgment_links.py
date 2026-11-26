@@ -12,7 +12,7 @@ from sqlalchemy.exc import OperationalError
 from app.api.routes_judgments import _case_or_404
 from app.auth import CurrentMember, current_member
 from app.corpus import ref_index, summary
-from app.corpus.article_refs import parse_article_query
+from app.corpus.article_refs import parse_article_query, unknown_law_in_query
 from app.corpus.pins import pins_by_passage
 from app.db import tenant_session
 from app.models import Judgment, JudgmentPassage
@@ -51,7 +51,8 @@ def article_search(case_id: UUID, q: str = "", offset: int = Query(0, ge=0), lim
         case = _case_or_404(s, case_id)
         ref = parse_article_query(q)
         if ref is None:
-            raise HTTPException(422, ARTICLE_HINT)
+            law = unknown_law_in_query(q)
+            raise HTTPException(422, f"判決庫的條文索引目前不含「{law}」" if law else ARTICLE_HINT)
         total, rows = ref_index.article_results(s, ref, case.case_type, offset=offset, limit=limit)
         for row in rows:
             row["issues"] = _issues(s, s.get(Judgment, UUID(row["judgment_id"])))

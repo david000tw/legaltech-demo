@@ -82,6 +82,23 @@ def test_article_search_rejects_unparseable_input(lawyer_client, q):
     assert r.json()["detail"] == HINT
 
 
+def test_article_search_unknown_law_has_its_own_message(lawyer_client):
+    client, firm, _ = lawyer_client
+    case_id = _case(firm)
+    r = _search(client, case_id, "勞動基準法第59條")
+    assert r.status_code == 422
+    assert r.json()["detail"] == "判決庫的條文索引目前不含「勞動基準法」"
+
+
+def test_article_search_accepts_paragraph_and_clause(lawyer_client):
+    client, firm, _ = lawyer_client
+    _seed()
+    case_id = _case(firm)
+    r = _search(client, case_id, "民法第195條第1項前段")
+    assert r.status_code == 200, r.text
+    assert r.json()["article"] == "民法第195條" and r.json()["results"]
+
+
 def test_article_search_paging(lawyer_client):
     client, firm, _ = lawyer_client
     _seed()

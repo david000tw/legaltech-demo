@@ -290,6 +290,11 @@ def _restated_in_sentence(norm: str, qs: int, qe: int) -> bool:
         return False
     if _QUOTED_END.search(norm, qs, s1):
         return True
+    if norm[qe - 1:qe] == "。":  # 轉述跨過句號、在下一句才以「等語」作結；下一句若是新的「原告主張…」，那個等語屬於它
+        nxt = norm.find("。", qe)
+        end = _QUOTED_END.search(norm, qe, len(norm) if nxt < 0 else nxt)
+        if end is not None and not _PARTY_START.search(norm, qe, end.start()):
+            return True
     concession = _CONCESSIVE.search(norm, role.end(), qs + 1)
     return concession is not None and _ADVERSATIVE.search(norm, qe, s1) is not None
 

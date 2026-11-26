@@ -48,6 +48,18 @@ describe('CitedJudgment', () => {
     expect(screen.getByText(/可以到司法院裁判書查詢找找看/)).toBeInTheDocument()
   })
 
+  it('does not offer to import a criminal or unknown-court judgment', async () => {
+    vi.mocked(api.citedJudgment).mockResolvedValue({ ...VIEW, key: '最高法院|100|台上|5|刑', display: '最高法院100年度台上字第5號（刑事）' })
+    const { unmount } = renderPage()
+    expect(await screen.findByText('刑事判決不能加入判決庫（判決庫只收民事、家事判決）')).toBeInTheDocument()
+    expect(screen.queryByText(/可以到司法院裁判書查詢找找看/)).not.toBeInTheDocument()
+    unmount()
+    vi.mocked(api.citedJudgment).mockResolvedValue({ ...VIEW, key: '不明|101|上|2', display: '101年度上字第2號' })
+    renderPage()
+    expect(await screen.findByText(/法院不明，無法比對/)).toBeInTheDocument()
+    expect(screen.queryByText(/可以到司法院裁判書查詢找找看/)).not.toBeInTheDocument()
+  })
+
   it('opens the judgment directly when exactly one library judgment matches', async () => {
     vi.mocked(api.citedJudgment).mockResolvedValue({ ...VIEW, library: [{ judgment_id: 'j5', citation: '判決' }] })
     renderPage()

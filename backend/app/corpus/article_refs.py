@@ -47,6 +47,10 @@ _GENERIC = re.compile(r"([一-鿿]{1,12}(?:法|條例|規則|細則|辦法|通�
 # 沒寫法律名稱的條文與前一條之間只能有這些：項款目（含「第1、2項」）、前段後段但書本文、準用、至、連接字
 _FILLER = re.compile(r"(?:第\d+(?:[、,]\d+)*[項款目]|前段|後段|但書|本文|準用|至|[、及與或暨並,])*")
 _CJK = re.compile(r"[一-鿿]")
+# 「同法」前面、沒接條號的法律名稱（最終審查 I1）：清單名稱取最長的；清單外的只認後面接「之、關於、規定…」的寫法
+_NAME_RE = re.compile("|".join(map(re.escape, _NAMES)))
+_LOOSE_NAME = re.compile(r"([一-鿿]{2,12}(?:法|條例|規則|細則|通則))(?=之|關於|規定|及|與|、|,|;|:|\(|「|所|上|中|施行)")
+_SAME_LAW = ("同法", "本法", "該法")
 _ENDS = "。;"
 
 
@@ -67,9 +71,10 @@ class ArticleHit:
 
 @dataclass
 class _Name:
-    """一個寫出法律名稱的地方：law 是正式名稱（不在清單時為 None），accepted 表示這次有沒有收。"""
+    """一個寫出法律名稱的地方：law 是正式名稱（不在清單時為 None），accepted 表示這次有沒有收，end 是名稱結束位置。"""
     law: str | None
     accepted: bool
+    end: int = 0
 
 
 def sentence_at(norm: str, start: int, end: int) -> str:
@@ -110,6 +115,21 @@ def _known_name(prefix: str) -> tuple[str, str] | None:
     return None
 
 
+def _name_between(norm: str, start: int, end: int) -> _Name | None:
+    """[start, end) 之間最後寫出、但後面沒接條號的法律名稱；沒有就回 None。"""
+    seg = norm[start:end]
+    known = list(_NAME_RE.finditer(seg))
+    loose = [m for m in _LOOSE_NAME.finditer(seg)
+             if len(name := _strip_boundary(m.group(1))) >= 3 and not name.endswith(_SAME_LAW) and name not in _NAMES]
+    last_known, last_loose = (known[-1] if known else None), (loose[-1] if loose else None)
+    if last_loose is not None and (last_known is None or last_loose.end() > last_known.end()):
+        return _Name(None, False, start + last_loose.end())  # 清單外的名稱：「同法」接不上
+    if last_known is None:
+        return None
+    formal = LAW_ALIASES.get(last_known.group(), last_known.group())
+    return _Name(formal, _boundary_ok(norm[:start + last_known.start()]), start + last_known.end())
+
+
 def _scan(text: str, log_unknown: bool) -> list[ArticleHit]:
     norm = normalize_text(text or "")
     hits: list[ArticleHit] = []
@@ -120,17 +140,20 @@ def _scan(text: str, log_unknown: bool) -> list[ArticleHit]:
         prefix = norm[:m.start()]
         law: str | None = None
         if prefix.endswith("同法"):
+            nearer = _name_between(norm, last_name.end if last_name is not None else 0, m.start() - 2)
+            if nearer is not None:
+                last_name = nearer
             law = last_name.law if last_name is not None and last_name.accepted else None
         elif (known := _known_name(prefix)) is not None:
             written, formal = known
             ok = _boundary_ok(prefix[:-len(written)])
-            last_name = _Name(formal, ok)
+            last_name = _Name(formal, ok, m.start())
             law = formal if ok else None
             if not ok and log_unknown and not prefix[:-len(written)].endswith(FOREIGN_PREFIXES):
                 if g := _GENERIC.search(prefix[-16:]):
                     log.info("判決索引：清單外的法律名稱 %s", _strip_boundary(g.group(1)))
         elif (g := _GENERIC.search(prefix[-16:])) is not None:
-            last_name = _Name(None, False)  # 清單外的名稱（含「本法」「該法」）：不收，「同法」也接不上
+            last_name = _Name(None, False, m.start())  # 清單外的名稱（含「本法」「該法」）：不收，「同法」也接不上
             if log_unknown:
                 log.info("判決索引：清單外的法律名稱 %s", _strip_boundary(g.group(1)))
         elif prev is not None and prev[1] is not None and _FILLER.fullmatch(norm[prev[0]:m.start()]):
@@ -156,8 +179,20 @@ def articles_in(text: str) -> set[ArticleRef]:
     return {h.ref for h in _scan(text, False)}
 
 
-_QUERY = re.compile(r"^(?P<law>\D+?)第?(?P<no>\d+)條?(?:(?:之|-)(?P<sub>\d+))?條?$")
+# 條號後面可以接項款目與前段、後段、但書、本文（律師習慣連項一起打，最終審查 I2），查詢時忽略
+_QUERY = re.compile(r"^(?P<law>\D+?)第?(?P<no>\d+)條?(?:(?:之|-)(?P<sub>\d+))?條?"
+                    r"(?:第\d+(?:[、,]\d+)*[項款目])*(?:前段|後段|但書|本文)?$")
 QUERY_LIMIT = 50
+
+
+def unknown_law_in_query(q: str) -> str | None:
+    """寫法正確、但法律不在索引清單裡時回那個法律名稱（給「依法條」專屬的提示）；其他情形回 None。"""
+    norm = normalize_text(q or "")
+    m = _QUERY.match(norm) if norm and len(norm) <= QUERY_LIMIT else None
+    if m is None:
+        return None
+    law = m.group("law")
+    return None if LAW_ALIASES.get(law, law) in LAW_NAMES else law
 
 
 def parse_article_query(q: str) -> ArticleRef | None:

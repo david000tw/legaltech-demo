@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import * as api from '../api'
 import AppShell from '../components/AppShell'
-import { importHint, judgmentPath } from '../judgmentLinks'
+import { importHint, isUnknownCourt, judgmentPath, UNKNOWN_COURT } from '../judgmentLinks'
 import { CARD } from '../ui'
 
 // 一個被引用的判決字號（計畫 3 丙）：庫裡剛好一份就直接打開；兩份以上（同字號的判決與裁定）逐一列出、不替律師挑；
@@ -38,7 +38,11 @@ export default function CitedJudgment() {
                 </ul>
               </section>
             )}
-            {outside && <p className="text-xs text-slate-500">{importHint(view.key.startsWith('最高法院|'), view.supreme_importable)}</p>}
+            {outside && (
+              <p className="text-xs text-slate-500">
+                {isUnknownCourt(view.key) ? `${UNKNOWN_COURT}：下面是寫了這個字號的判決，可能是不同法院的不同判決` : importHint(view.key, view.supreme_importable)}
+              </p>
+            )}
             <section aria-label="引用它的判決" className={`${CARD} space-y-2`}>
               <h2 className="text-lg font-semibold text-slate-800">{`庫裡有 ${view.citing.length} 份判決引用`}</h2>
               <ul className="space-y-3 text-sm">

@@ -187,6 +187,35 @@ def test_import_from_pdf_creates_judgment_and_passages(lawyer_client):
     assert r.status_code == 200
 
 
+def test_imported_judgment_links_to_existing_citations(lawyer_client):
+    """設計驗收 9：貼網址加入一份已經被庫內判決引用的判決後，引用關係自動接上（不必重算索引）。"""
+    from app.corpus.ref_index import reindex_one
+    client, firm, _ = lawyer_client
+    case_id, _ = make_round(firm)
+    with admin_session() as s:
+        citer = Judgment(citation="臺灣臺南地方法院115年度訴字第9號民事判決", court="臺灣臺南地方法院",
+                         court_level="district", decided_on=date(2026, 5, 1), source_url="https://example.test/x.pdf",
+                         full_text="合成判決", status="active", curated=False, case_types=["traffic_tort"])
+        s.add(citer)
+        s.flush()
+        s.add(JudgmentPassage(judgment_id=citer.id, seq=1, passage_type="court_reasoning",
+                              text="按慰撫金之酌定，應斟酌兩造身分地位（本院114年度訴字第1347號民事判決意旨參照）。"))
+        s.flush()
+        reindex_one(s, citer)
+        citer_id = str(citer.id)
+    before = client.get(f"/api/cases/{case_id}/judgments/{citer_id}").json()
+    assert [c["library"] for c in before["cites"]] == [[]]
+    _fetcher(client, [])
+    r = client.post(f"/api/cases/{case_id}/judgments/import", json={"url": URL_DATA})
+    assert r.status_code == 200, r.text
+    with admin_session() as s:
+        tndv_id = str(s.scalars(select(Judgment.id).where(Judgment.citation == TNDV["citation"])).one())
+    after = client.get(f"/api/cases/{case_id}/judgments/{citer_id}").json()
+    assert after["cites"][0]["library"] == [{"judgment_id": tndv_id, "citation": TNDV["citation"]}]
+    imported = client.get(f"/api/cases/{case_id}/judgments/{tndv_id}").json()
+    assert [c["judgment_id"] for c in imported["cited_by"]] == [citer_id]
+
+
 def test_import_same_url_twice_no_duplicate(lawyer_client):
     client, firm, _ = lawyer_client
     case_id, _ = make_round(firm)

@@ -118,6 +118,20 @@ describe('JudgmentDetail', () => {
     expect(screen.getByRole('link', { name: '回判決檢索' })).toHaveAttribute('href', '/cases/c1?tab=search')
   })
 
+  it('shows an unknown-court number as text only and a criminal one as not importable', async () => {
+    vi.mocked(api.judgmentDetail).mockResolvedValue({ ...DETAIL, cites: [
+      { key: '不明|101|上|2', display: '101年度上字第2號', library: [], citing_count: 3, supreme: false },
+      { key: '最高法院|100|台上|5|刑', display: '最高法院100年度台上字第5號（刑事）', library: [], citing_count: 2, supreme: true }] })
+    renderPage()
+    expect(await screen.findByText('101年度上字第2號')).toBeInTheDocument()
+    expect(screen.getByText('法院不明，無法比對')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '庫裡有 3 份判決引用' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '庫裡有 2 份判決引用' })).toBeInTheDocument()
+    expect(screen.getByText('刑事判決不能加入判決庫（判決庫只收民事、家事判決）')).toBeInTheDocument()
+    expect(screen.queryByText(/可以到司法院裁判書查詢找找看/)).not.toBeInTheDocument()
+    expect(screen.queryByText('目前無法加入判決庫')).not.toBeInTheDocument()
+  })
+
   it('pins a reasoning passage', async () => {
     vi.mocked(api.pinPassage).mockResolvedValue({} as api.PassageView)
     renderPage()

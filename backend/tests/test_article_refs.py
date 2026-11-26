@@ -29,6 +29,22 @@ def test_same_law_after_excluded_name_is_dropped():
     assert refs("民法第184條規定。德國民法第823條；同法第826條") == [ArticleRef("民法", "184")]
     assert refs("德國民法第823條、第826條") == []
 
+def test_same_law_uses_nearest_name_even_without_article():
+    """最終審查 I1：「同法」接的是前面最近寫出的法律名稱，即使那個名稱後面沒接條號。"""
+    assert refs("按民事訴訟法第277條前段定有明文。次按民法關於侵權行為之規定，同法第184條第1項前段規定") == [
+        ArticleRef("民事訴訟法", "277"), ArticleRef("民法", "184")]
+    assert refs("民事訴訟法第277條定有明文。又依民法規定，同法第195條") == [
+        ArticleRef("民事訴訟法", "277"), ArticleRef("民法", "195")]
+    # 中間是清單外或外國的法律名稱：寧可漏，「同法」不收
+    assert refs("民法第184條定有明文。又依勞動基準法之規定，同法第59條") == [ArticleRef("民法", "184")]
+    assert refs("民法第184條定有明文。參酌德國民法之規定，同法第826條") == [ArticleRef("民法", "184")]
+    # 中間只有一般用語或另一個「同法」：照舊沿用
+    assert refs("民法第184條第1項前段定有明文；同法第185條、同法第195條亦有規定") == [
+        ArticleRef("民法", "184"), ArticleRef("民法", "185"), ArticleRef("民法", "195")]
+    assert refs("依民法第184條規定，被告違法侵害原告權利，同法第195條") == [
+        ArticleRef("民法", "184"), ArticleRef("民法", "195")]
+
+
 def test_boundary_words_from_real_judgments():
     assert refs("違反道路交通安全規則第94條第3項") == [ArticleRef("道路交通安全規則", "94")]
     assert refs("類推適用民法第541條") == [ArticleRef("民法", "541")]
@@ -81,13 +97,26 @@ def test_unknown_law_name_logged_only_when_asked(caplog):
 
 @pytest.mark.parametrize("q,want", [("民法第195條", ArticleRef("民法", "195")), ("民法195", ArticleRef("民法", "195")),
     (" 民法第191條之2 ", ArticleRef("民法", "191-2")), ("民法191-2", ArticleRef("民法", "191-2")),
-    ("民訴法第277條", ArticleRef("民事訴訟法", "277")), ("民法１９５", ArticleRef("民法", "195"))])
+    ("民訴法第277條", ArticleRef("民事訴訟法", "277")), ("民法１９５", ArticleRef("民法", "195")),
+    # 最終審查 I2：律師習慣連項款、前段一起打
+    ("民法第195條第1項", ArticleRef("民法", "195")), ("民法第184條第1項前段", ArticleRef("民法", "184")),
+    ("民法第195條第1、3項", ArticleRef("民法", "195")), ("民法第191條之2第1項", ArticleRef("民法", "191-2")),
+    ("民事訴訟法第277條但書", ArticleRef("民事訴訟法", "277"))])
 def test_parse_article_query(q, want):
     assert parse_article_query(q) == want
 
 @pytest.mark.parametrize("q", ["195", "民法", "abc", "某某法第1條", "民" * 200])
 def test_parse_article_query_rejects(q):
     assert parse_article_query(q) is None
+
+def test_unknown_law_in_query():
+    from app.corpus.article_refs import unknown_law_in_query
+    assert unknown_law_in_query("勞動基準法第59條") == "勞動基準法"
+    assert unknown_law_in_query("勞動基準法59") == "勞動基準法"
+    assert unknown_law_in_query("民法第195條") is None
+    assert unknown_law_in_query("195") is None
+    assert unknown_law_in_query("abc") is None
+
 
 def test_seed_statute_names_are_in_list():
     import json, pathlib

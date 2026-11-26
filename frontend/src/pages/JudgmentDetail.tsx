@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import * as api from '../api'
 import AppShell from '../components/AppShell'
 import { IssueTags } from '../components/JudgmentSearchTab'
-import { citedPath, courtLine, importHint, judgmentPath, searchByArticlePath } from '../judgmentLinks'
+import { citedPath, courtLine, importHint, isUnknownCourt, judgmentPath, searchByArticlePath, UNKNOWN_COURT } from '../judgmentLinks'
 import { BTN_SECONDARY, BTN_SMALL, CARD } from '../ui'
 
 const POLL_MS = 3_000
@@ -178,6 +178,13 @@ export default function JudgmentDetail() {
                             </Link>
                           ))}
                         </span>
+                      ) : isUnknownCourt(c.key) ? (
+                        // 法院不明（設計：只顯示原文，不連到任何判決）：不同法院的同字號會被算在一起，所以不給引用數與連結
+                        <p className="flex flex-wrap items-center gap-2">
+                          <span className="text-slate-800">{c.display}</span>
+                          <span className="text-xs text-slate-500">{UNKNOWN_COURT}</span>
+                          <button type="button" onClick={() => copy(c.display)} className={BTN_SMALL}>複製字號</button>
+                        </p>
                       ) : (
                         <>
                           <p className="flex flex-wrap items-center gap-2">
@@ -185,7 +192,7 @@ export default function JudgmentDetail() {
                             <Link to={citedPath(caseId, c.key)} className="text-blue-700 underline">{`庫裡有 ${c.citing_count} 份判決引用`}</Link>
                             <button type="button" onClick={() => copy(c.display)} className={BTN_SMALL}>複製字號</button>
                           </p>
-                          <p className="text-xs text-slate-500">{importHint(c.supreme, detail.supreme_importable)}</p>
+                          <p className="text-xs text-slate-500">{importHint(c.key, detail.supreme_importable)}</p>
                         </>
                       )}
                     </li>

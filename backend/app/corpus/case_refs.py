@@ -29,6 +29,8 @@ _COURT = re.compile(
     r"|(?:臺灣|台灣|福建)?[一-鿿]{2}少年及家事法院|(?:臺灣|台灣|福建)?[一-鿿]{2}地方法院)$")
 _SERIES_GAP = re.compile(r"[、及與]*")
 _EXCLUDED_WORD = re.compile(r"[偵他調]")
+# 字號後面接卷宗（「卷」「民事卷宗」「案卷」「全卷」「刑事全案卷宗」）：是卷宗，不是引用見解（最終審查 M6）
+_CASE_FILE = re.compile(r"(?:民事|刑事)?全?案?卷")
 _KEY = re.compile(r"^(\D+?)(\d+)年度?(\D+?)字第(\d+)號")
 
 
@@ -96,7 +98,7 @@ def _find(norm: str) -> list[_Found]:
         kind = _KIND.match(norm, m.end())
         criminal = kind.group(1) == "刑事"
         end = kind.end()
-        excluded = norm.startswith("卷", m.end()) or bool(_EXCLUDED_WORD.search(m.group(2)))
+        excluded = bool(_CASE_FILE.match(norm, m.end())) or bool(_EXCLUDED_WORD.search(m.group(2)))
         f = _Found(start, m.start(), end, written, m.group(1), m.group(2), m.group(3), criminal, excluded)
         f.marker = norm.startswith(FOLLOW_MARKERS, end) or norm[:start].endswith(LEAD_MARKERS)
         inner = _innermost(pairs, m.start())
@@ -126,7 +128,8 @@ def _resolve_courts(group: list[_Found], own_court: str) -> None:
         elif _tai(f.word) in SUPREME_WORDS:
             f.court = "最高法院"
         elif i > 0:
-            f.court = prev  # 同一串前一則的法院（不明就跟著不明）
+            # 同一串前一則的法院（不明就跟著不明）；最高法院沒有這種字別，沿用會變成不存在的字號（最終審查 M4）
+            f.court = None if prev == "最高法院" else prev
         else:
             f.court = None
         prev = f.court

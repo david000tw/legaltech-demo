@@ -8,9 +8,17 @@ export const IMPORT_HINT = '可以到司法院裁判書查詢找找看；找得�
   + '很舊的判決、判例或最高法院判決可能查不到或無法加入。'
 export const NOT_IMPORTABLE = '目前無法加入判決庫'
 
-// 庫外判決的加入提示：最高法院判決在伺服器驗證過不能加入時，不給貼網址的提示
-export const importHint = (supreme: boolean, supremeImportable: boolean) =>
-  supreme && !supremeImportable ? NOT_IMPORTABLE : IMPORT_HINT
+export const UNKNOWN_COURT = '法院不明，無法比對'
+export const CRIMINAL_NOT_IMPORTABLE = '刑事判決不能加入判決庫（判決庫只收民事、家事判決）'
+
+// 比對鍵（後端 case_refs.make_key）：法院不明的以「不明|」開頭，刑事的以「|刑」結尾
+export const isUnknownCourt = (key: string) => key.startsWith('不明|')
+const isCriminal = (key: string) => key.endsWith('|刑')
+
+// 庫外判決的加入提示：刑事判決加不進來；最高法院判決在伺服器驗證過不能加入時，不給貼網址的提示
+export const importHint = (key: string, supremeImportable: boolean) =>
+  isCriminal(key) ? CRIMINAL_NOT_IMPORTABLE
+    : key.startsWith('最高法院|') && !supremeImportable ? NOT_IMPORTABLE : IMPORT_HINT
 
 export const AI_WRITTEN = 'AI 撰寫'
 
