@@ -16,7 +16,9 @@ from app.ai.provider import AIError, AIProvider
 from app.ai.usage import call_ai
 from app.ai.schemas import select_schema
 from app.ai.tokens import estimate_tokens
+from app.corpus.article_refs import articles_in
 from app.corpus.pins import pinned_passages
+from app.corpus.ref_index import passage_notes, passages_citing
 from app.corpus.search import article_display, search_articles, search_page_texts, search_pages, search_passages
 from app.exhibit_labels import evidence_label
 from app.ingest.service import current_page_text
@@ -32,6 +34,9 @@ EVIDENCE_TOKEN_BUDGET = 150_000
 PAGES_PER_CLAIM = 20
 PASSAGES_PER_CLAIM = 8
 ARTICLES_PER_CLAIM = 5
+# 計畫 3 丙 2B：主張寫到某條法律時，多找引用同一條、同類型、非少數見解的判決段（排在原本結果之後）
+EXTRA_PER_CLAIM = 3
+EXTRA_PER_ROUND = 15
 MIN_QUOTE = 15
 SELECT_TOKEN_LIMIT = 180_000  # 送出前估算；超過就明確失敗，不讓模型默默截斷
 KIND_PREFIX = {"evidence": "E", "judgment": "J", "statute": "S"}
@@ -96,6 +101,19 @@ def build_candidates(s: Session, round_id: UUID) -> list[Candidate]:
     pinned_ids = {p.id for p in pinned}
     passages = _unique(pinned + [p for q in queries
                                  for p in search_passages(s, q, PASSAGES_PER_CLAIM, case_type=case_type)])
+    # 依條文多找（2B）：原本的搜尋與排序不動；他類判決已有搜尋裡的保留位置，這裡只補同類型
+    extras: list = []
+    taken = {p.id for p in passages}
+    for q in queries:
+        room = min(EXTRA_PER_CLAIM, EXTRA_PER_ROUND - len(extras))
+        refs = articles_in(q)  # 主張文字是案件內容：articles_in 永不寫日誌
+        if room <= 0 or not refs:
+            continue
+        for p, ref in passages_citing(s, refs, q, case_type, taken, room):
+            taken.add(p.id)
+            extras.append((p, ref))
+    via = {p.id: ref.display() for p, ref in extras}
+    passages = passages + [p for p, _ in extras]
     articles = _unique([a for q in queries for a in search_articles(s, q, ARTICLES_PER_CLAIM, case_type=case_type)])
 
     out: list[Candidate] = []
@@ -104,7 +122,7 @@ def build_candidates(s: Session, round_id: UUID) -> list[Candidate]:
                              page_text_id=pt.id))
     for i, p in enumerate(passages, start=1):
         out.append(Candidate(firm_id=rnd.firm_id, round_id=round_id, code=f"J{i}", kind="judgment",
-                             judgment_passage_id=p.id, pinned=p.id in pinned_ids))
+                             judgment_passage_id=p.id, pinned=p.id in pinned_ids, via_article=via.get(p.id)))
     for i, a in enumerate(articles, start=1):
         out.append(Candidate(firm_id=rnd.firm_id, round_id=round_id, code=f"S{i}", kind="statute",
                              statute_article_id=a.id))
@@ -130,7 +148,7 @@ def candidate_source(s: Session, c: Candidate) -> tuple[str, str]:
         j = s.get(Judgment, p.judgment_id)
         note = f"【註記：{j.annotation}】" if j.annotation else ""  # 少數見解等，AI 與律師都要看到
         pin = "【律師釘選】" if c.pinned else ""
-        return f"{j.citation}（法院判斷段）{note}{pin}", p.text
+        return f"{j.citation}（法院判斷段）{note}{pin}{passage_notes(s, p)}", p.text  # 附註只在標題行（計畫 3 丙）
     a = s.get(StatuteArticle, c.statute_article_id)
     return article_display(a.statute.name, a.article_no), a.text
 

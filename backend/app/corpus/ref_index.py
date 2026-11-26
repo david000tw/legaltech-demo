@@ -8,11 +8,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.corpus.article_refs import ArticleHit, ArticleRef, extract_articles
 from app.corpus.case_refs import UNKNOWN, CaseHit, extract_case_refs, judgment_key
+from app.corpus.search import CURATED_BOOST, MINORITY_PREFIX, _type_boost, bigrams, score
 from app.models import Judgment, JudgmentArticleRef, JudgmentCaseRef, JudgmentPassage
 
 REFS_VERSION = 1  # 規則一、二改版時加 1，部署後執行 reindex-judgments
@@ -207,3 +208,64 @@ def cited_view(s: Session, key: str) -> dict | None:
     rows = _case_rows(s, JudgmentCaseRef.key == key)
     display = rows[0][2] if rows else library[0]["citation"]
     return {"key": key, "display": display, "library": library, "citing": citing}
+
+
+# ---- AI 起草（計畫 3 丙 2B）----
+
+def passages_citing(s: Session, refs: set[ArticleRef], query: str, case_type: str | None, exclude: set[UUID],
+                    k: int) -> list[tuple[JudgmentPassage, ArticleRef]]:
+    """引用 refs 其中一條的有效法院理由段：案件有案型時只收同類型、不收少數見解、與主張的二字比對分數要大於 0；
+    依既有評分（分數 × 精選 × 同類型加權）取前 k 段，每段附上它引用到的其中一條（display 字典序最小的）。"""
+    if not refs or k <= 0:
+        return []
+    wanted = or_(*[and_(JudgmentArticleRef.law == r.law, JudgmentArticleRef.article_no == r.article_no) for r in refs])
+    rows = s.execute(
+        select(JudgmentPassage, Judgment, JudgmentArticleRef.law, JudgmentArticleRef.article_no)
+        .join(JudgmentArticleRef, JudgmentArticleRef.passage_id == JudgmentPassage.id)
+        .join(Judgment, Judgment.id == JudgmentPassage.judgment_id)
+        .where(wanted, JudgmentPassage.passage_type == "court_reasoning", *_ACTIVE)).all()
+    found: dict[UUID, tuple[JudgmentPassage, Judgment, list[ArticleRef]]] = {}
+    for p, j, law, no in rows:
+        found.setdefault(p.id, (p, j, []))[2].append(ArticleRef(law, no))
+    q = bigrams(query)
+    scored = []
+    for p, j, cited in found.values():
+        if p.id in exclude or (j.annotation or "").startswith(MINORITY_PREFIX):
+            continue
+        if case_type and case_type not in (j.case_types or []):
+            continue
+        base = score(q, p.text)
+        if base <= 0:
+            continue
+        weight = base * (CURATED_BOOST if j.curated else 1.0) * _type_boost(case_type, j.case_types)
+        scored.append((weight, str(p.id), p, min(cited, key=lambda r: r.display())))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [(p, ref) for _, _, p, ref in scored[:k]]
+
+
+def _article_order(r: ArticleRef):
+    main, _, sub = r.article_no.partition("-")
+    return (r.law, int(main), int(sub or 0))
+
+
+def passage_notes(s: Session, passage: JudgmentPassage) -> str:
+    """候選判決標題行的系統附註：「【本段引用：…】」與（要旨通過檢查時）「【要旨爭點（AI 撰寫）：…】」。
+    只放在標題行、不放進原文：引文比對只對原文，AI 把附註當原文引用會比對失敗。"""
+    from app.corpus.summary import summary_view  # summary 也用到本模組的查詢，延後載入避免循環
+
+    arts = sorted({ArticleRef(law, no) for law, no in s.execute(
+        select(JudgmentArticleRef.law, JudgmentArticleRef.article_no)
+        .where(JudgmentArticleRef.passage_id == passage.id)).all()}, key=_article_order)
+    cases = dict(s.execute(select(JudgmentCaseRef.key, JudgmentCaseRef.display)
+                           .where(JudgmentCaseRef.passage_id == passage.id)).all())
+    counts = _citing_counts(s, set(cases))
+    shown = []
+    for key in sorted(cases):
+        others = counts.get(key, 0) - 1
+        shown.append(cases[key] + (f"（庫內另有{others}份判決引用）" if others > 0 else ""))
+    parts = [x for x in ("、".join(r.display() for r in arts), "、".join(shown)) if x]
+    out = f"【本段引用：{'；'.join(parts)}】" if parts else ""
+    view = summary_view(s, s.get(Judgment, passage.judgment_id))
+    if view["status"] == "ok" and view["issues"]:
+        out += f"【要旨爭點（AI 撰寫）：{'、'.join(view['issues'])}】"
+    return out
