@@ -1,14 +1,17 @@
 """判決庫：依法條找、整份判決、庫外判決（計畫 3 丙）。律師與助理都可以用，一律在案件裡（使用者選 1A）。"""
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
 from app.api.routes_judgments import _case_or_404
 from app.auth import CurrentMember, current_member
-from app.corpus import ref_index
+from app.corpus import ref_index, summary
 from app.corpus.article_refs import parse_article_query
 from app.corpus.pins import pins_by_passage
 from app.db import tenant_session
@@ -16,6 +19,7 @@ from app.models import Judgment, JudgmentPassage
 from app.sources import PASSAGE_LABEL
 
 router = APIRouter(prefix="/api")
+log = logging.getLogger(__name__)
 
 ARTICLE_HINT = "請輸入法律名稱和條號，例如「民法第195條」或「民法195」"
 NOT_FOUND = "找不到這則判決，或已撤下"
@@ -25,12 +29,12 @@ SUPREME_IMPORTABLE = True
 
 
 def _summary(s, j: Judgment) -> dict:
-    """要旨的狀態（Task 5 接上 summary_view 前的預設）。"""
-    return {"status": "none", "issues": [], "excerpts": [], "message": None}
+    return summary.summary_view(s, j)
 
 
 def _issues(s, j: Judgment) -> list[str]:
-    return []
+    view = summary.summary_view(s, j)
+    return view["issues"] if view["status"] == "ok" else []
 
 
 def _judgment_or_404(s, judgment_id: UUID) -> Judgment:
@@ -82,3 +86,41 @@ def cited_judgment(case_id: UUID, key: str, m: CurrentMember = Depends(current_m
         if view is None:
             raise HTTPException(404, "判決庫裡沒有判決引用這個字號")
         return {**view, "supreme_importable": SUPREME_IMPORTABLE}
+
+
+class SummaryBody(BaseModel):
+    retry: bool = False
+
+
+@router.post("/cases/{case_id}/judgments/{judgment_id}/summary")
+def request_summary(case_id: UUID, judgment_id: UUID, request: Request, background: BackgroundTasks,
+                    body: SummaryBody | None = None, m: CurrentMember = Depends(current_member)) -> dict:
+    """打開整份判決時呼叫：沒有要旨或已過期就產生（背景執行）；失敗的只在按「重試」時重新產生。"""
+    retry = bool(body and body.retry)
+    with tenant_session(m.firm_id) as s:
+        _case_or_404(s, case_id)
+        j = _judgment_or_404(s, judgment_id)
+        if not summary.reasoning_passages(s, j.id):
+            return {"status": "failed", "issues": [], "excerpts": [], "message": summary.NO_REASONING}
+        view = summary.summary_view(s, j)
+    wanted = view["status"] in ("none", "stale") or (view["status"] == "failed" and retry)
+    if not wanted:
+        return view
+    try:
+        token = summary.claim(j, retry=retry, force=view["status"] == "stale")
+    except OperationalError:
+        # 常見原因：corpus_writer 是不能登入的帳號（見 docs/deploy-notes.md）；頁面其他部分照常
+        log.warning("corpus_writer 無法寫入要旨表")
+        return {"status": "unavailable", "issues": [], "excerpts": [], "message": summary.UNAVAILABLE}
+    if token is not None:
+        background.add_task(summary.run_summary, j.id, token, m.firm_id, case_id, m.id,
+                            request.app.state.settings, request.app.state.provider_factory)
+    with tenant_session(m.firm_id) as s:
+        return summary.summary_view(s, s.get(Judgment, judgment_id))
+
+
+@router.get("/cases/{case_id}/judgments/{judgment_id}/summary")
+def get_summary(case_id: UUID, judgment_id: UUID, m: CurrentMember = Depends(current_member)) -> dict:
+    with tenant_session(m.firm_id) as s:
+        _case_or_404(s, case_id)
+        return summary.summary_view(s, _judgment_or_404(s, judgment_id))

@@ -114,3 +114,11 @@ def support_schema(ids: list[str]) -> dict:
                  "verdict": {"type": "string", "enum": list(SUPPORT_VERDICTS)},
                  "explanation": _STR})
     return _obj({"items": {"type": "array", "items": item}})
+
+
+def judgment_summary_schema() -> dict:
+    """判決要旨（節錄式，計畫 3 丙）：爭點標籤＋法院理由原文節錄（附段號）。"""
+    return _obj({
+        "issues": {"type": "array", "items": _STR},
+        "excerpts": {"type": "array", "items": _obj({"passage_seq": _INT, "text": _STR})},
+    })
