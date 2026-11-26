@@ -39,6 +39,9 @@ export function IssueTags({ issues }: { issues: string[] }) {
   )
 }
 
+// 每份判決最多列幾句（設計寫「條文出現的那一句」；長篇判決可能引用同一條十幾次，其餘連到整份判決）
+const SENTENCES_SHOWN = 2
+
 // 依法條找的結果：一份判決一列，附條文出現的句子（反白條號）；上方是「最常一起引用」的判決
 function ArticleResults({ caseId, body }: { caseId: string; body: api.ArticleSearchResult }) {
   const terms = [body.article.match(/第\d+條(?:之\d+)?/)?.[0] ?? '']
@@ -64,7 +67,15 @@ function ArticleResults({ caseId, body }: { caseId: string; body: api.ArticleSea
             )}
             <IssueTags issues={r.issues} />
             <ul className="mt-2 space-y-1">
-              {r.sentences.map((x) => <li key={x} className="text-sm leading-7 text-slate-800">{highlight(x, terms)}</li>)}
+              {r.sentences.slice(0, SENTENCES_SHOWN).map((x) => (
+                <li key={x} className="text-sm leading-7 text-slate-800">{highlight(x, terms)}</li>))}
+              {r.sentences.length > SENTENCES_SHOWN && (
+                <li className="text-sm">
+                  <Link to={judgmentPath(caseId, r.judgment_id)} className="text-blue-700 underline">
+                    {`還有 ${r.sentences.length - SENTENCES_SHOWN} 句，看整份判決`}
+                  </Link>
+                </li>
+              )}
             </ul>
           </li>
         ))}

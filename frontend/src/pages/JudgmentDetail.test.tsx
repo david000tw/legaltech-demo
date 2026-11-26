@@ -53,6 +53,12 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('JudgmentDetail', () => {
+  it('uses the same centred page width as the other case pages', async () => {
+    renderPage()
+    expect(await screen.findByText('車禍慰撫金金額')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '回判決檢索' }).parentElement).toHaveClass('mx-auto', 'max-w-6xl', 'p-6')
+  })
+
   it('requests the summary once when there is none and shows it labelled as AI-written', async () => {
     renderPage()
     expect(await screen.findByText('車禍慰撫金金額')).toBeInTheDocument()

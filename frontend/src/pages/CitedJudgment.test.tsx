@@ -31,6 +31,13 @@ function renderPage() {
 beforeEach(() => vi.resetAllMocks())
 
 describe('CitedJudgment', () => {
+  it('uses the same centred page width as the other case pages', async () => {
+    vi.mocked(api.citedJudgment).mockResolvedValue(VIEW)
+    renderPage()
+    expect(await screen.findByText('最高法院51年度台上字第223號（不在判決庫）')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '回判決檢索' }).parentElement).toHaveClass('mx-auto', 'max-w-6xl', 'p-6')
+  })
+
   it('lists the judgments citing an outside judgment with the import hint', async () => {
     vi.mocked(api.citedJudgment).mockResolvedValue(VIEW)
     renderPage()

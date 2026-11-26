@@ -133,7 +133,7 @@ export default function JudgmentDetail() {
 
   return (
     <AppShell caseId={caseId}>
-      <div className="space-y-4">
+      <div className="mx-auto max-w-6xl space-y-4 p-6">
         <Link to={`/cases/${caseId}?tab=search`} className="text-sm text-blue-700 underline">回判決檢索</Link>
         {error && <p className="text-sm text-red-700">{error}</p>}
         {detail && (

@@ -283,7 +283,7 @@ def _restated_in_sentence(norm: str, qs: int, qe: int) -> bool:
     1. 句中引文之前（含引文）有角色詞，引文之後以「等語／云云」作結 → 轉述；
     2. 句中角色詞之後有「雖以／雖主張…」，引文落在它之後、下一個「然／惟／但」之前 → 轉述。"""
     s0 = norm.rfind("。", 0, qs) + 1
-    s1 = norm.find("。", qe)
+    s1 = norm.find("。", max(qs, qe - 1))  # 引文以「。」結尾時，那一句就到它為止，不延伸到下一句
     s1 = len(norm) if s1 < 0 else s1
     role = _ROLE_RE.search(norm, s0, qe)
     if role is None:

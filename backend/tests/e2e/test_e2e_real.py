@@ -31,7 +31,8 @@ from app.models import (
     Candidate, Case, Citation, Claim, Document, Draft, Judgment, JudgmentPassage, Page, Paragraph, Round, StatuteArticle,
     UsageRecord,
 )
-from app.pipeline.candidates import resolve_references, round_candidates
+from app.ai.tokens import estimate_tokens
+from app.pipeline.candidates import candidate_source, resolve_references, round_candidates
 from app.ingest.service import current_page_text
 from app.pipeline.evidence_notes import notes_view
 from app.pipeline.health import report_view
@@ -57,6 +58,9 @@ NEW_TYPE_CASES = ["spike-affair-1663", "spike-estate-159", "spike-nominee-524", 
 TITLES = {"spike-estate-159": "家事準備書狀", "estate-2": "家事準備書狀", "demo-complaint": "民事起訴狀",
           "estate-complaint": "家事起訴狀", "tc-answer": "民事答辯狀"}
 REPORT = BACKEND.parent / "docs" / "acceptance" / "e2e_report_a.json"
+# 計畫 3 丙驗收：E2E_REPORT 另存報告（不覆蓋已進版控的 e2e_report_a.json）；E2E_NO_EXTRA=1 關掉依條文多找（基準）；
+# E2E_SUMMARIES=<json> 在載入種子後寫回事先產生的要旨（測試資料庫每次清空，要旨不會留著）
+REPORT_PATH = Path(os.environ["E2E_REPORT"]).resolve() if os.environ.get("E2E_REPORT") else REPORT
 FIRM = "內部測試所（E2E 甲）"
 BAR = "(110)北律字第0001號"
 WORKERS = 5  # 本機 Claude Code 同時開太多容易撞用量上限
@@ -109,15 +113,23 @@ def _candidates(s, round_id, case_type: str) -> dict:
             j = s.get(Judgment, p.judgment_id)
             js.append({"code": c.code, "citation": j.citation, "case_types": list(j.case_types or []),
                        "other_type": case_type not in (j.case_types or []), "passage_type": p.passage_type,
-                       "annotation": j.annotation})
+                       "annotation": j.annotation, "via_article": c.via_article,
+                       "tokens": estimate_tokens(p.text)})
         elif c.kind == "statute":
             a = s.get(StatuteArticle, c.statute_article_id)
             ss.append({"code": c.code, "article": article_display(a.statute.name, a.article_no)})
     by_type = Counter(t for j in js for t in (j["case_types"] or ["（未標）"]))
     other = sum(j["other_type"] for j in js)
+    extras = [j for j in js if j["via_article"]]  # 計畫 3 丙 2B：依條文多找進來的判決段
+    titles = [candidate_source(s, c)[0] for c in rows if c.kind == "judgment"]
     return {"evidence_pages": sum(c.kind == "evidence" for c in rows), "judgments": js, "statutes": ss,
             "judgments_by_case_type": dict(by_type),
-            "other_type_ratio": round(other / len(js), 3) if js else 0.0}
+            "other_type_ratio": round(other / len(js), 3) if js else 0.0,
+            "extras": [{k: j[k] for k in ("code", "via_article", "other_type", "annotation")} for j in extras],
+            "extra_tokens": sum(j["tokens"] for j in extras),
+            "extra_minority": sum((j["annotation"] or "").startswith("少數見解") for j in extras),
+            "titles_with_reference_note": sum("【本段引用：" in t for t in titles),
+            "titles_with_summary_issues": sum("【要旨爭點（AI 撰寫）：" in t for t in titles)}
 
 
 def _expected_references(s, round_id, raw: dict | None) -> dict[int, list[str]]:
@@ -418,9 +430,31 @@ def _run_case(firm, member, name: str, round_id, recorder, settings) -> dict:
     return actions
 
 
-def test_twelve_cases_end_to_end(db):
+def _load_summaries(path: str) -> int:
+    """把 accept_summaries.py 存下的要旨（以判決字號為鍵）寫回共用的要旨表，指紋依目前段落重算。"""
+    from app.corpus.summary import fingerprint, reasoning_passages
+    from app.models import JudgmentSummary
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    n = 0
+    with admin_session() as s:
+        for citation, summ in data.items():
+            j = s.scalars(select(Judgment).where(Judgment.citation == citation)).one_or_none()
+            if j is None:
+                continue
+            s.add(JudgmentSummary(judgment_id=j.id, status="ok", fingerprint=fingerprint(reasoning_passages(s, j.id)),
+                                  issues=summ["issues"], excerpts=summ["excerpts"], model="replay"))
+            n += 1
+    return n
+
+
+def test_twelve_cases_end_to_end(db, monkeypatch):
     with admin_session() as s:
         load_seed(s, SEED)
+    if os.environ.get("E2E_NO_EXTRA"):
+        from app.pipeline import candidates as cand_mod
+        monkeypatch.setattr(cand_mod, "EXTRA_PER_CLAIM", 0)
+    if os.environ.get("E2E_SUMMARIES"):
+        assert _load_summaries(os.environ["E2E_SUMMARIES"]) > 0
     firm = create_firm(FIRM)
     member = create_member(firm, "lawyer@e2e.test", bar_number=BAR)
     rounds = {name: import_testcase(CASES_DIR / name, FIRM) for name in CASES}
@@ -431,8 +465,8 @@ def test_twelve_cases_end_to_end(db):
 
     report = {name: _collect(firm, member, name, rounds[name][1], recorders[name].select, actions[name])
               for name in CASES}
-    REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
     _assert_report(report)
 
 

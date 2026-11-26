@@ -126,6 +126,19 @@ describe('JudgmentSearchTab', () => {
       expect([...container.querySelectorAll('mark')].map((m) => m.textContent)).toEqual(['第195條'])
     })
 
+    it('shows at most two sentences per judgment and links the rest to the whole judgment', async () => {
+      const many = Array.from({ length: 5 }, (_, i) => `第${i + 1}句，民法第195條第1項定有明文。`)
+      vi.mocked(api.searchByArticle).mockResolvedValue({ ...RESULT, results: [{ ...RESULT.results[0], sentences: many }] })
+      renderTab()
+      await userEvent.click(screen.getByRole('tab', { name: '依法條' }))
+      await userEvent.type(screen.getByLabelText('法條'), '民法195')
+      await userEvent.click(screen.getByRole('button', { name: '搜尋' }))
+      expect(await screen.findByText(/^第1句/)).toBeInTheDocument()
+      expect(screen.getByText(/^第2句/)).toBeInTheDocument()
+      expect(screen.queryByText(/^第3句/)).not.toBeInTheDocument()
+      expect(screen.getByRole('link', { name: '還有 3 句，看整份判決' })).toHaveAttribute('href', '/cases/c1/judgments/j2')
+    })
+
     it('shows the hint when the article cannot be read', async () => {
       const hint = '請輸入法律名稱和條號，例如「民法第195條」或「民法195」'
       vi.mocked(api.searchByArticle).mockRejectedValue(new api.ApiError(422, hint))
