@@ -45,6 +45,22 @@ def test_verbs_before_law_name_from_real_judgments():
     assert refs("德國之民法第823條") == []
     assert refs("依入出國及移民法第1條") == []
 
+def test_article_missing_di_inside_a_list():
+    """Task 8 人工核對：臺中 114 沙簡 456 寫「191條之2」少了「第」，後面的第193、195條也跟著漏掉。"""
+    assert refs("民法第184條第1項前段、191條之2前段、第193條第1項、第195條第1項前段分別定有明文") == [
+        ArticleRef("民法", "184"), ArticleRef("民法", "191-2"), ArticleRef("民法", "193"), ArticleRef("民法", "195")]
+    assert refs("共10條規定") == []  # 沒有前一條可以接、也沒有法律名稱：不收
+
+def test_common_connectors_from_hand_check():
+    """Task 8 人工核對漏抓的常見寫法：項次清單、本文、準用、至；接續的仍只有同一部法律。"""
+    assert refs("應依民法第830條第2項準用第824條第2、3項規定") == [ArticleRef("民法", "830"), ArticleRef("民法", "824")]
+    assert refs("民法第824條第1、2項、第830條第2項、第1148條第1項前段") == [
+        ArticleRef("民法", "824"), ArticleRef("民法", "830"), ArticleRef("民法", "1148")]
+    assert refs("民法第229條第2項、第233條第1項本文、第203條分別定有明文") == [
+        ArticleRef("民法", "229"), ArticleRef("民法", "233"), ArticleRef("民法", "203")]
+    assert refs("仍應依民法第184條至第191條規定") == [ArticleRef("民法", "184"), ArticleRef("民法", "191")]
+    assert refs("民法第184條規定，準用強制執行法第128條") == [ArticleRef("民法", "184"), ArticleRef("強制執行法", "128")]
+
 def test_sub_article_and_line_breaks():
     assert refs("民法第\n191\n條之\n2") == [ArticleRef("民法", "191-2")]
 

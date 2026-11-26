@@ -36,7 +36,7 @@ def test_seed_indexes_court_reasoning_only(db):
     with admin_session() as s:
         citing = s.scalar(select(func.count(func.distinct(JudgmentCaseRef.judgment_id)))
                           .where(JudgmentCaseRef.key == SUPREME_51))
-        assert citing >= 5  # Task 8 人工核對後改成精確值
+        assert citing == 7  # Task 8 人工核對（docs/acceptance/judgment_index_report.txt）
         types = set(s.scalars(select(JudgmentPassage.passage_type)
                               .join(JudgmentCaseRef, JudgmentCaseRef.passage_id == JudgmentPassage.id)))
         types |= set(s.scalars(select(JudgmentPassage.passage_type)
@@ -51,7 +51,7 @@ def test_seed_civil_code_195_found_in_reasoning(db):
     with admin_session() as s:
         n = s.scalar(select(func.count(func.distinct(JudgmentArticleRef.judgment_id)))
                      .where(JudgmentArticleRef.law == "民法", JudgmentArticleRef.article_no == "195"))
-        assert n >= 6
+        assert n == 9  # Task 8 人工核對：9 份都是真的引用民法第195條
         assert s.scalar(select(func.count()).select_from(JudgmentArticleRef)
                         .where(JudgmentArticleRef.law == "保險法", JudgmentArticleRef.article_no == "32")) == 0
 

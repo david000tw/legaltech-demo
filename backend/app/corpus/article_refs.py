@@ -41,9 +41,11 @@ BOUNDARY_WORDS = ("依照", "按照", "類推適用", "適用", "準用", "違�
 
 SENTENCE_LIMIT = 200
 _NAMES = sorted(set(LAW_NAMES) | set(LAW_ALIASES), key=len, reverse=True)  # 最長的先比
-_ART = re.compile(r"第(\d+)條(?:之(\d+))?")
+# 「第」可以省略（判決偶有「191條之2」這種漏字寫法）；沒寫法律名稱時仍只能接續緊鄰的前一條
+_ART = re.compile(r"(?<!\d)第?(\d+)條(?:之(\d+))?")
 _GENERIC = re.compile(r"([一-鿿]{1,12}(?:法|條例|規則|細則|辦法|通則))$")
-_FILLER = re.compile(r"(?:第\d+[項款目]|前段|後段|但書|[、及與或暨並,])*")
+# 沒寫法律名稱的條文與前一條之間只能有這些：項款目（含「第1、2項」）、前段後段但書本文、準用、至、連接字
+_FILLER = re.compile(r"(?:第\d+(?:[、,]\d+)*[項款目]|前段|後段|但書|本文|準用|至|[、及與或暨並,])*")
 _CJK = re.compile(r"[一-鿿]")
 _ENDS = "。;"
 
