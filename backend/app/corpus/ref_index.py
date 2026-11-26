@@ -11,8 +11,8 @@ from uuid import UUID
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.corpus.article_refs import ArticleHit, extract_articles
-from app.corpus.case_refs import CaseHit, extract_case_refs, judgment_key
+from app.corpus.article_refs import ArticleHit, ArticleRef, extract_articles
+from app.corpus.case_refs import UNKNOWN, CaseHit, extract_case_refs, judgment_key
 from app.models import Judgment, JudgmentArticleRef, JudgmentCaseRef, JudgmentPassage
 
 REFS_VERSION = 1  # 規則一、二改版時加 1，部署後執行 reindex-judgments
@@ -83,3 +83,127 @@ def reindex_all(admin_s: Session) -> int:
 def stale_index_count(s: Session) -> int:
     return s.scalar(select(func.count()).select_from(Judgment)
                     .where(Judgment.refs_version.is_distinct_from(REFS_VERSION))) or 0
+
+
+# ---- 查詢（計畫 3 丙 Task 4）：全部只算有效的判決與段落 ----
+
+_ACTIVE = (Judgment.status == "active", JudgmentPassage.status == "active")
+
+
+def _article_rows(s: Session, ref: ArticleRef):
+    return s.execute(
+        select(JudgmentArticleRef.judgment_id, JudgmentArticleRef.sentence)
+        .join(JudgmentPassage, JudgmentPassage.id == JudgmentArticleRef.passage_id)
+        .join(Judgment, Judgment.id == JudgmentArticleRef.judgment_id)
+        .where(JudgmentArticleRef.law == ref.law, JudgmentArticleRef.article_no == ref.article_no, *_ACTIVE)
+        .order_by(JudgmentArticleRef.judgment_id, JudgmentPassage.seq)).all()
+
+
+def _case_rows(s: Session, *where):
+    return s.execute(
+        select(JudgmentCaseRef.judgment_id, JudgmentCaseRef.key, JudgmentCaseRef.display, JudgmentCaseRef.sentence)
+        .join(JudgmentPassage, JudgmentPassage.id == JudgmentCaseRef.passage_id)
+        .join(Judgment, Judgment.id == JudgmentCaseRef.judgment_id)
+        .where(*where, *_ACTIVE)
+        .order_by(JudgmentCaseRef.judgment_id, JudgmentPassage.seq)).all()
+
+
+def judgment_brief(j: Judgment) -> dict:
+    return {"judgment_id": str(j.id), "citation": j.citation, "court": j.court,
+            "decided_on": j.decided_on.isoformat(), "case_types": list(j.case_types or []), "annotation": j.annotation}
+
+
+def _sort_key(j: Judgment, case_type: str | None):
+    return (not (case_type and case_type in (j.case_types or [])), not j.curated, -j.decided_on.toordinal(), j.citation)
+
+
+def article_results(s: Session, ref: ArticleRef, case_type: str | None, *, offset: int = 0,
+                    limit: int = 50) -> tuple[int, list[dict]]:
+    """引用這條的判決，一份一筆，附條文出現的句子。排序：同案型 → 精選 → 新到舊 → 字號。"""
+    sentences: dict[UUID, list[str]] = {}
+    for jid, sentence in _article_rows(s, ref):
+        if sentence not in sentences.setdefault(jid, []):
+            sentences[jid].append(sentence)
+    judgments = sorted((s.get(Judgment, jid) for jid in sentences), key=lambda j: _sort_key(j, case_type))
+    page = judgments[offset:offset + limit]
+    return len(judgments), [{**judgment_brief(j), "sentences": sentences[j.id]} for j in page]
+
+
+def _citing_counts(s: Session, keys: set[str]) -> dict[str, int]:
+    if not keys:
+        return {}
+    rows = s.execute(
+        select(JudgmentCaseRef.key, func.count(func.distinct(JudgmentCaseRef.judgment_id)))
+        .join(JudgmentPassage, JudgmentPassage.id == JudgmentCaseRef.passage_id)
+        .join(Judgment, Judgment.id == JudgmentCaseRef.judgment_id)
+        .where(JudgmentCaseRef.key.in_(keys), *_ACTIVE).group_by(JudgmentCaseRef.key)).all()
+    return dict(rows)
+
+
+def co_cited(s: Session, ref: ArticleRef, limit: int = 3) -> list[dict]:
+    """引用這條的判決最常一起引用的判決（法院不明的不列）。"""
+    citing = {jid for jid, _ in _article_rows(s, ref)}
+    if not citing:
+        return []
+    by_key: dict[str, set] = {}
+    display: dict[str, str] = {}
+    for jid, key, disp, _ in _case_rows(s, JudgmentCaseRef.judgment_id.in_(citing)):
+        if key.startswith(UNKNOWN + "|"):
+            continue
+        by_key.setdefault(key, set()).add(jid)
+        display.setdefault(key, disp)
+    ranked = sorted(by_key, key=lambda k: (-len(by_key[k]), k))[:limit]
+    return [{"key": k, "display": display[k], "count": len(by_key[k])} for k in ranked]
+
+
+def library_for(s: Session, key: str) -> list[dict]:
+    """比對鍵對到的庫內有效判決（刑事鍵永遠對不到：庫內判決的鍵沒有「|刑」）。"""
+    rows = s.scalars(select(Judgment).where(Judgment.case_key == key, Judgment.status == "active")
+                     .order_by(Judgment.citation))
+    return [{"judgment_id": str(j.id), "citation": j.citation} for j in rows]
+
+
+def judgment_cites(s: Session, judgment_id: UUID) -> list[dict]:
+    first: dict[str, str] = {}
+    for _, key, disp, _ in _case_rows(s, JudgmentCaseRef.judgment_id == judgment_id):
+        first.setdefault(key, disp)
+    counts = _citing_counts(s, set(first))
+    return [{"key": k, "display": d, "library": library_for(s, k), "citing_count": counts.get(k, 0),
+             "supreme": k.startswith("最高法院|")} for k, d in first.items()]
+
+
+def _citing_list(s: Session, key: str, exclude: UUID | None = None) -> list[dict]:
+    out: dict[UUID, dict] = {}
+    for jid, _, _, sentence in _case_rows(s, JudgmentCaseRef.key == key):
+        if jid != exclude and jid not in out:
+            j = s.get(Judgment, jid)
+            out[jid] = {"judgment_id": str(jid), "citation": j.citation, "sentence": sentence}
+    return sorted(out.values(), key=lambda x: x["citation"])
+
+
+def judgment_cited_by(s: Session, judgment: Judgment) -> list[dict]:
+    return _citing_list(s, judgment.case_key, exclude=judgment.id) if judgment.case_key else []
+
+
+def judgment_articles(s: Session, judgment_id: UUID) -> list[dict]:
+    rows = s.execute(
+        select(JudgmentArticleRef.law, JudgmentArticleRef.article_no)
+        .join(JudgmentPassage, JudgmentPassage.id == JudgmentArticleRef.passage_id)
+        .where(JudgmentArticleRef.judgment_id == judgment_id, JudgmentPassage.status == "active")
+        .order_by(JudgmentPassage.seq, JudgmentArticleRef.id)).all()
+    seen: list[ArticleRef] = []
+    for law, no in rows:
+        if (ref := ArticleRef(law, no)) not in seen:
+            seen.append(ref)
+    return [{"display": r.display(), "query": r.display()} for r in seen]
+
+
+def cited_view(s: Session, key: str) -> dict | None:
+    """一個被引用的字號：庫內有哪幾份、誰引用它。沒有人引用、庫裡也沒有就回 None。"""
+    citing = _citing_list(s, key)
+    library = library_for(s, key)
+    if not citing and not library:
+        return None
+    rows = _case_rows(s, JudgmentCaseRef.key == key)
+    display = rows[0][2] if rows else library[0]["citation"]
+    return {"key": key, "display": display, "library": library, "citing": citing}

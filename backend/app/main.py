@@ -10,8 +10,8 @@ from starlette.concurrency import run_in_threadpool
 from app import db
 from app.ai.provider import check_startup, get_provider
 from app.api import (
-    routes_auth, routes_cases, routes_drafts, routes_evidence, routes_health, routes_judgments, routes_rounds,
-    routes_ocr, routes_sources, routes_support, routes_tools, routes_usage,
+    routes_auth, routes_cases, routes_drafts, routes_evidence, routes_health, routes_judgment_links, routes_judgments,
+    routes_ocr, routes_rounds, routes_sources, routes_support, routes_tools, routes_usage,
 )
 from app.config import Settings
 from app.corpus.importer import fetch_pdf
@@ -81,6 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(routes_evidence.router)
     app.include_router(routes_health.router)
     app.include_router(routes_judgments.router)
+    app.include_router(routes_judgment_links.router)
     app.include_router(routes_tools.router)
     app.include_router(routes_usage.router)
     app.include_router(routes_ocr.router)

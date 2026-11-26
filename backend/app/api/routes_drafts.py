@@ -152,6 +152,7 @@ def citation_source(citation_id: UUID, m: CurrentMember = Depends(current_member
             p = s.get(JudgmentPassage, c.judgment_passage_id)
             title = f"{s.get(Judgment, p.judgment_id).citation}（{PASSAGE_LABEL[p.passage_type]}）"
             text = p.text
+            image = {"judgment_id": str(p.judgment_id)}  # 草稿的引用卡可以「看整份判決」（計畫 3 丙）
         elif c.kind == "statute" and c.statute_article_id:
             a = s.get(StatuteArticle, c.statute_article_id)
             title, text = article_display(a.statute.name, a.article_no), a.text

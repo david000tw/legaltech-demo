@@ -11,7 +11,7 @@ from app.models import Judgment, JudgmentPassage, PinnedPassage
 
 def passage_json(s: Session, passage: JudgmentPassage, pin: PinnedPassage | None) -> dict:
     j = s.get(Judgment, passage.judgment_id)
-    return {"passage_id": str(passage.id), "citation": j.citation, "court": j.court,
+    return {"passage_id": str(passage.id), "judgment_id": str(j.id), "citation": j.citation, "court": j.court,
             "decided_on": j.decided_on.isoformat(), "text": passage.text, "annotation": j.annotation,
             "pin_id": str(pin.id) if pin else None, "note": pin.note if pin else ""}
 
