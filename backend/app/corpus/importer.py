@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import http.client
 import io
+import logging
 import re
+import uuid
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -19,8 +21,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.corpus.case_refs import judgment_key
+from app.corpus.ref_index import REFS_VERSION, build_refs, insert_refs
 from app.corpus.splitter import split_judgment, split_problems
 from app.models import Judgment, JudgmentPassage
+
+log = logging.getLogger(__name__)
 
 HOST = "judgment.judicial.gov.tw"
 USER_AGENT = "legaltech-judgment-import/0.1"
@@ -156,16 +162,29 @@ def import_judgment(corpus_s: Session, ref: JudgmentRef, full_text: str, case_ty
     if split_problems(passages, full_text, False):
         raise ImportRejected(UNSPLITTABLE)
     court, _ = _header(full_text)
+    own_key = judgment_key(citation)
+    numbered = [(seq, kind, text) for seq, (kind, text) in enumerate(passages, start=1)]
+    # 判決索引（計畫 3 丙）：corpus_writer 不能修改 judgments，所以在新增判決之前就把索引全部算好；
+    # 規則出錯不擋住加入判決，refs_version 留空，之後由 reindex-judgments 補
+    try:
+        rows = build_refs(court, own_key, numbered)
+    except Exception:  # noqa: BLE001
+        log.exception("判決索引規則出錯，判決照常加入，之後由 reindex-judgments 補")
+        rows = None
     j = Judgment(citation=citation, court=court, court_level=_LEVEL.get(ref.court_code[2], "district"),
                  decided_on=ref.decided_on, source_url=pdf_url(ref), source_key=ref.key, full_text=full_text,
-                 status="active", curated=False, case_types=[case_type])
+                 status="active", curated=False, case_types=[case_type], case_key=own_key,
+                 refs_version=REFS_VERSION if rows is not None else None)
+    ids = {seq: uuid.uuid4() for seq, _, _ in numbered}
     try:
         with corpus_s.begin_nested():
             corpus_s.add(j)
             corpus_s.flush()
-            corpus_s.add_all(JudgmentPassage(judgment_id=j.id, seq=seq, passage_type=kind, text=text, status="active")
-                             for seq, (kind, text) in enumerate(passages, start=1))
+            corpus_s.add_all(JudgmentPassage(id=ids[seq], judgment_id=j.id, seq=seq, passage_type=kind, text=text,
+                                             status="active") for seq, kind, text in numbered)
             corpus_s.flush()
+            if rows is not None:
+                insert_refs(corpus_s, j, rows, ids)
     except IntegrityError:
         # 兩人同時加入同一件：另一邊先寫入了，回傳那一筆
         existing = _find_by_key(corpus_s, ref.key)

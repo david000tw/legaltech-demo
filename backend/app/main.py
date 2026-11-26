@@ -49,7 +49,20 @@ async def lifespan(app: FastAPI):
                 log.warning("啟動時把 %d 個輪次階段、%d 筆 AI 工作標成中斷", rounds, jobs)
         except Exception:
             log.exception("啟動時標記中斷的輪次與 AI 工作失敗；這些要等逾時才會出現「重試」")
+    try:  # 判決索引（計畫 3 丙）：規則改版或部署後忘了重算，就提醒；只讀，所有環境都檢查，失敗不擋啟動
+        n = await asyncio.wait_for(run_in_threadpool(_stale_judgment_index), STARTUP_RECOVERY_TIMEOUT_S)
+        if n:
+            log.warning("有 %d 份判決的索引需要重算：python -m app.cli reindex-judgments", n)
+    except Exception:
+        log.exception("啟動時檢查判決索引版本失敗")
     yield
+
+
+def _stale_judgment_index() -> int:
+    from app.corpus.ref_index import stale_index_count
+    from app.db import app_session
+    with app_session() as s:
+        return stale_index_count(s)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

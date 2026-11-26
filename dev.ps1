@@ -26,6 +26,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '判決庫寫入帳號設定失敗' }
     uv run python -m app.cli load-calendar  # 行政機關辦公日曆（期限試算用），可重跑
     if ($LASTEXITCODE -ne 0) { throw '辦公日曆匯入失敗' }
+    uv run python -m app.cli reindex-judgments  # 判決的條文索引與引用關係（計畫 3 丙），可重跑
+    if ($LASTEXITCODE -ne 0) { throw '判決索引重算失敗' }
 } finally {
     Pop-Location
 }

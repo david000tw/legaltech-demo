@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.corpus.importer import ImportRejected, parse_judgment_url
+from app.corpus.ref_index import REFS_VERSION, reindex_one
 from app.corpus.splitter import split_judgment
 from app.models import Candidate, Citation, Judgment, JudgmentPassage, PinnedPassage, Statute, StatuteArticle
 
@@ -49,12 +50,17 @@ def load_seed(admin_s: Session, seed_dir: Path, resplit: bool = False) -> tuple[
             existing.case_types = list(d.get("case_types", []))  # 標籤與註記可隨種子更新；全文不動
             existing.annotation = d.get("annotation")
             existing.source_key = existing.source_key or _source_key(existing.source_url)
+            resplit_done = False
             if resplit:
                 if _referenced(admin_s, existing.id):
                     log.warning("判決 %s 已被引用，不重切", existing.citation)
                 else:
                     admin_s.execute(delete(JudgmentPassage).where(JudgmentPassage.judgment_id == existing.id))
                     _insert_passages(admin_s, existing)
+                    resplit_done = True
+            if resplit_done or existing.refs_version != REFS_VERSION:  # 重切後或規則改版：重建判決索引（計畫 3 丙）
+                admin_s.flush()
+                reindex_one(admin_s, existing)
             continue
         j = Judgment(citation=d["citation"], court=d["court"], court_level=d["court_level"],
                      decided_on=date.fromisoformat(d["decided_on"]), source_url=d["source_url"],
@@ -64,6 +70,8 @@ def load_seed(admin_s: Session, seed_dir: Path, resplit: bool = False) -> tuple[
         admin_s.add(j)
         admin_s.flush()
         _insert_passages(admin_s, j)
+        admin_s.flush()
+        reindex_one(admin_s, j)  # 判決索引與 case_key（計畫 3 丙）
         new_j += 1
     for f in sorted((Path(seed_dir) / "statutes").glob("*.json")):
         d = json.loads(f.read_text(encoding="utf-8"))

@@ -366,6 +366,10 @@ class Judgment(Base):
     curated: Mapped[bool] = mapped_column(Boolean, default=False)
     case_types: Mapped[list] = _tags()  # 案型標籤，可多個
     annotation: Mapped[str | None] = mapped_column(Text)  # 例如「少數見解：否定配偶權」，給 AI 與律師看
+    # 計畫 3 丙：自己的比對鍵「法院|年|字別|號」（「臺」寫成「台」），讓引用它的判決接得上；
+    # refs_version＝建索引時的規則版本，與 ref_index.REFS_VERSION 不同就要重算（None＝還沒建或建失敗）
+    case_key: Mapped[str | None] = mapped_column(String(120), index=True)
+    refs_version: Mapped[int | None] = mapped_column(Integer)
 
 
 class JudgmentPassage(Base):
@@ -381,6 +385,62 @@ class JudgmentPassage(Base):
     text: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="active")
     judgment: Mapped[Judgment] = relationship()
+
+
+class JudgmentArticleRef(Base):
+    """判決索引：法院理由段引用的條文（計畫 3 丙，規則一，app/corpus/article_refs.py）。公開表。
+    只存法律名稱＋條號，不連法規庫：查詢時再用名稱與條號對，法規庫擴充後也不會過期。"""
+    __tablename__ = "judgment_article_refs"
+    __table_args__ = (
+        UniqueConstraint("passage_id", "law", "article_no", name="uq_judgment_article_ref"),
+        Index("ix_judgment_article_refs_law_article", "law", "article_no"),
+        Index("ix_judgment_article_refs_judgment", "judgment_id"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    judgment_id: Mapped[uuid.UUID] = _public_fk("judgments.id", nullable=False, ondelete="CASCADE")
+    passage_id: Mapped[uuid.UUID] = _public_fk("judgment_passages.id", nullable=False, ondelete="CASCADE")
+    law: Mapped[str] = mapped_column(String(50))
+    article_no: Mapped[str] = mapped_column(String(20))
+    sentence: Mapped[str] = mapped_column(Text)
+
+
+class JudgmentCaseRef(Base):
+    """判決索引：法院理由段以「…意旨參照」等方式引用的判決（計畫 3 丙，規則二，app/corpus/case_refs.py）。
+    key 是「法院|年|字別|號」，和被引用判決的 Judgment.case_key 相同時就接上。公開表。"""
+    __tablename__ = "judgment_case_refs"
+    __table_args__ = (
+        UniqueConstraint("passage_id", "key", name="uq_judgment_case_ref"),
+        Index("ix_judgment_case_refs_key", "key"),
+        Index("ix_judgment_case_refs_judgment", "judgment_id"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    judgment_id: Mapped[uuid.UUID] = _public_fk("judgments.id", nullable=False, ondelete="CASCADE")
+    passage_id: Mapped[uuid.UUID] = _public_fk("judgment_passages.id", nullable=False, ondelete="CASCADE")
+    key: Mapped[str] = mapped_column(String(120))
+    display: Mapped[str] = mapped_column(String(200))
+    sentence: Mapped[str] = mapped_column(Text)
+
+
+class JudgmentSummary(Base):
+    """判決要旨（節錄式，計畫 3 丙）：每份判決一列，所有事務所共用；第一次打開時產生（app/corpus/summary.py）。
+    claim_token／claimed_at 是認領代號與心跳：同一份判決同一時間只產生一次，被接手後舊工作晚寫回無效。
+    只存失敗種類（error_kind），不存 AI 服務回傳的錯誤訊息全文。"""
+    __tablename__ = "judgment_summaries"
+    __table_args__ = (
+        _enum("status", ("generating", "ok", "failed"), "ck_judgment_summary_status"),
+        UniqueConstraint("judgment_id", name="uq_judgment_summary_judgment"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    judgment_id: Mapped[uuid.UUID] = _public_fk("judgments.id", nullable=False, ondelete="CASCADE")
+    status: Mapped[str] = mapped_column(String(20))
+    claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    issues: Mapped[list] = _jsonb_list()
+    excerpts: Mapped[list] = _jsonb_list()
+    model: Mapped[str | None] = mapped_column(String(100))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_kind: Mapped[str | None] = mapped_column(String(40))
 
 
 class Statute(Base):
@@ -421,6 +481,8 @@ class Candidate(Base):
     statute_article_id: Mapped[uuid.UUID | None] = _public_fk("statute_articles.id")
     # 建候選時這段是不是律師釘選；之後取消釘選不改變舊輪次的標示
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # 計畫 3 丙 2B：因為主張寫到這條法律而多找進來的判決段，記下是哪一條（例如「民法第195條」）
+    via_article: Mapped[str | None] = mapped_column(String(100))
 
 
 class Draft(Base):
@@ -782,7 +844,8 @@ class WorkCalendarDay(Base):
     note: Mapped[str] = mapped_column(Text, default="")
 
 
-PUBLIC_TABLES = ("judgments", "judgment_passages", "statutes", "statute_articles", "work_calendar")
+PUBLIC_TABLES = ("judgments", "judgment_passages", "statutes", "statute_articles", "work_calendar",
+                 "judgment_article_refs", "judgment_case_refs", "judgment_summaries")
 # 合規門檻欄位（is_internal_test、bar_verified、role）所在的表：一般請求用的帳號只能讀。
 READ_ONLY_FOR_APP = ("firms", "members")
 

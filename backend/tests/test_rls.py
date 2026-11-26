@@ -160,11 +160,24 @@ def test_corpus_writer_only_writes_corpus(db):
                 "insert into judgments (id, citation, court, court_level, decided_on, source_url, full_text, status,"
                 " curated) values (gen_random_uuid(), 'x', 'y', 'district', '2025-01-01', 'u', 't', 'active', false)"
                 " returning id")).scalar_one()
-            c.execute(text("insert into judgment_passages (id, judgment_id, seq, passage_type, text, status) "
-                           "values (gen_random_uuid(), :j, 1, 'court_reasoning', 't', 'active')"), {"j": jid})
+            pid = c.execute(text("insert into judgment_passages (id, judgment_id, seq, passage_type, text, status) "
+                                 "values (gen_random_uuid(), :j, 1, 'court_reasoning', 't', 'active') returning id"),
+                            {"j": jid}).scalar_one()
+            # 計畫 3 丙：判決索引與要旨也由它寫入；要旨只能改狀態與結果欄位
+            c.execute(text("insert into judgment_article_refs (id, judgment_id, passage_id, law, article_no, sentence) "
+                           "values (gen_random_uuid(), :j, :p, '民法', '195', 's')"), {"j": jid, "p": pid})
+            c.execute(text("insert into judgment_case_refs (id, judgment_id, passage_id, key, display, sentence) "
+                           "values (gen_random_uuid(), :j, :p, 'k', 'd', 's')"), {"j": jid, "p": pid})
+            c.execute(text("insert into judgment_summaries (id, judgment_id, status, fingerprint, issues, excerpts) "
+                           "values (gen_random_uuid(), :j, 'generating', 'f', '[]', '[]')"), {"j": jid})
+            c.execute(text("update judgment_summaries set status = 'failed', error_kind = 'timeout'"))
         for stmt in ("insert into cases (id, firm_id, title, our_side) "
                      "values (gen_random_uuid(), gen_random_uuid(), 't', 'plaintiff')",
                      "update judgments set court = 'z'",
+                     "update judgments set case_key = 'x'",
+                     "update judgment_summaries set judgment_id = gen_random_uuid()",
+                     "delete from judgment_article_refs",
+                     "delete from judgment_summaries",
                      "delete from judgment_passages",
                      "insert into statutes (id, name) values (gen_random_uuid(), 'x')"):
             with pytest.raises(DBAPIError):

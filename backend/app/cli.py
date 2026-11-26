@@ -19,6 +19,7 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.auth import hash_password
+from app.corpus.ref_index import reindex_all
 from app.corpus.seed_loader import load_seed
 from app.db import admin_session
 from app.ingest.service import ingest_document
@@ -105,6 +106,13 @@ def cmd_load_seed(a) -> None:
     print(f"judgments_added={j} articles_added={art}")
 
 
+def cmd_reindex_judgments(a) -> None:
+    """判決索引重算（計畫 3 丙）：規則改版、部署後執行一次。"""
+    with admin_session() as s:
+        n = reindex_all(s)
+    print(f"judgments_reindexed={n}")
+
+
 def cmd_load_calendar(a) -> None:
     with admin_session() as s:
         n = load_calendar(s, SEED_DIR / "calendar")
@@ -138,6 +146,9 @@ def build_parser() -> argparse.ArgumentParser:
     ls = sub.add_parser("load-seed")
     ls.add_argument("--resplit", action="store_true")
     ls.set_defaults(func=cmd_load_seed)
+
+    ri = sub.add_parser("reindex-judgments")
+    ri.set_defaults(func=cmd_reindex_judgments)
 
     cal = sub.add_parser("load-calendar")
     cal.set_defaults(func=cmd_load_calendar)
