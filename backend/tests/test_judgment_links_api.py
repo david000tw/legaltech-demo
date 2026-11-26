@@ -69,6 +69,8 @@ def test_article_search_lists_judgments_with_sentences(lawyer_client):
     assert types[0] is True
     assert all(set(row) >= {"judgment_id", "citation", "court", "decided_on", "case_types", "annotation", "issues"}
                for row in body["results"])
+    from app.case_types import CASE_TYPES
+    assert all(row["case_type_labels"] == [CASE_TYPES[c].label for c in row["case_types"]] for row in body["results"])
 
 
 @pytest.mark.parametrize("q", ["195", "民法", "abc", "民" * 200])
@@ -106,6 +108,7 @@ def test_judgment_detail_has_passages_cites_and_pin_state(lawyer_client):
     j = _citing_195_and_51()
     body = client.get(f"/api/cases/{case_id}/judgments/{j.id}").json()
     assert body["citation"] == j.citation and body["source_url"] == j.source_url
+    assert len(body["case_type_labels"]) == len(body["case_types"]) >= 1
     cite = next(c for c in body["cites"] if c["key"] == SUPREME_51)
     assert cite["library"] == [] and cite["citing_count"] >= 2 and cite["supreme"] is True
     assert cite["display"] == "最高法院51年度台上字第223號"

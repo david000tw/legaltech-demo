@@ -68,7 +68,8 @@ def judgment_detail(case_id: UUID, judgment_id: UUID, m: CurrentMember = Depends
             JudgmentPassage.judgment_id == j.id, JudgmentPassage.status == "active").order_by(JudgmentPassage.seq))
         return {
             "id": str(j.id), "citation": j.citation, "court": j.court, "decided_on": j.decided_on.isoformat(),
-            "case_types": list(j.case_types or []), "annotation": j.annotation, "source_url": j.source_url,
+            "case_types": list(j.case_types or []), "case_type_labels": ref_index.case_type_labels(j.case_types),
+            "annotation": j.annotation, "source_url": j.source_url,
             "articles": ref_index.judgment_articles(s, j.id), "cites": ref_index.judgment_cites(s, j.id),
             "cited_by": ref_index.judgment_cited_by(s, j),
             "passages": [{"passage_id": str(p.id), "seq": p.seq, "passage_type": p.passage_type,

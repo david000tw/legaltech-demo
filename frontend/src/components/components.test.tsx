@@ -90,6 +90,18 @@ describe('SourcePane', () => {
     expect(container.querySelector('mark')?.textContent).toBe('乙丙')
   })
 
+  it('links a judgment citation to the whole judgment in a new tab', () => {
+    render(<SourcePane caseId="c1" source={{ kind: 'judgment', title: '判決', text: '甲乙丙', span: null, judgment_id: 'j1' }} />)
+    const link = screen.getByRole('link', { name: '看整份判決' })
+    expect(link).toHaveAttribute('href', '/cases/c1/judgments/j1')
+    expect(link).toHaveAttribute('target', '_blank')
+  })
+
+  it('has no whole-judgment link for evidence', () => {
+    render(<SourcePane caseId="c1" source={{ kind: 'evidence', title: '原證1第1頁', text: '甲', span: null }} />)
+    expect(screen.queryByRole('link', { name: '看整份判決' })).not.toBeInTheDocument()
+  })
+
   it('prompts when nothing is selected', () => {
     render(<SourcePane source={null} />)
     expect(screen.getByText(/點選引用/)).toBeInTheDocument()

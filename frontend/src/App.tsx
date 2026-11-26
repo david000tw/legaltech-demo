@@ -3,8 +3,10 @@ import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 import * as api from './api'
 import { MeContext } from './MeContext'
 import CaseDetail from './pages/CaseDetail'
+import CitedJudgment from './pages/CitedJudgment'
 import Cases from './pages/Cases'
 import DraftEditor from './pages/DraftEditor'
+import JudgmentDetail from './pages/JudgmentDetail'
 import Login from './pages/Login'
 import ToolsPage from './pages/ToolsPage'
 import UsagePage from './pages/UsagePage'
@@ -31,6 +33,8 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/cases" element={<RequireLogin><Cases /></RequireLogin>} />
       <Route path="/cases/:caseId" element={<RequireLogin><CaseDetailRoute /></RequireLogin>} />
+      <Route path="/cases/:caseId/judgments/:judgmentId" element={<RequireLogin><JudgmentDetail /></RequireLogin>} />
+      <Route path="/cases/:caseId/cited/:key" element={<RequireLogin><CitedJudgment /></RequireLogin>} />
       <Route path="/drafts/:draftId" element={<RequireLogin><DraftEditor /></RequireLogin>} />
       <Route path="/tools" element={<RequireLogin><ToolsPage /></RequireLogin>} />
       <Route path="/usage" element={<RequireLogin><UsagePage /></RequireLogin>} />

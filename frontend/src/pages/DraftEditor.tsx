@@ -298,6 +298,7 @@ export default function DraftEditor({ pollMs = POLL_MS }: { pollMs?: number } = 
           </div>
           {tab === 'source' && (
             <SourcePane source={source} citation={sourceCitation} canReview={draft.can_review} onConfirmCourt={confirmCourt}
+              caseId={draft.case_id}
               onVerify={verifySource} />
           )}
           {tab === 'notes' && (

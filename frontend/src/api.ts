@@ -189,7 +189,8 @@ export type CitationSource = { kind: string; title: string; text: string; span: 
   annotation?: string | null
   // 卷證引用（計畫 2A）：原文卡片並排原圖；needs_check＝辨識文字、律師要對照後才能標記已審
   page_id?: string; has_image?: boolean; needs_check?: boolean; version?: number
-  alerts?: OcrAlert[] }  // 這一頁目前版本的提醒（卡片勾「已對照原圖」會解除整頁，要看得到）
+  alerts?: OcrAlert[]  // 這一頁目前版本的提醒（卡片勾「已對照原圖」會解除整頁，要看得到）
+  judgment_id?: string }  // 判決引用：可以「看整份判決」（計畫 3 丙）
 export type CitationInput = { code: string; quote: string }
 
 async function detail(r: Response): Promise<{ message: string; code?: string; reasons?: string[] }> {
@@ -440,8 +441,8 @@ export const getHealthReport = (roundId: string) =>
   req<{ report: HealthReportView | null; job: JobView | null }>(`/rounds/${roundId}/health`)
 
 // 判決檢索與釘選（設計 5.9）：只列法院判斷段；pin_id 有值＝本案已釘選
-export type PassageView = { passage_id: string; citation: string; court: string; decided_on: string; text: string
-  annotation: string | null; pin_id: string | null; note: string }
+export type PassageView = { passage_id: string; judgment_id: string; citation: string; court: string; decided_on: string
+  text: string; annotation: string | null; pin_id: string | null; note: string }
 export type ImportedJudgment = { judgment: { citation: string; court: string; decided_on: string }; created: boolean
   passages: PassageView[] }
 export const searchJudgments = (caseId: string, q: string, scope: 'case_type' | 'all') =>
@@ -458,6 +459,36 @@ export async function deletePin(pinId: string): Promise<void> {
 // 貼司法院判決網址加入判決庫：伺服器自己向司法院下載
 export const importJudgment = (caseId: string, url: string) =>
   req<ImportedJudgment>(`/cases/${caseId}/judgments/import`, json('POST', { url }))
+// 判決庫（計畫 3 丙）：依法條找、整份判決、庫外判決、要旨（節錄式）；全部在案件裡用
+export type ArticleSearchRow = { judgment_id: string; citation: string; court: string; decided_on: string
+  case_types: string[]; case_type_labels: string[]; annotation: string | null; sentences: string[]; issues: string[] }
+export type CoCited = { key: string; display: string; count: number }
+export type ArticleSearchResult = { article: string; total: number; results: ArticleSearchRow[]; co_cited: CoCited[] }
+// none＝還沒有、stale＝過期（打開時會重新產生）、unavailable＝伺服器沒設定判決庫寫入帳號
+export type SummaryStatus = 'none' | 'stale' | 'generating' | 'ok' | 'failed' | 'unavailable'
+export type SummaryExcerpt = { passage_seq: number; text: string; span: [number, number] }
+export type SummaryView = { status: SummaryStatus; issues: string[]; excerpts: SummaryExcerpt[]; message: string | null }
+export type LibraryRef = { judgment_id: string; citation: string }
+export type CitedRef = { key: string; display: string; library: LibraryRef[]; citing_count: number; supreme: boolean }
+export type CitingRef = { judgment_id: string; citation: string; sentence: string }
+export type JudgmentPassageView = { passage_id: string; seq: number; passage_type: string; label: string; text: string
+  pin_id: string | null }
+export type JudgmentDetailView = { id: string; citation: string; court: string; decided_on: string; case_types: string[]
+  case_type_labels: string[]
+  annotation: string | null; source_url: string; articles: { display: string; query: string }[]; cites: CitedRef[]
+  cited_by: CitingRef[]; passages: JudgmentPassageView[]; summary: SummaryView; supreme_importable: boolean }
+export type CitedView = { key: string; display: string; library: LibraryRef[]; citing: CitingRef[]
+  supreme_importable: boolean }
+export const searchByArticle = (caseId: string, q: string) =>
+  req<ArticleSearchResult>(`/cases/${caseId}/article-search?q=${encodeURIComponent(q)}`)
+export const judgmentDetail = (caseId: string, judgmentId: string) =>
+  req<JudgmentDetailView>(`/cases/${caseId}/judgments/${judgmentId}`)
+export const citedJudgment = (caseId: string, key: string) =>
+  req<CitedView>(`/cases/${caseId}/cited/${encodeURIComponent(key)}`)
+export const requestSummary = (caseId: string, judgmentId: string, retry = false) =>
+  req<SummaryView>(`/cases/${caseId}/judgments/${judgmentId}/summary`, json('POST', { retry }))
+export const judgmentSummary = (caseId: string, judgmentId: string) =>
+  req<SummaryView>(`/cases/${caseId}/judgments/${judgmentId}/summary`)
 // 把釘選的判決插到草稿段落結尾；引文必填（至少 15 字、取自判決原文）
 export const insertPin = (paragraphId: string, pinId: string, quote: string) =>
   req<{ paragraph_id: string; code: string }>(`/paragraphs/${paragraphId}/insert-pin`,

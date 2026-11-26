@@ -10,7 +10,7 @@ vi.mock('../api', async (orig) => {
 })
 
 const TEXT = '本院審酌原告鎖骨骨折之傷勢，認原告請求慰撫金十萬元為適當。'
-const PIN: api.PassageView = { passage_id: 'jp1', citation: '臺灣臺中地方法院113年度中簡字第3946號民事判決',
+const PIN: api.PassageView = { passage_id: 'jp1', judgment_id: 'j1', citation: '臺灣臺中地方法院113年度中簡字第3946號民事判決',
   court: '臺灣臺中地方法院', decided_on: '2025-02-17', text: TEXT, annotation: null, pin_id: 'pin1', note: '慰撫金行情' }
 const PARAGRAPHS = [{ id: 'p1', no: 1, heading: '關於路權' }, { id: 'p2', no: 2, heading: '關於慰撫金' }]
 

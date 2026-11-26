@@ -835,7 +835,7 @@ export default function CaseDetail() {
             </section>
           )}
 
-          {tab === 'search' && <JudgmentSearchTab caseId={caseId} />}
+          {tab === 'search' && <JudgmentSearchTab caseId={caseId} initialArticle={params.get('article')} />}
 
           {tab === 'health' && (
             <div className={source ? 'grid gap-4 lg:grid-cols-[1fr_24rem]' : ''}>

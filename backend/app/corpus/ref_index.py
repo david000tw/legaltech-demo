@@ -11,6 +11,7 @@ from uuid import UUID
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.case_types import CASE_TYPES
 from app.corpus.article_refs import ArticleHit, ArticleRef, extract_articles
 from app.corpus.case_refs import UNKNOWN, CaseHit, extract_case_refs, judgment_key
 from app.corpus.search import CURATED_BOOST, MINORITY_PREFIX, _type_boost, bigrams, score
@@ -109,9 +110,14 @@ def _case_rows(s: Session, *where):
         .order_by(JudgmentCaseRef.judgment_id, JudgmentPassage.seq)).all()
 
 
+def case_type_labels(codes: list | None) -> list[str]:
+    return [CASE_TYPES[c].label for c in codes or [] if c in CASE_TYPES]
+
+
 def judgment_brief(j: Judgment) -> dict:
     return {"judgment_id": str(j.id), "citation": j.citation, "court": j.court,
-            "decided_on": j.decided_on.isoformat(), "case_types": list(j.case_types or []), "annotation": j.annotation}
+            "decided_on": j.decided_on.isoformat(), "case_types": list(j.case_types or []),
+            "case_type_labels": case_type_labels(j.case_types), "annotation": j.annotation}
 
 
 def _sort_key(j: Judgment, case_type: str | None):

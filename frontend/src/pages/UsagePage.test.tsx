@@ -75,6 +75,15 @@ describe('UsagePage', () => {
     expect(within(table).getByText('辨識')).toBeInTheDocument()
   })
 
+  it('labels judgment summary usage as 判決要旨', async () => {
+    vi.mocked(api.getUsage).mockResolvedValue({ ...SUMMARY, rows: [row({ step: 'judgment_summary' })],
+      filters: { ...SUMMARY.filters, steps: ['judgment_summary'] } })
+    renderAs('lawyer')
+    const table = await screen.findByRole('table', { name: '用量' })
+    expect(within(table).getByText('判決要旨')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '判決要旨' })).toBeInTheDocument()
+  })
+
   it('firm admin edits a price and the exchange rate', async () => {
     vi.mocked(api.putPrice).mockResolvedValue({ ...PRICE, input_usd: 5 })
     renderAs('firm_admin')

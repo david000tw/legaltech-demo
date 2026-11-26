@@ -1,8 +1,9 @@
 import { pageImageUrl, type CitationSource, type CitationView } from '../api'
 import { OCR_TAG } from './SourceBadge'
 
-export default function SourcePane({ source, citation, canReview = false, onConfirmCourt, onVerify }: {
+export default function SourcePane({ source, citation, canReview = false, onConfirmCourt, onVerify, caseId }: {
   source: CitationSource | null
+  caseId?: string  // 判決引用可以「看整份判決」（計畫 3 丙；開新分頁，審核規則照舊）
   citation?: CitationView | null
   canReview?: boolean
   onConfirmCourt?: (c: CitationView) => void
@@ -17,6 +18,10 @@ export default function SourcePane({ source, citation, canReview = false, onConf
   return (
     <div data-testid="source-pane" className="space-y-2 p-4">
       <h3 className="font-semibold text-slate-800">{source.title}</h3>
+      {source.kind === 'judgment' && source.judgment_id && caseId && (
+        <a href={`/cases/${caseId}/judgments/${source.judgment_id}`} target="_blank" rel="noreferrer"
+          className="text-xs text-blue-700 underline">看整份判決</a>
+      )}
       {source.needs_check && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">{OCR_TAG}</span>
